@@ -1,15 +1,12 @@
 import { useState } from 'react';
 import {
-  Brain,
   Clock3,
   FileText,
-  FolderPlus,
   Gauge,
   ListChecks,
   Pause,
   Play,
   Plus,
-  RotateCcw,
   Square,
   Trash2,
   Users,
@@ -21,11 +18,10 @@ import type { SessionDetailsSnapshot } from '../shared/desktop-api';
 import type { TodoItem } from '../shared/desktop-api';
 import { AgentActivityTree } from './AgentActivity';
 import type { AgentActivityForest } from './agent-activity';
-import { contextPercentage, contextProgress } from './composer-utils';
 import { classNames, formatJson, number, record, text } from './ui-utils';
 import { TodoListPanel } from './TodoListPanel';
 
-type InspectorTab = 'plan' | 'agents' | 'tasks' | 'goal' | 'context';
+type InspectorTab = 'plan' | 'agents' | 'tasks' | 'goal';
 
 interface InspectorProps {
   readonly sessionId?: string;
@@ -47,7 +43,6 @@ export function Inspector(props: InspectorProps) {
     { id: 'agents', label: 'Agents', icon: <Users size={13} /> },
     { id: 'tasks', label: '后台任务', icon: <ListChecks size={13} /> },
     { id: 'goal', label: 'Goal', icon: <Gauge size={13} /> },
-    { id: 'context', label: '上下文', icon: <Brain size={13} /> },
   ];
   return (
     <aside className="inspector">
@@ -83,7 +78,6 @@ export function Inspector(props: InspectorProps) {
             {tab === 'agents' && <AgentsPanel {...props} />}
             {tab === 'tasks' && <TasksPanel sessionId={props.sessionId} tasks={props.details.backgroundTasks} onOutput={props.onTaskOutput} />}
             {tab === 'goal' && <GoalPanel sessionId={props.sessionId} goal={props.details.goal} cron={props.details.cron} />}
-            {tab === 'context' && <ContextPanel sessionId={props.sessionId} details={props.details} />}
           </>
         )}
       </div>
@@ -225,55 +219,6 @@ function GoalPanel({ sessionId, goal, cron }: { readonly sessionId: string; read
         <h4><Clock3 size={13} />Cron</h4>
         <pre className="compact-json">{formatJson(cron)}</pre>
       </section>
-    </div>
-  );
-}
-
-function ContextPanel({ sessionId, details }: { readonly sessionId: string; readonly details: SessionDetailsSnapshot }) {
-  const [instruction, setInstruction] = useState('');
-  const [importText, setImportText] = useState('');
-  const [directory, setDirectory] = useState('');
-  const status = details.status;
-  const percent = contextPercentage(status?.contextUsage ?? 0);
-  const progress = contextProgress(status?.contextUsage ?? 0);
-  return (
-    <div className="panel-stack context-panel">
-      <div className="context-meter">
-        <div><strong>Context</strong><span>{status?.contextTokens ?? 0} / {status?.maxContextTokens ?? 0}</span></div>
-        <progress value={progress} max={100} />
-        <small>{percent}% · {details.context?.messageCount ?? 0} messages</small>
-      </div>
-      <section className="subsection">
-        <h4>压缩与历史</h4>
-        <input value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="压缩指令（可选）" />
-        <div className="panel-actions wrap">
-          <button onClick={() => void window.kimiDesktop.turn.compact(instruction || undefined, sessionId)}><RotateCcw size={13} />Compact</button>
-          <button onClick={() => void window.kimiDesktop.turn.cancelCompact(sessionId)}>取消 Compact</button>
-          <button onClick={() => void window.kimiDesktop.turn.undo(1, sessionId)}>Undo</button>
-          <button onClick={() => void window.kimiDesktop.context.clear(sessionId)}><Trash2 size={13} />Clear</button>
-        </div>
-      </section>
-      <section className="subsection">
-        <h4>导入上下文</h4>
-        <textarea rows={4} value={importText} onChange={(event) => setImportText(event.target.value)} placeholder="粘贴要追加的上下文" />
-        <button disabled={importText.trim().length === 0} onClick={() => {
-          void window.kimiDesktop.context.import(importText, 'desktop-import', sessionId);
-          setImportText('');
-        }}>导入</button>
-      </section>
-      <section className="subsection">
-        <h4>Additional directories</h4>
-        {details.context?.additionalDirs.map((path) => <div className="path-row" key={path}>{path}</div>)}
-        <div className="inline-form"><input value={directory} onChange={(event) => setDirectory(event.target.value)} placeholder="绝对目录" /><button className="icon-button" onClick={() => {
-          if (directory.trim().length === 0) return;
-          void window.kimiDesktop.context.addDirectory(directory.trim(), true, sessionId);
-          setDirectory('');
-        }} title="添加目录"><FolderPlus size={14} /></button></div>
-      </section>
-      <div className="panel-actions wrap">
-        <button onClick={() => void window.kimiDesktop.context.initAgents(sessionId)}>初始化 AGENTS.md</button>
-        <button onClick={() => void window.kimiDesktop.context.applySecondaryModel(sessionId)}>应用 Secondary Model</button>
-      </div>
     </div>
   );
 }
