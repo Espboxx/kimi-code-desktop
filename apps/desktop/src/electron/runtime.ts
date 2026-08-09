@@ -150,6 +150,11 @@ export class KimiDesktopRuntime {
 
   snapshot(): DesktopSnapshot {
     const runtime = this.activeRuntime(false);
+    const teams = Object.fromEntries(
+      [...this.sessionRuntimes.entries()]
+        .filter((entry): entry is [string, SessionRuntime] => entry[1].teamState?.snapshot.team !== undefined)
+        .map(([sessionId, sessionRuntime]) => [sessionId, sessionRuntime.teamState!]),
+    );
     return {
       workspace: this.workspace,
       tree: this.tree,
@@ -157,6 +162,7 @@ export class KimiDesktopRuntime {
       sessions: this.sessions.map((summary) => this.sessionItem(summary)),
       activeSessionId: this.activeSessionId,
       transcript: runtime?.transcriptSnapshot(),
+      teams,
       session: runtime?.sessionDetails ?? {
         backgroundTasks: [], skills: [], pluginCommands: [], commands: [], mcpServers: [],
       },
@@ -587,6 +593,31 @@ export class KimiDesktopRuntime {
       }
       case 'task.startBtw':
         return this.runtimeFor(payload<{ sessionId?: string }>(command).sessionId).startBtw();
+      case 'task.replaceTodos': {
+        const input = payload<{
+          sessionId?: string;
+          expected: readonly import('@moonshot-ai/kimi-code-sdk').TodoItem[];
+          todos: readonly import('@moonshot-ai/kimi-code-sdk').TodoItem[];
+        }>(command);
+        return this.runtimeFor(input.sessionId).replaceTodos(input.expected, input.todos);
+      }
+
+      case 'team.snapshot': {
+        const input = payload<{ sessionId: string }>(command);
+        return this.runtimeFor(input.sessionId).getTeamSnapshot();
+      }
+      case 'team.operations': {
+        const input = payload<{ sessionId: string; afterSeq: number; limit?: number }>(command);
+        return this.runtimeFor(input.sessionId).getTeamOperations(input.afterSeq, input.limit);
+      }
+      case 'team.history': {
+        const input = payload<{ sessionId: string; beforeChannelSeq?: number; limit?: number }>(command);
+        return this.runtimeFor(input.sessionId).getTeamHistory(input.beforeChannelSeq, input.limit);
+      }
+      case 'team.send': {
+        const input = payload<{ sessionId: string; body: string; clientMessageId: string }>(command);
+        return this.runtimeFor(input.sessionId).sendTeamMessage(input.body, input.clientMessageId);
+      }
 
       case 'goal.get':
         return this.runtimeFor(payload<{ sessionId?: string }>(command).sessionId).sdkSession.getGoal();

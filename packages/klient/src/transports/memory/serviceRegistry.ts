@@ -30,6 +30,8 @@ import { ISessionInteractionService } from '@moonshot-ai/agent-core-v2/session/i
 import { ISessionApprovalService } from '@moonshot-ai/agent-core-v2/session/approval/approval';
 import { ISessionQuestionService } from '@moonshot-ai/agent-core-v2/session/question/question';
 import { ISessionSkillCatalog } from '@moonshot-ai/agent-core-v2/session/sessionSkillCatalog/skillCatalog';
+import { ISessionTodoService } from '@moonshot-ai/agent-core-v2/session/todo/sessionTodo';
+import { ISessionCollaborationService } from '@moonshot-ai/agent-core-v2/features/collaboration/collaboration';
 import { IAgentRPCService } from '@moonshot-ai/agent-core-v2/agent/rpc/rpc';
 import { IAgentActivityView } from '@moonshot-ai/agent-core-v2/agent/activityView/activityView';
 import { IAgentPlanService } from '@moonshot-ai/agent-core-v2/features/plan/plan';
@@ -63,6 +65,8 @@ export const serviceTokens: Readonly<Record<string, ServiceIdentifier<unknown>>>
   sessionApprovalService: ISessionApprovalService,
   sessionQuestionService: ISessionQuestionService,
   sessionSkillCatalog: ISessionSkillCatalog,
+  sessionTodoService: ISessionTodoService,
+  sessionCollaborationService: ISessionCollaborationService,
   agentRPCService: IAgentRPCService,
   agentActivityView: IAgentActivityView,
   agentShellCommandService: IAgentShellCommandService,

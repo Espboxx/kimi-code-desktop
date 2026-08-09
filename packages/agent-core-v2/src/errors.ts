@@ -11,6 +11,7 @@ import { TaskErrors } from '#/agent/task/errors';
 import { ProtocolErrors } from '#/kosong/protocol/errors';
 import { ConfigErrors } from '#/app/config/errors';
 import { CapabilityErrors } from '#/app/capability/errors';
+import { CollaborationErrors } from '#/features/collaboration/errors';
 import { CronErrors } from '#/app/cron/errors';
 import { DebugErrors } from '#/debug/errors';
 import { FileErrors } from '#/app/file/fileService';
@@ -47,6 +48,7 @@ export { TaskErrors } from '#/agent/task/errors';
 export { ProtocolErrors } from '#/kosong/protocol/errors';
 export { ConfigErrors } from '#/app/config/errors';
 export { CapabilityErrors } from '#/app/capability/errors';
+export { CollaborationErrors } from '#/features/collaboration/errors';
 export { CronErrors } from '#/app/cron/errors';
 export { DebugErrors } from '#/debug/errors';
 export { FileErrors } from '#/app/file/fileService';
@@ -80,6 +82,7 @@ export const ErrorCodes = {
   ...ProtocolErrors.codes,
   ...ConfigErrors.codes,
   ...CapabilityErrors.codes,
+  ...CollaborationErrors.codes,
   ...CronErrors.codes,
   ...DebugErrors.codes,
   ...FileErrors.codes,

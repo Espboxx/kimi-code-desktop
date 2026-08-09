@@ -19,11 +19,13 @@
  */
 
 import type { TokenUsage } from '#/kosong/contract/usage';
+import { randomUUID } from 'node:crypto';
 import { IModelCatalog } from '#/kosong/model/catalog';
 import { LifecycleScope } from '#/app/scopes';
 import { ScopeActivation, registerScopedService } from '#/_base/di/scope';
 import { Error2, ErrorCodes } from '#/errors';
-import { linkAbortSignal } from '#/_base/utils/abort';
+import { linkAbortSignal, userCancellationReason } from '#/_base/utils/abort';
+import { Disposable } from '#/_base/di/lifecycle';
 import type { IAgentScopeHandle } from '#/_base/di/scope';
 import { IAgentProfileService } from '#/agent/profile/profile';
 import { IAgentPermissionModeService } from '#/agent/permissionMode/permissionMode';
@@ -50,10 +52,16 @@ import { ISessionContext } from '#/session/sessionContext/sessionContext';
 import { ISessionMetadata, type AgentMeta } from '#/session/sessionMetadata/sessionMetadata';
 import { ISessionProcessRunner } from '#/session/process/processRunner';
 import { ILogService } from '#/_base/log/log';
+import type { Hooks } from '#/hooks';
+import {
+  ISessionLifecycleHooks,
+  type SessionLifecycleHookSlots,
+} from '#/session/sessionLifecycleHooks/sessionLifecycleHooks';
 
 import {
   ISessionSwarmService,
   type SessionSwarmRunArgs,
+  type SessionSwarmLaunchReceipt,
   type SessionSwarmRunResult,
   type SessionSwarmTask,
 } from './sessionSwarm';
@@ -80,10 +88,17 @@ declare module '#/app/event/eventBus' {
 
 const RESUMED_PROFILE_FALLBACK = 'subagent';
 
-export class SessionSwarmService implements ISessionSwarmService {
+export class SessionSwarmService extends Disposable implements ISessionSwarmService {
   declare readonly _serviceBrand: undefined;
 
-  private readonly inFlight = new Map<string, AbortController>();
+  private readonly inFlight = new Map<
+    string,
+    {
+      readonly callerAgentId: string;
+      readonly controller: AbortController;
+      readonly completion: Promise<readonly SessionSwarmRunResult<unknown>[]>;
+    }
+  >();
 
   constructor(
     @IAgentLifecycleService private readonly lifecycle: IAgentLifecycleService,
@@ -95,7 +110,23 @@ export class SessionSwarmService implements ISessionSwarmService {
     @ILogService private readonly log: ILogService,
     @IModelCatalog private readonly modelCatalog: IModelCatalog,
     @IConfigService private readonly config: IConfigService,
-  ) {}
+    @ISessionLifecycleHooks lifecycleHooks: Hooks<SessionLifecycleHookSlots>,
+  ) {
+    super();
+    this._register(
+      lifecycleHooks.onWillCloseSession.register('sessionSwarm', async (_event, next) => {
+        this.cancelAll();
+        await this.settle();
+        await next();
+      }),
+    );
+  }
+
+  override dispose(): void {
+    this.cancelAll();
+    this.inFlight.clear();
+    super.dispose();
+  }
 
   async getSwarmItem(args: {
     readonly callerAgentId: string;
@@ -107,10 +138,10 @@ export class SessionSwarmService implements ISessionSwarmService {
     return subagentSwarmItem(meta);
   }
 
-  run<T>(args: SessionSwarmRunArgs<T>): Promise<readonly SessionSwarmRunResult<T>[]> {
+  launch<T>(args: SessionSwarmRunArgs<T>): SessionSwarmLaunchReceipt<T> {
     const { callerAgentId, tasks } = args;
+    const batchId = `swarm_${randomUUID()}`;
     const controller = new AbortController();
-    this.inFlight.set(callerAgentId, controller);
     const unlinks: Array<() => void> = [];
     const linkedTasks: SessionSwarmTask<T>[] = tasks.map((task) => {
       if (task.signal !== undefined) unlinks.push(linkAbortSignal(task.signal, controller));
@@ -129,17 +160,59 @@ export class SessionSwarmService implements ISessionSwarmService {
         });
       },
     };
-    const maxConcurrency = resolveSwarmMaxConcurrency();
-    const promise = new AgentRunBatch(launcher, linkedTasks, { maxConcurrency }).run();
-    void promise.finally(() => {
+    let maxConcurrency: number | undefined;
+    try {
+      maxConcurrency = resolveSwarmMaxConcurrency();
+    } catch (error) {
       for (const unlink of unlinks) unlink();
-      if (this.inFlight.get(callerAgentId) === controller) this.inFlight.delete(callerAgentId);
+      throw error;
+    }
+    const settlementWrites: Promise<void>[] = [];
+    const promise = new AgentRunBatch(launcher, linkedTasks, {
+      maxConcurrency,
+      onResult: (result) => {
+        if (args.onResult === undefined) return;
+        settlementWrites.push(Promise.resolve(args.onResult(result)));
+      },
+    }).run().then(async (results) => {
+      await Promise.allSettled(settlementWrites);
+      return results;
     });
-    return promise;
+    this.inFlight.set(batchId, {
+      callerAgentId,
+      controller,
+      completion: promise as Promise<readonly SessionSwarmRunResult<unknown>[]>,
+    });
+    void promise.then(() => {
+      for (const unlink of unlinks) unlink();
+      this.inFlight.delete(batchId);
+    }, () => {
+      for (const unlink of unlinks) unlink();
+      this.inFlight.delete(batchId);
+    });
+    return { batchId, accepted: tasks, completion: promise };
+  }
+
+  run<T>(args: SessionSwarmRunArgs<T>): Promise<readonly SessionSwarmRunResult<T>[]> {
+    return this.launch(args).completion;
   }
 
   cancel({ callerAgentId }: { readonly callerAgentId: string }): void {
-    this.inFlight.get(callerAgentId)?.abort();
+    for (const entry of this.inFlight.values()) {
+      if (entry.callerAgentId === callerAgentId) entry.controller.abort(userCancellationReason());
+    }
+  }
+
+  async settle(): Promise<void> {
+    while (this.inFlight.size > 0) {
+      await Promise.allSettled([...this.inFlight.values()].map((entry) => entry.completion));
+    }
+  }
+
+  private cancelAll(): void {
+    for (const entry of this.inFlight.values()) {
+      entry.controller.abort(userCancellationReason());
+    }
   }
 
   private async spawnAttempt(
@@ -179,6 +252,12 @@ export class SessionSwarmService implements ISessionSwarmService {
     } catch (error) {
       throw wrapSubagentModelError(error, binding.model, callerData.modelAlias);
     }
+    try {
+      await options.onAgentBound?.(child.id);
+    } catch (error) {
+      await this.lifecycle.remove(child.id).catch(() => undefined);
+      throw error;
+    }
     child.accessor
       .get(IAgentPermissionModeService)
       .setMode(caller.accessor.get(IAgentPermissionModeService).mode);
@@ -216,6 +295,7 @@ export class SessionSwarmService implements ISessionSwarmService {
     const caller = this.requireHandle(callerAgentId, 'Caller agent');
     const child = this.requireHandle(agentId, 'Agent instance');
     this.requireIdleSubagent(agentId, child);
+    await options.onAgentBound?.(agentId);
     const profileName =
       child.accessor.get(IAgentProfileService).data().profileName ?? RESUMED_PROFILE_FALLBACK;
     if (!retryTurn) {

@@ -8,6 +8,10 @@ import {
   type QuestionRequest,
   type QuestionResult,
   type Session,
+  type TeamMessage,
+  type TeamOperation,
+  type TeamSnapshot,
+  type TodoItem,
 } from '@moonshot-ai/kimi-code-sdk';
 import { TranscriptStore, type AgentDescriptor, type TranscriptInteraction } from '@moonshot-ai/transcript';
 import { z } from 'zod';
@@ -19,6 +23,7 @@ import type {
   ShellSnapshot,
   TranscriptSnapshot,
 } from '../shared/desktop-api';
+import { applyTeamOperations, createTeamState, type TeamStateSnapshot } from '../shared/team-state';
 import { materializeReplayMedia, type DesktopMediaInput } from './media-service';
 import { DesktopTranscriptProjector } from './transcript-projector';
 
@@ -82,6 +87,8 @@ export class SessionRuntime {
   private readonly seqByAgent = new Map<string, number>();
   private readonly pending = new Map<string, PendingInteraction>();
   private unsubscribe?: () => void;
+  private todoUnsubscribe?: () => void;
+  private teamUnsubscribe?: () => void;
   private initialized = false;
   private disposed = false;
   private busy = false;
@@ -89,6 +96,8 @@ export class SessionRuntime {
   private details: SessionDetailsSnapshot = emptyDetails();
   private shell: ShellSnapshot = emptyShell();
   private planModeQueue: Promise<void> = Promise.resolve();
+  private teamQueue: Promise<void> = Promise.resolve();
+  private team?: TeamStateSnapshot;
 
   constructor(options: SessionRuntimeOptions) {
     this.session = options.session;
@@ -117,10 +126,16 @@ export class SessionRuntime {
     return this.shell;
   }
 
+  get teamState(): TeamStateSnapshot | undefined {
+    return this.team;
+  }
+
   async initialize(): Promise<void> {
     if (this.initialized) return;
     this.initialized = true;
     this.unsubscribe = this.session.onEvent((event) => { this.handleEvent(event); });
+    this.todoUnsubscribe = this.session.onTodosChanged((todos) => this.publishTodos(todos));
+    this.teamUnsubscribe = this.session.onTeamOperation((operation) => this.enqueueTeamOperation(operation));
     this.session.setApprovalHandler((request) => this.requestApproval(request));
     this.session.setQuestionHandler((request) => this.requestQuestion(request));
 
@@ -147,6 +162,8 @@ export class SessionRuntime {
       this.describeAgent('main', { type: 'main', label: 'Main Agent' });
       this.projector('main');
     }
+    this.publishTodos(await this.session.getTodos(), false);
+    await this.refreshTeam(false);
     await this.refreshDetails();
   }
 
@@ -251,6 +268,38 @@ export class SessionRuntime {
     return agentId;
   }
 
+  async replaceTodos(
+    expected: readonly TodoItem[],
+    todos: readonly TodoItem[],
+  ): Promise<void> {
+    this.ensureOpen();
+    if (this.todoEditingBlocked()) throw todoEditBusyError(this.id);
+    const current = await this.session.getTodos();
+    if (!todoItemsEqual(current, expected)) throw todoConflictError(this.id, current);
+    if (this.todoEditingBlocked()) throw todoEditBusyError(this.id);
+    await this.session.setTodos(todos);
+  }
+
+  getTeamSnapshot(): Promise<TeamSnapshot> {
+    this.ensureOpen();
+    return this.session.getTeamSnapshot();
+  }
+
+  getTeamOperations(afterSeq: number, limit?: number): Promise<readonly TeamOperation[]> {
+    this.ensureOpen();
+    return this.session.getTeamOperations({ afterSeq, limit });
+  }
+
+  getTeamHistory(beforeChannelSeq?: number, limit?: number): Promise<readonly TeamMessage[]> {
+    this.ensureOpen();
+    return this.session.getTeamHistory({ beforeChannelSeq, limit });
+  }
+
+  sendTeamMessage(body: string, clientMessageId: string): Promise<TeamMessage> {
+    this.ensureOpen();
+    return this.session.sendTeamMessage({ body, clientMessageId });
+  }
+
   async runShell(command: string): Promise<ShellSnapshot> {
     this.ensureOpen();
     const commandId = randomUUID();
@@ -331,6 +380,8 @@ export class SessionRuntime {
     if (this.disposed) return;
     this.disposed = true;
     this.unsubscribe?.();
+    this.todoUnsubscribe?.();
+    this.teamUnsubscribe?.();
     this.session.setApprovalHandler(undefined);
     this.session.setQuestionHandler(undefined);
     for (const pending of this.pending.values()) {
@@ -527,6 +578,98 @@ export class SessionRuntime {
     }
   }
 
+  private publishTodos(todos: readonly TodoItem[], publish = true): void {
+    if (this.disposed) return;
+    this.applyOps('main', [{
+      op: 'todo.upsert',
+      todo: {
+        todoId: 'todo',
+        items: todos.map((todo) => ({ ...todo })),
+        updatedAt: new Date().toISOString(),
+      },
+    }], publish);
+    this.onStateChanged();
+  }
+
+  private enqueueTeamOperation(operation: TeamOperation): void {
+    if (this.disposed) return;
+    const next = this.teamQueue.then(
+      () => this.applyLiveTeamOperation(operation),
+      () => this.applyLiveTeamOperation(operation),
+    );
+    this.teamQueue = next.catch((error) => {
+      this.emit({
+        type: 'error',
+        command: 'team.catchup',
+        error: {
+          code: errorCode(error) ?? 'team.catchup_failed',
+          message: error instanceof Error ? error.message : String(error),
+        },
+      });
+    });
+  }
+
+  private async applyLiveTeamOperation(operation: TeamOperation): Promise<void> {
+    if (this.team === undefined) {
+      await this.refreshTeam(true);
+      return;
+    }
+    const currentSeq = this.team.snapshot.latestSeq;
+    const hadTeam = this.team.snapshot.team !== undefined;
+    if (operation.seq <= currentSeq) return;
+
+    let operations: readonly TeamOperation[] = [operation];
+    if (operation.seq !== currentSeq + 1) {
+      operations = await this.session.getTeamOperations({ afterSeq: currentSeq, limit: 1_000 });
+    }
+    const next = applyTeamOperations(this.team, operations);
+    if (next === undefined || next.snapshot.latestSeq < operation.seq) {
+      await this.refreshTeam(true);
+      return;
+    }
+    this.team = next;
+    if (!hadTeam && next.snapshot.team !== undefined) {
+      this.emit({ type: 'team.reset', sessionId: this.id, state: next });
+    } else {
+      this.emit({ type: 'team.ops', sessionId: this.id, operations });
+    }
+    this.onStateChanged();
+  }
+
+  private async refreshTeam(publish: boolean): Promise<void> {
+    try {
+      const snapshot = await this.session.getTeamSnapshot();
+      const messages = snapshot.team === undefined
+        ? []
+        : await this.session.getTeamHistory({ limit: 200 });
+      this.team = createTeamState(snapshot, messages);
+      if (publish) this.emit({ type: 'team.reset', sessionId: this.id, state: this.team });
+      this.onStateChanged();
+    } catch (error) {
+      if (errorCode(error) !== 'collaboration.not_enabled') throw error;
+      this.team = undefined;
+      if (publish) this.emit({ type: 'team.reset', sessionId: this.id, state: undefined });
+    }
+  }
+
+  private todoEditingBlocked(): boolean {
+    if (this.busy || this.pending.size > 0) return true;
+    for (const descriptor of this.store.agents()) {
+      const transcript = this.store.getAgent(descriptor.agentId);
+      const phase = transcript?.getMeta().agent?.phase;
+      if (
+        phase !== undefined &&
+        ['running', 'streaming', 'tool_call', 'retrying', 'awaiting_approval'].includes(phase.kind)
+      ) {
+        return true;
+      }
+      for (const task of transcript?.getTasks().values() ?? []) {
+        if (task.kind === 'subagent' && task.state === 'running') return true;
+      }
+    }
+    return false;
+  }
+
   private agentForToolCall(toolCallId: string): string {
     for (const [agentId, projector] of this.projectors) {
       if (projector.hasToolCall(toolCallId)) return agentId;
@@ -547,6 +690,27 @@ function emptyDetails(): SessionDetailsSnapshot {
     commands: [],
     mcpServers: [],
   };
+}
+
+function todoItemsEqual(left: readonly TodoItem[], right: readonly TodoItem[]): boolean {
+  return left.length === right.length && left.every((item, index) => {
+    const other = right[index];
+    return other !== undefined && item.title === other.title && item.status === other.status;
+  });
+}
+
+function todoEditBusyError(sessionId: string): Error {
+  return Object.assign(new Error('Agent 运行期间 TodoList 只读'), {
+    code: 'task.todo_edit_busy',
+    details: { sessionId },
+  });
+}
+
+function todoConflictError(sessionId: string, current: readonly TodoItem[]): Error {
+  return Object.assign(new Error('TodoList 已被更新，请基于最新列表重试'), {
+    code: 'task.todo_conflict',
+    details: { sessionId, current },
+  });
 }
 
 function emptyShell(): ShellSnapshot {

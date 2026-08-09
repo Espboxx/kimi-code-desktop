@@ -12,6 +12,8 @@ import type {
   InteractionResolution,
 } from '@moonshot-ai/agent-core-v2/session/interaction/interaction';
 import type { SessionMetadataChangedEvent } from '@moonshot-ai/agent-core-v2/session/sessionMetadata/sessionMetadata';
+import type { TodoItem } from '@moonshot-ai/agent-core-v2/session/todo/todoItem';
+import type { TeamOperation } from './collaboration.js';
 
 import type { EventRegistration } from '../types.js';
 import {
@@ -19,6 +21,8 @@ import {
   interactionSchema,
 } from './interaction.js';
 import { sessionMetadataChangedEventSchema } from './metadata.js';
+import { todoItemsSchema } from './todo.js';
+import { teamOperationSchema } from './collaboration.js';
 
 /**
  * Scope-stream registration (`kind: 'stream'`). Declared structurally here
@@ -41,6 +45,8 @@ export interface SessionEventPayloads {
   'interactions.resolved': InteractionResolution;
   /** The merged skill catalog changed; the payload is the changed source id. */
   'skills.changed': string;
+  'todos.changed': readonly TodoItem[];
+  'collaboration.operation': TeamOperation;
 }
 
 export type SessionEventName = keyof SessionEventPayloads;
@@ -58,6 +64,18 @@ export const sessionEvents = {
     service: 'sessionSkillCatalog',
     event: 'onDidChange',
     schema: z.string(),
+  },
+  'todos.changed': {
+    kind: 'emitter',
+    service: 'sessionTodoService',
+    event: 'onDidChange',
+    schema: todoItemsSchema,
+  },
+  'collaboration.operation': {
+    kind: 'emitter',
+    service: 'sessionCollaborationService',
+    event: 'onDidOperate',
+    schema: teamOperationSchema,
   },
   // Passthrough stream (no `type` filter): the source pushes the full
   // pending interaction set on every change.

@@ -5,6 +5,9 @@ import type {
   QuestionHandler,
   QuestionRequest,
   Session,
+  TeamOperation,
+  TeamSnapshot,
+  TodoItem,
 } from '@moonshot-ai/kimi-code-sdk';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -33,7 +36,9 @@ describe('SessionRuntime interactions', () => {
 
     await expect(response).resolves.toEqual({ decision: 'approved', scope: 'session' });
     const batches = notifications.filter((event) => event.type === 'transcript.ops');
-    expect(batches.map((event) => event.type === 'transcript.ops' ? event.batch.seq : 0)).toEqual([1, 2]);
+    const sequences = batches.map((event) => event.type === 'transcript.ops' ? event.batch.seq : 0);
+    expect(sequences).toHaveLength(2);
+    expect(sequences[1]).toBe((sequences[0] ?? 0) + 1);
     expect(notifications).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'interaction.pending', interactionId: 'approval:call-1' }),
       expect.objectContaining({ type: 'interaction.resolved', interactionId: 'approval:call-1', state: 'approved' }),
@@ -83,6 +88,29 @@ describe('SessionRuntime interactions', () => {
       expect.objectContaining({ type: 'session.status', status: expect.objectContaining({ busy: true }) }),
       expect.objectContaining({ type: 'session.status', status: expect.objectContaining({ busy: false }) }),
     ]);
+    await runtime.close();
+  });
+
+  it('publishes, replaces, rejects stale, and locks the TodoList while an Agent runs', async () => {
+    const initial = [{ title: 'Inspect runtime', status: 'pending' as const }];
+    const fixture = createSessionFixture({ initialTodos: initial });
+    const runtime = createRuntime(fixture);
+    await runtime.initialize();
+
+    expect(runtime.store.getAgent('main')?.getTodo('todo')?.items).toEqual(initial);
+    const next = [{ title: 'Inspect runtime', status: 'in_progress' as const }];
+    await runtime.replaceTodos(initial, next);
+    expect(fixture.setTodos).toHaveBeenCalledWith(next);
+    expect(runtime.store.getAgent('main')?.getTodo('todo')?.items).toEqual(next);
+
+    await expect(runtime.replaceTodos(initial, [])).rejects.toMatchObject({
+      code: 'task.todo_conflict',
+    });
+
+    fixture.emitEvent({ type: 'turn.started', sessionId: 's1', agentId: 'main', turnId: 1 } as Event);
+    await expect(runtime.replaceTodos(next, [])).rejects.toMatchObject({
+      code: 'task.todo_edit_busy',
+    });
     await runtime.close();
   });
 
@@ -196,29 +224,78 @@ describe('SessionRuntime interactions', () => {
     expect(runtime.sessionStatus?.planMode).toBe(false);
     await runtime.close();
   });
+
+  it('publishes a separate Team baseline and contiguous live operations', async () => {
+    const initialTeam: TeamSnapshot = {
+      state: 'ready',
+      team: { id: 'team-1', sessionId: 's1', channelId: 'general', leaderAgentId: 'main', createdAt: 1 },
+      members: [{ agentId: 'main', role: 'leader', joinedAt: 1, joinedSeq: 1 }],
+      batches: [],
+      assignments: [],
+      latestSeq: 1,
+      latestChannelSeq: 0,
+    };
+    const fixture = createSessionFixture({ initialTeam });
+    const notifications: KimiDesktopNotification[] = [];
+    const runtime = new SessionRuntime({
+      session: fixture.session,
+      mediaCacheDir: 'D:\\workspace\\.media-cache',
+      emit: (notification) => notifications.push(notification),
+      onRawEvent: () => undefined,
+      onStateChanged: () => undefined,
+      onSessionMetadataChanged: () => undefined,
+    });
+    await runtime.initialize();
+
+    fixture.emitTeamOperation({
+      version: 1,
+      type: 'message.sent',
+      seq: 2,
+      at: 2,
+      message: {
+        id: 'm1', teamId: 'team-1', channelId: 'general', seq: 2, channelSeq: 1,
+        sender: { actorKind: 'user', actorId: 'desktop-user', role: 'user' },
+        body: 'Proceed', clientMessageId: 'client-1', createdAt: 2,
+      },
+    });
+
+    await vi.waitFor(() => expect(runtime.teamState?.snapshot.latestSeq).toBe(2));
+    expect(runtime.teamState?.messages.at(-1)?.body).toBe('Proceed');
+    expect(notifications).toContainEqual(expect.objectContaining({
+      type: 'team.ops', sessionId: 's1', operations: [expect.objectContaining({ seq: 2 })],
+    }));
+    await runtime.close();
+  });
 });
 
 interface SessionFixtureOptions {
   readonly resumeState?: unknown;
   readonly initialPlanMode?: boolean;
+  readonly initialTodos?: readonly TodoItem[];
   readonly planMutation?: (
     enabled: boolean,
     update: (enabled: boolean) => void,
   ) => Promise<void>;
+  readonly initialTeam?: TeamSnapshot;
 }
 
 function createSessionFixture(options: SessionFixtureOptions = {}): {
   readonly session: Session;
   readonly close: ReturnType<typeof vi.fn>;
   readonly setPlanMode: ReturnType<typeof vi.fn>;
+  readonly setTodos: ReturnType<typeof vi.fn>;
   readonly emitEvent: (event: Event) => void;
+  readonly emitTeamOperation: (operation: TeamOperation) => void;
   readonly approvalHandler?: ApprovalHandler;
   readonly questionHandler?: QuestionHandler;
 } {
   let approvalHandler: ApprovalHandler | undefined;
   let questionHandler: QuestionHandler | undefined;
   let eventHandler: ((event: Event) => void) | undefined;
+  let todoHandler: ((todos: readonly TodoItem[]) => void) | undefined;
+  let teamHandler: ((operation: TeamOperation) => void) | undefined;
   let planMode = options.initialPlanMode ?? false;
+  let todos = options.initialTodos ?? [];
   const close = vi.fn(async () => undefined);
   const setPlanMode = vi.fn(async (enabled: boolean) => {
     if (options.planMutation !== undefined) {
@@ -227,6 +304,10 @@ function createSessionFixture(options: SessionFixtureOptions = {}): {
     }
     planMode = enabled;
   });
+  const setTodos = vi.fn(async (next: readonly TodoItem[]) => {
+    todos = next.map((todo) => ({ ...todo }));
+    todoHandler?.(todos);
+  });
   const session = {
     id: 's1',
     summary: { id: 's1', workDir: 'D:\\workspace', additionalDirs: [] },
@@ -234,6 +315,26 @@ function createSessionFixture(options: SessionFixtureOptions = {}): {
       eventHandler = handler;
       return () => { eventHandler = undefined; };
     },
+    onTodosChanged: (handler: (next: readonly TodoItem[]) => void) => {
+      todoHandler = handler;
+      return () => { todoHandler = undefined; };
+    },
+    onTeamOperation: (handler: (operation: TeamOperation) => void) => {
+      teamHandler = handler;
+      return () => { teamHandler = undefined; };
+    },
+    getTeamSnapshot: async () => options.initialTeam ?? ({
+      state: 'ready',
+      members: [],
+      batches: [],
+      assignments: [],
+      latestSeq: 0,
+      latestChannelSeq: 0,
+    }),
+    getTeamHistory: async () => [],
+    getTeamOperations: async ({ afterSeq }: { readonly afterSeq: number }) => [],
+    getTodos: async () => todos,
+    setTodos,
     setApprovalHandler: (handler?: ApprovalHandler) => { approvalHandler = handler; },
     setQuestionHandler: (handler?: QuestionHandler) => { questionHandler = handler; },
     getResumeState: () => options.resumeState,
@@ -255,7 +356,9 @@ function createSessionFixture(options: SessionFixtureOptions = {}): {
     session,
     close,
     setPlanMode,
+    setTodos,
     emitEvent: (event) => eventHandler?.(event),
+    emitTeamOperation: (operation) => teamHandler?.(operation),
     get approvalHandler() { return approvalHandler; },
     get questionHandler() { return questionHandler; },
   };

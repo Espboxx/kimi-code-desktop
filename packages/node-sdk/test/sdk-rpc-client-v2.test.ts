@@ -19,8 +19,10 @@ import {
   KimiHarness,
   removeProviderFromConfig,
   SDKRpcClientV2,
+  Session,
   type KimiConfig,
 } from '#/index';
+import type { SDKRpcClientBase } from '#/rpc';
 import { foldAgentWireReplay } from '#/v2/resume-replay';
 import {
   drainQueryStoreDisposals,
@@ -293,6 +295,73 @@ describe('SDKRpcClientV2 (agent-core-v2 wiring MVP)', () => {
     } finally {
       await harness.close();
     }
+  });
+
+  it('persists and publishes the session TodoList across resume', async () => {
+    const { harness } = await makeHarness();
+    const workDir = await mkdtemp(join(tmpdir(), 'kimi-sdk-v2-todos-'));
+    tempDirs.push(workDir);
+    const todos = [
+      { title: 'Inspect runtime', status: 'in_progress' as const },
+      { title: 'Run tests', status: 'pending' as const },
+    ];
+    try {
+      const session = await harness.createSession({ workDir });
+      const updates: unknown[] = [];
+      const unsubscribe = session.onTodosChanged((items) => updates.push(items));
+
+      await session.setTodos(todos);
+      expect(await session.getTodos()).toEqual(todos);
+      expect(updates).toEqual([todos]);
+      unsubscribe();
+
+      await session.close();
+      const resumed = await harness.resumeSession({ id: session.id });
+      expect(await resumed.getTodos()).toEqual(todos);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('reports TodoList as v2-only on a legacy RPC surface', async () => {
+    const session = new Session({
+      id: 'legacy-session',
+      workDir: join(tmpdir(), 'legacy-session'),
+      rpc: {} as SDKRpcClientBase,
+    });
+    await expect(session.getTodos()).rejects.toThrow('requires v2');
+    expect(() => session.onTodosChanged(() => undefined)).toThrow('requires v2');
+  });
+
+  it('exposes the v2 Team collaboration facade separately from Agent events', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'kimi-sdk-v2-team-'));
+    const workDir = await mkdtemp(join(tmpdir(), 'kimi-sdk-v2-team-workspace-'));
+    tempDirs.push(homeDir, workDir);
+    await writeFile(join(homeDir, 'config.toml'), '[experimental]\nteam_collaboration = true\n', 'utf-8');
+    const harness = createKimiHarnessV2({ homeDir, identity: TEST_IDENTITY });
+    try {
+      const session = await harness.createSession({ workDir });
+      await expect(session.getTeamSnapshot()).resolves.toMatchObject({
+        state: 'ready', latestSeq: 0, latestChannelSeq: 0,
+      });
+      await expect(session.getTeamOperations({ afterSeq: 0 })).resolves.toEqual([]);
+      expect(session.onTeamOperation(() => undefined)).toBeTypeOf('function');
+      await expect(session.sendTeamMessage({ body: 'hello', clientMessageId: 'client-1' }))
+        .rejects.toMatchObject({ code: 'collaboration.no_team' });
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('reports Team collaboration as v2-only on a legacy RPC surface', async () => {
+    const session = new Session({
+      id: 'legacy-team-session',
+      workDir: join(tmpdir(), 'legacy-team-session'),
+      rpc: {} as SDKRpcClientBase,
+    });
+    await expect(session.getTeamSnapshot()).rejects.toThrow('requires v2');
+    await expect(session.sendTeamMessage({ body: 'hello', clientMessageId: 'client-1' })).rejects.toThrow('requires v2');
+    expect(() => session.onTeamOperation(() => undefined)).toThrow('requires v2');
   });
 });
 

@@ -5,6 +5,26 @@ import { describe, expect, it } from 'vitest';
 import { DesktopTranscriptProjector } from './transcript-projector';
 
 describe('DesktopTranscriptProjector', () => {
+  it('links mutating TodoList frames to the current Todo document', () => {
+    const projector = new DesktopTranscriptProjector('main');
+    const transcript = new TranscriptStore('s1').ensureAgent('main');
+    const events = [
+      { type: 'turn.started', sessionId: 's1', agentId: 'main', turnId: 1, origin: { kind: 'user' }, prompt: 'Plan' },
+      { type: 'turn.step.started', sessionId: 's1', agentId: 'main', turnId: 1, step: 1, stepId: 'step-1' },
+      {
+        type: 'tool.call.started', sessionId: 's1', agentId: 'main', turnId: 1,
+        toolCallId: 'todo-call', name: 'TodoList',
+        args: JSON.stringify({ todos: [{ title: 'Run tests', status: 'pending' }] }),
+      },
+    ] as unknown as readonly Event[];
+
+    for (const event of events) transcript.apply(projector.map(event));
+
+    expect(transcript.getTurn('t1')?.steps[0]?.frames).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'tool', name: 'TodoList', todoId: 'todo' }),
+    ]));
+  });
+
   it('projects ordered streaming text and tool lifecycle events', () => {
     const projector = new DesktopTranscriptProjector('main');
     const transcript = new TranscriptStore('s1').ensureAgent('main');
@@ -96,6 +116,33 @@ describe('DesktopTranscriptProjector', () => {
       taskId: 'agent-agent-1',
       agentRefs: [{ agentId: 'agent-1', role: 'member' }],
     });
+  });
+
+  it('keeps compaction phases and activations as independent ordered timeline markers', () => {
+    const projector = new DesktopTranscriptProjector('main');
+    const transcript = new TranscriptStore('s1').ensureAgent('main');
+    const events = [
+      { type: 'compaction.started', sessionId: 's1', agentId: 'main', trigger: 'manual' },
+      { type: 'compaction.blocked', sessionId: 's1', agentId: 'main', turnId: 2 },
+      { type: 'skill.activated', sessionId: 's1', agentId: 'main', activationId: 'skill-1', skillName: 'brainstorming', trigger: 'user-slash' },
+      { type: 'plugin_command.activated', sessionId: 's1', agentId: 'main', activationId: 'plugin-1', pluginId: 'example', commandName: 'review', trigger: 'user-slash' },
+      {
+        type: 'compaction.completed', sessionId: 's1', agentId: 'main',
+        result: { summary: 'Compact summary', compactedCount: 2, tokensBefore: 100, tokensAfter: 20 },
+      },
+    ] as unknown as readonly Event[];
+
+    for (const event of events) expect(transcript.apply(projector.map(event)).gap).toBeUndefined();
+
+    expect(transcript.getItems().map((item) => item.kind === 'marker'
+      ? { marker: item.marker, payload: item.payload }
+      : { marker: item.kind, payload: undefined })).toEqual([
+      { marker: 'compaction', payload: expect.objectContaining({ phase: 'started', trigger: 'manual' }) },
+      { marker: 'compaction', payload: expect.objectContaining({ phase: 'blocked', turnId: 2 }) },
+      { marker: 'skill', payload: expect.objectContaining({ skillName: 'brainstorming' }) },
+      { marker: 'skill', payload: expect.objectContaining({ variant: 'plugin_command', commandName: 'review' }) },
+      { marker: 'compaction', payload: expect.objectContaining({ phase: 'completed' }) },
+    ]);
   });
 
   it('builds a replay baseline with persisted status and background tasks', () => {

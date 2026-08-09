@@ -735,11 +735,23 @@ export function swarmServices(
       ? {
           _serviceBrand: undefined,
           getSwarmItem: async () => undefined,
+          launch: ((args) => ({
+            batchId: 'test-swarm-batch',
+            accepted: args.tasks,
+            completion: swarmService(args),
+          })) as ISessionSwarmService['launch'],
           run: swarmService,
           cancel: () => {},
+          settle: async () => {},
         } satisfies ISessionSwarmService
       : swarmService;
+  const lifecycleHooks = createHooks<SessionLifecycleHookSlots, keyof SessionLifecycleHookSlots>([
+    'onDidCreateSession',
+    'onWillCloseSession',
+  ]);
+  lifecycleHooks.onWillCloseSession.register('sessionSwarm', async (_event, next) => next());
   return [
+    sessionService(ISessionLifecycleHooks, lifecycleHooks),
     sessionService(ISessionSwarmService, service),
     agentService(IAgentSwarmService, new SyncDescriptor(AgentSwarmService)),
   ];

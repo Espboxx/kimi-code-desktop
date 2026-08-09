@@ -58,6 +58,9 @@ import {
   PROMPT_TEMPLATE_PLACEHOLDER,
   type AgentSwarmToolInput,
 } from './agent-swarm';
+import { randomUUID } from 'node:crypto';
+import { ISessionCollaborationService } from '#/features/collaboration/collaboration';
+import { TEAM_COLLABORATION_FLAG_ID } from '#/features/collaboration/flag';
 import AGENT_SWARM_DESCRIPTION from './agent-swarm.md?raw';
 
 const DEFAULT_SUBAGENT_TYPE = 'coder';
@@ -112,6 +115,7 @@ export class AgentSwarmTool implements IAgentSwarmTool {
     @ISessionAgentProfileCatalog private readonly catalog: ISessionAgentProfileCatalog,
     @IAgentProfileService private readonly profile: IAgentProfileService,
     @IModelCatalog private readonly modelCatalog: IModelCatalog,
+    @ISessionCollaborationService private readonly collaboration?: ISessionCollaborationService,
   ) {
     this.callerAgentId = scopeContext.agentId;
   }
@@ -199,8 +203,29 @@ export class AgentSwarmTool implements IAgentSwarmTool {
     const specs = await createAgentSwarmSpecs(args, (agentId) =>
       this.swarmService.getSwarmItem({ callerAgentId: this.callerAgentId, agentId }),
     );
-    const tasks: SessionSwarmTask<AgentSwarmSpec>[] = specs.map((spec) => {
+    // The optional dependency keeps direct tool unit fixtures backwards-compatible;
+    // production feature composition contributes it whenever the flag is available.
+    const teamMode = this.collaboration !== undefined && this.flags.enabled(TEAM_COLLABORATION_FLAG_ID);
+    let teamReceipt: Awaited<ReturnType<ISessionCollaborationService['prepareSwarmBatch']>> | undefined;
+    if (teamMode) {
+      const collaboration = this.requireCollaboration();
+      teamReceipt = await collaboration.prepareSwarmBatch({
+        callerAgentId: this.callerAgentId,
+        assignments: specs.map((spec) => ({
+          assignmentId: `assignment_${randomUUID()}`,
+          profileName: spec.kind === 'resume' ? 'subagent' : profileName,
+          description: childDescription(
+            args.description,
+            spec.index,
+            spec.kind === 'resume' ? 'resume' : profileName,
+          ),
+          item: spec.item,
+        })),
+      });
+    }
+    const tasks: SessionSwarmTask<AgentSwarmSpec>[] = specs.map((spec, taskIndex) => {
       const descriptionName = spec.kind === 'resume' ? 'resume' : profileName;
+      const assignment = teamReceipt?.assignments[taskIndex];
       const common = {
         data: spec,
         profileName: spec.kind === 'resume' ? 'subagent' : profileName,
@@ -208,10 +233,17 @@ export class AgentSwarmTool implements IAgentSwarmTool {
         prompt: spec.prompt,
         description: childDescription(args.description, spec.index, descriptionName),
         swarmIndex: spec.index,
-        runInBackground: false,
+        runInBackground: teamMode,
         swarmItem: spec.item,
         signal,
         timeout: timeoutMs,
+        onAgentBound: assignment === undefined
+          ? undefined
+          : (agentId: string) => this.requireCollaboration().bindAssignment({
+              assignmentId: assignment.id,
+              agentId,
+              parentAgentId: this.callerAgentId,
+            }),
       };
       if (spec.kind === 'resume') {
         return {
@@ -226,6 +258,55 @@ export class AgentSwarmTool implements IAgentSwarmTool {
         binding,
       };
     });
+    if (teamReceipt !== undefined) {
+      const receipt = teamReceipt;
+      const assignmentByIndex = new Map(
+        specs.map((spec, index) => [spec.index, receipt.assignments[index]!.id]),
+      );
+      let launch: ReturnType<ISessionSwarmService['launch']>;
+      try {
+        launch = this.swarmService.launch({
+          callerAgentId: this.callerAgentId,
+          tasks,
+          onResult: (result) => {
+            const assignmentId = assignmentByIndex.get((result.task.data as AgentSwarmSpec).index);
+            if (assignmentId === undefined) return;
+            return this.requireCollaboration().settleAssignment({
+              assignmentId,
+              status: result.status === 'completed'
+                ? 'completed'
+                : result.status === 'aborted'
+                  ? 'cancelled'
+                  : 'failed',
+              error: result.error,
+            });
+          },
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        for (const assignment of receipt.assignments) {
+          await this.requireCollaboration().settleAssignment({
+            assignmentId: assignment.id,
+            status: 'failed',
+            error: message,
+          });
+        }
+        await this.requireCollaboration().settleBatch({ batchId: receipt.batchId, status: 'failed' });
+        throw error;
+      }
+      void launch.completion.then(
+        (results) => this.requireCollaboration().settleBatch({
+          batchId: receipt.batchId,
+          status: results.every((result) => result.status === 'completed')
+            ? 'completed'
+            : results.some((result) => result.status === 'failed')
+              ? 'failed'
+              : 'cancelled',
+        }),
+        () => this.requireCollaboration().settleBatch({ batchId: receipt.batchId, status: 'interrupted' }),
+      ).catch(() => undefined);
+      return renderSwarmLaunchReceipt(receipt.batchId, receipt.assignments);
+    }
     const results = await this.swarmService.run({
       callerAgentId: this.callerAgentId,
       tasks,
@@ -234,6 +315,32 @@ export class AgentSwarmTool implements IAgentSwarmTool {
       results.map(({ task, ...result }) => ({ spec: task.data as AgentSwarmSpec, ...result })),
     );
   }
+
+  private requireCollaboration(): ISessionCollaborationService {
+    if (this.collaboration === undefined) {
+      throw new Error2(
+        ErrorCodes.COLLABORATION_NOT_ENABLED,
+        'Team collaboration service is unavailable',
+      );
+    }
+    return this.collaboration;
+  }
+}
+
+function renderSwarmLaunchReceipt(
+  batchId: string,
+  assignments: readonly { readonly id: string; readonly description: string }[],
+): string {
+  return [
+    '<agent_swarm_started>',
+    `<batch_id>${batchId}</batch_id>`,
+    `<accepted>${String(assignments.length)}</accepted>`,
+    ...assignments.map((assignment) =>
+      `<assignment id="${escapeXmlAttribute(assignment.id)}">${escapeXmlAttribute(assignment.description)}</assignment>`,
+    ),
+    '<coordination>Use TeamStatus, TeamSend, and TeamWait to coordinate this running batch.</coordination>',
+    '</agent_swarm_started>',
+  ].join('\n');
 }
 
 registerAgentToolService(IAgentSwarmTool, AgentSwarmTool, { name: 'AgentSwarm', domain: 'swarm' });

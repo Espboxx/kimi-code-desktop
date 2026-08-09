@@ -76,6 +76,7 @@ const V2_RECORD_TYPES: ReadonlySet<string> = new Set([
   'interaction.resolved',
   'plan.revision',
   'interruptionReminder.recorded',
+  'team.delivery.advance',
   'turn.ended',
 ]);
 
@@ -162,6 +163,7 @@ describe('v1 wire vocabulary', () => {
 
 describe('conversation-time checkpoint registration', () => {
   const CHECKPOINT_EXEMPT_MODELS: ReadonlySet<string> = new Set([
+    'collaborationDelivery',
     'goalForkNotice',
   ]);
   const CONTEXT_OPS = [

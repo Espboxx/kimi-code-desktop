@@ -63,6 +63,8 @@ export type {
   SessionQuestionsFacade,
   SessionRestoreOptions,
   SessionSkillsFacade,
+  SessionTodosFacade,
+  SessionCollaborationFacade,
   SessionStatus,
 } from './core/facade/session.js';
 export type {
@@ -138,3 +140,15 @@ export type {
 export type { SkillSummary } from '@moonshot-ai/agent-core-v2/app/skillCatalog/types';
 export type { ContentPart } from '@moonshot-ai/agent-core-v2/kosong/contract/message';
 export type { PermissionMode } from '@moonshot-ai/agent-core-v2/agent/permissionPolicy/types';
+export type { TodoItem, TodoStatus } from '@moonshot-ai/agent-core-v2/session/todo/todoItem';
+export type {
+  Team,
+  TeamAssignment,
+  TeamAssignmentStatus,
+  TeamBatch,
+  TeamBatchStatus,
+  TeamMember,
+  TeamMessage,
+  TeamOperation,
+  TeamSnapshot,
+} from './contract/session/collaboration.js';

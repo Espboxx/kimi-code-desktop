@@ -321,6 +321,19 @@ function WorkspaceSettings({ snapshot }: { readonly snapshot: DesktopSnapshot })
 }
 
 function DiagnosticsSettings({ snapshot }: { readonly snapshot: DesktopSnapshot }) {
+  const [updatingFeature, setUpdatingFeature] = useState<string>();
+  const [featureError, setFeatureError] = useState('');
+  const setFeatureEnabled = async (id: string, enabled: boolean) => {
+    setUpdatingFeature(id);
+    setFeatureError('');
+    try {
+      await window.kimiDesktop.config.set({ experimental: { [id]: enabled } });
+    } catch (error) {
+      setFeatureError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setUpdatingFeature(undefined);
+    }
+  };
   return (
     <SettingsPage title="诊断与实验特性" description="启动配置、校验结果与原始事件均已脱敏。">
       <section className="settings-section">
@@ -333,10 +346,29 @@ function DiagnosticsSettings({ snapshot }: { readonly snapshot: DesktopSnapshot 
         <div className="feature-list">
           {snapshot.config.experimentalFeatures.map((raw, index) => {
             const feature = record(raw);
-            return <div className="feature-row" key={text(feature['id'], `feature-${index}`)}><div><strong>{text(feature['id'], text(feature['name']))}</strong><small>{text(feature['source'])}</small></div><span className={classNames('feature-state', bool(feature['enabled']) && 'enabled')}>{bool(feature['enabled']) ? 'enabled' : 'disabled'}</span></div>;
+            const id = text(feature['id'], `feature-${index}`);
+            const enabled = bool(feature['enabled']);
+            const source = text(feature['source']);
+            const locked = source === 'env' || source === 'master-env';
+            return (
+              <div className="feature-row" key={id}>
+                <div>
+                  <strong>{text(feature['title'], id)}</strong>
+                  <small>{text(feature['description'], source)}</small>
+                </div>
+                <button
+                  className={classNames('toggle', enabled && 'on')}
+                  disabled={locked || updatingFeature === id}
+                  aria-label={`${enabled ? '禁用' : '启用'} ${id}`}
+                  title={locked ? `由 ${source} 控制` : `${id} · ${source}`}
+                  onClick={() => void setFeatureEnabled(id, !enabled)}
+                ><span /></button>
+              </div>
+            );
           })}
           {snapshot.config.experimentalFeatures.length === 0 && <div className="settings-empty">没有实验特性</div>}
         </div>
+        {featureError.length > 0 && <div className="form-error"><CircleAlert size={13} />{featureError}</div>}
       </section>
       <section className="settings-section">
         <h3>启动与事件</h3>

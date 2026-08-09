@@ -34,6 +34,10 @@ import {
 } from '#/session/subagent/subagent';
 import { ISessionContext, makeSessionContext } from '#/session/sessionContext/sessionContext';
 import {
+  ISessionLifecycleHooks,
+  type SessionLifecycleHookSlots,
+} from '#/session/sessionLifecycleHooks/sessionLifecycleHooks';
+import {
   ISessionMetadata,
   type AgentMeta,
   type SessionMetadataChangedEvent,
@@ -917,6 +921,13 @@ describe('SessionSwarmService metadata compatibility', () => {
         cwd: '/repo',
       }),
     );
+    ix.stub(
+      ISessionLifecycleHooks,
+      createHooks<SessionLifecycleHookSlots, keyof SessionLifecycleHookSlots>([
+        'onDidCreateSession',
+        'onWillCloseSession',
+      ]),
+    );
     ix.stub(ISessionMetadata, {
       _serviceBrand: undefined,
       ready: Promise.resolve(),
@@ -1332,6 +1343,28 @@ describe('SessionSwarmService metadata compatibility', () => {
     expect(eventBus.publish).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: 'subagent.spawned' }),
     );
+  });
+
+  it('cancels and settles every active batch before the session closes', async () => {
+    const childCompletion = createControlledPromise<{ summary: string }>();
+    runAgent.mockImplementation((_agentId, _request, options) => {
+      options?.onReady?.();
+      options?.signal?.addEventListener('abort', () => {
+        childCompletion.reject(options.signal?.reason ?? new Error('Aborted'));
+      }, { once: true });
+      return { agentId: 'agent-new', turn: {} as never, completion: childCompletion };
+    });
+    const service = ix.get(ISessionSwarmService);
+    const launch = service.launch({
+      callerAgentId: 'main',
+      tasks: [spawnSessionTask('src/a.ts')],
+    });
+    await vi.waitFor(() => expect(runAgent).toHaveBeenCalledOnce());
+
+    await ix.get(ISessionLifecycleHooks).onWillCloseSession.run({ reason: 'exit' });
+
+    await expect(launch.completion).resolves.toMatchObject([{ status: 'aborted' }]);
+    await expect(service.settle()).resolves.toBeUndefined();
   });
 });
 

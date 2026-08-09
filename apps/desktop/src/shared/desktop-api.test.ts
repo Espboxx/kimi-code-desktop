@@ -54,4 +54,62 @@ describe('desktop IPC schema', () => {
       domain: 'host', action: 'resolveClose', payload: { requestId: 'r1', action: 'discard' },
     })).toThrow();
   });
+
+  it('validates TodoList replacement payloads in the task domain', async () => {
+    const payload = {
+      sessionId: 's1',
+      expected: [{ title: 'Inspect', status: 'pending' }],
+      todos: [{ title: 'Inspect', status: 'in_progress' }],
+    } as const;
+    expect(parseDesktopCommand({ domain: 'task', action: 'replaceTodos', payload })).toMatchObject({
+      name: 'task.replaceTodos',
+      payload,
+    });
+    expect(() => parseDesktopCommand({
+      domain: 'task',
+      action: 'replaceTodos',
+      payload: { ...payload, todos: [{ title: ' ', status: 'pending' }] },
+    })).toThrow();
+
+    const calls = vi.fn();
+    const invoke: Parameters<typeof createKimiDesktopApi>[0] = async <T>(
+      domain: DesktopDomain,
+      action: string,
+      commandPayload?: unknown,
+    ) => {
+      calls(domain, action, commandPayload);
+      return undefined as T;
+    };
+    const api = createKimiDesktopApi(invoke, () => () => undefined);
+    await api.task.replaceTodos(payload.expected, payload.todos, 's1');
+    expect(calls).toHaveBeenCalledWith('task', 'replaceTodos', payload);
+  });
+
+  it('validates Team commands and preserves the retry idempotency key', async () => {
+    expect(parseDesktopCommand({
+      domain: 'team',
+      action: 'operations',
+      payload: { sessionId: 's1', afterSeq: 12, limit: 200 },
+    })).toMatchObject({ name: 'team.operations' });
+    expect(() => parseDesktopCommand({
+      domain: 'team',
+      action: 'send',
+      payload: { sessionId: 's1', body: 'x'.repeat(8_193), clientMessageId: 'retry-1' },
+    })).toThrow();
+
+    const calls = vi.fn();
+    const invoke: Parameters<typeof createKimiDesktopApi>[0] = async <T>(
+      domain: DesktopDomain,
+      action: string,
+      payload?: unknown,
+    ) => {
+      calls(domain, action, payload);
+      return undefined as T;
+    };
+    const api = createKimiDesktopApi(invoke, () => () => undefined);
+    await api.team.send('s1', 'Coordinate', 'retry-1');
+    expect(calls).toHaveBeenCalledWith('team', 'send', {
+      sessionId: 's1', body: 'Coordinate', clientMessageId: 'retry-1',
+    });
+  });
 });

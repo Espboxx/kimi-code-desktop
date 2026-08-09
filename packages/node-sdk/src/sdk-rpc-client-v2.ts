@@ -301,6 +301,11 @@ import type {
   SessionUsage,
   SkillSummary,
   TelemetryClient,
+  TodoItem,
+  TeamMessage,
+  TeamOperation,
+  TeamSnapshot,
+  Unsubscribe,
   WorkspaceTrustInfo,
 } from '#/types';
 import {
@@ -1454,6 +1459,71 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
   override async getPlan(input: SessionIdRpcInput): Promise<SessionPlan> {
     const agent = await this.agentFacade(input.sessionId);
     return agent.getPlan();
+  }
+
+  async getTodos(input: SessionIdRpcInput): Promise<readonly TodoItem[]> {
+    await this.agentFacade(input.sessionId);
+    return this.klient.session(input.sessionId).todos.get();
+  }
+
+  async setTodos(
+    input: SessionIdRpcInput & { readonly todos: readonly TodoItem[] },
+  ): Promise<void> {
+    await this.agentFacade(input.sessionId);
+    await this.klient.session(input.sessionId).todos.set(input.todos);
+  }
+
+  onTodosChanged(
+    input: SessionIdRpcInput,
+    listener: (todos: readonly TodoItem[]) => void,
+  ): Unsubscribe {
+    const disposable = this.klient.session(input.sessionId).events.on('todos.changed', listener);
+    return () => disposable.dispose();
+  }
+
+  async getTeamSnapshot(input: SessionIdRpcInput): Promise<TeamSnapshot> {
+    await this.agentFacade(input.sessionId);
+    return this.klient.session(input.sessionId).collaboration.snapshot();
+  }
+
+  async getTeamOperations(
+    input: SessionIdRpcInput & { readonly afterSeq: number; readonly limit?: number },
+  ): Promise<readonly TeamOperation[]> {
+    await this.agentFacade(input.sessionId);
+    return this.klient.session(input.sessionId).collaboration.operations({
+      afterSeq: input.afterSeq,
+      limit: input.limit,
+    });
+  }
+
+  async getTeamHistory(
+    input: SessionIdRpcInput & { readonly beforeChannelSeq?: number; readonly limit?: number },
+  ): Promise<readonly TeamMessage[]> {
+    await this.agentFacade(input.sessionId);
+    return this.klient.session(input.sessionId).collaboration.history({
+      beforeChannelSeq: input.beforeChannelSeq,
+      limit: input.limit,
+    });
+  }
+
+  async sendTeamMessage(
+    input: SessionIdRpcInput & { readonly body: string; readonly clientMessageId: string },
+  ): Promise<TeamMessage> {
+    await this.agentFacade(input.sessionId);
+    return this.klient.session(input.sessionId).collaboration.sendUserMessage({
+      body: input.body,
+      clientMessageId: input.clientMessageId,
+    });
+  }
+
+  onTeamOperation(
+    input: SessionIdRpcInput,
+    listener: (operation: TeamOperation) => void,
+  ): Unsubscribe {
+    const disposable = this.klient
+      .session(input.sessionId)
+      .events.on('collaboration.operation', listener);
+    return () => disposable.dispose();
   }
 
   override async clearPlan(input: SessionIdRpcInput): Promise<void> {

@@ -37,6 +37,9 @@ const AGENT_TOOLS = [
   'WebSearch',
   'Agent',
   'AgentSwarm',
+  'TeamSend',
+  'TeamStatus',
+  'TeamWait',
   'FetchURL',
   'AskUserQuestion',
   'EnterPlanMode',
@@ -51,6 +54,9 @@ const AGENT_TOOLS = [
 const CODER_TOOLS = [
   'Agent',
   'AgentSwarm',
+  'TeamSend',
+  'TeamStatus',
+  'TeamWait',
   'Bash',
   'CronCreate',
   'CronDelete',
@@ -74,6 +80,9 @@ const CODER_TOOLS = [
 ] as const;
 
 const EXPLORE_TOOLS = [
+  'TeamSend',
+  'TeamStatus',
+  'TeamWait',
   'Bash',
   'Read',
   'ReadMediaFile',

@@ -17,6 +17,17 @@ export type JsonObject = { readonly [key: string]: JsonValue };
 export type Unsubscribe = () => void;
 
 export type { CapabilityStatus } from '@moonshot-ai/agent-core-v2/app/capability/types';
+export type {
+  Team,
+  TeamAssignment,
+  TeamAssignmentStatus,
+  TeamBatch,
+  TeamBatchStatus,
+  TeamMember,
+  TeamMessage,
+  TeamOperation,
+  TeamSnapshot,
+} from '@moonshot-ai/klient';
 
 export type {
   AgentReplayRecord,
@@ -251,6 +262,13 @@ export interface PlanInfo {
 }
 
 export type SessionPlan = PlanInfo | null;
+
+export type TodoStatus = 'pending' | 'in_progress' | 'done';
+
+export interface TodoItem {
+  readonly title: string;
+  readonly status: TodoStatus;
+}
 
 export interface TokenUsage {
   readonly inputOther: number;

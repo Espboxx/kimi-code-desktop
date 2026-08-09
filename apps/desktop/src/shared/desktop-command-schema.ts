@@ -9,6 +9,11 @@ const empty = z.object({}).strict().optional();
 const nonEmptyString = z.string().trim().min(1);
 const optionalSessionId = z.object({ sessionId: nonEmptyString.optional() }).strict();
 const unknownRecord = z.record(z.string(), z.unknown());
+const todoItem = z.object({
+  title: z.string().min(1).max(10_000).refine((value) => value.trim().length > 0),
+  status: z.enum(['pending', 'in_progress', 'done']),
+}).strict();
+const todoItems = z.array(todoItem).max(1_000);
 
 export const desktopCommandSchemas = {
   'workspace.choose': empty,
@@ -104,6 +109,28 @@ export const desktopCommandSchemas = {
   'task.stop': z.object({ sessionId: nonEmptyString.optional(), taskId: nonEmptyString, reason: z.string().optional() }).strict(),
   'task.detach': z.object({ sessionId: nonEmptyString.optional(), taskId: nonEmptyString }).strict(),
   'task.startBtw': optionalSessionId,
+  'task.replaceTodos': z.object({
+    sessionId: nonEmptyString.optional(),
+    expected: todoItems,
+    todos: todoItems,
+  }).strict(),
+
+  'team.snapshot': z.object({ sessionId: nonEmptyString }).strict(),
+  'team.operations': z.object({
+    sessionId: nonEmptyString,
+    afterSeq: z.number().int().nonnegative(),
+    limit: z.number().int().positive().max(1_000).optional(),
+  }).strict(),
+  'team.history': z.object({
+    sessionId: nonEmptyString,
+    beforeChannelSeq: z.number().int().positive().optional(),
+    limit: z.number().int().positive().max(200).optional(),
+  }).strict(),
+  'team.send': z.object({
+    sessionId: nonEmptyString,
+    body: z.string().min(1).max(8_192),
+    clientMessageId: nonEmptyString,
+  }).strict(),
 
   'goal.get': optionalSessionId,
   'goal.create': z.object({ sessionId: nonEmptyString.optional(), objective: nonEmptyString, replace: z.boolean().optional() }).strict(),

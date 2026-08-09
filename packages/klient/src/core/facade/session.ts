@@ -26,6 +26,12 @@ import type {
   SessionMetaPatch,
 } from '@moonshot-ai/agent-core-v2/session/sessionMetadata/sessionMetadata';
 import type { SkillSummary } from '@moonshot-ai/agent-core-v2/app/skillCatalog/types';
+import type { TodoItem } from '@moonshot-ai/agent-core-v2/session/todo/todoItem';
+import type {
+  TeamMessage,
+  TeamOperation,
+  TeamSnapshot,
+} from '../../contract/session/collaboration.js';
 
 import type { ScopeRef } from '../channel.js';
 import type { McpServerConfig } from '../../contract/mcp.js';
@@ -77,6 +83,18 @@ export interface SessionSkillsFacade {
   list(): Promise<readonly SkillSummary[]>;
 }
 
+export interface SessionTodosFacade {
+  get(): Promise<readonly TodoItem[]>;
+  set(todos: readonly TodoItem[]): Promise<void>;
+}
+
+export interface SessionCollaborationFacade {
+  snapshot(): Promise<TeamSnapshot>;
+  operations(input: { readonly afterSeq: number; readonly limit?: number }): Promise<readonly TeamOperation[]>;
+  history(input?: { readonly beforeChannelSeq?: number; readonly limit?: number }): Promise<readonly TeamMessage[]>;
+  sendUserMessage(input: { readonly body: string; readonly clientMessageId: string }): Promise<TeamMessage>;
+}
+
 /**
  * Derived session lifecycle phase. The engine retired its `sessionActivity`
  * service (#1751) — busy is now derived from agent activity views — so the
@@ -107,6 +125,8 @@ export interface SessionFacade {
   readonly questions: SessionQuestionsFacade;
   readonly interactions: SessionInteractionsFacade;
   readonly skills: SessionSkillsFacade;
+  readonly todos: SessionTodosFacade;
+  readonly collaboration: SessionCollaborationFacade;
   /** Agent id → metadata for every agent registered in this session. */
   agents(): Promise<Readonly<Record<string, AgentMeta>>>;
 }
@@ -239,6 +259,24 @@ export function createSessionFacade(call: ScopedCaller, sessionId: string): Sess
     skills: {
       list: () =>
         call(scope, 'sessionSkillCatalog', 'list', []) as Promise<readonly SkillSummary[]>,
+    },
+
+    todos: {
+      get: () =>
+        call(scope, 'sessionTodoService', 'getTodos', []) as Promise<readonly TodoItem[]>,
+      set: (todos) =>
+        call(scope, 'sessionTodoService', 'setTodos', [todos]) as Promise<void>,
+    },
+
+    collaboration: {
+      snapshot: () =>
+        call(scope, 'sessionCollaborationService', 'snapshot', []) as Promise<TeamSnapshot>,
+      operations: (input) =>
+        call(scope, 'sessionCollaborationService', 'operations', [input]) as Promise<readonly TeamOperation[]>,
+      history: (input = {}) =>
+        call(scope, 'sessionCollaborationService', 'history', [input]) as Promise<readonly TeamMessage[]>,
+      sendUserMessage: (input) =>
+        call(scope, 'sessionCollaborationService', 'sendUserMessage', [input]) as Promise<TeamMessage>,
     },
 
     agents: async () => {

@@ -649,11 +649,15 @@ export class DesktopTranscriptProjector {
     const turnId = `t${event.turnId}`;
     const step = this.ensureLiveStep(turnId, ops);
     const prior = this.toolFrames.get(event.toolCallId)?.frame;
+    const input = parseArguments(event.args);
+    const todoId = event.name === 'TodoList' && Array.isArray(objectValue(input)['todos'])
+      ? 'todo'
+      : prior?.todoId;
     const frame = this.attachPendingAgentLinks(event.toolCallId, {
       kind: 'tool', frameId: prior?.frameId ?? `${step.stepId}.tool.${event.toolCallId}`,
-      toolCallId: event.toolCallId, name: event.name, state: 'running', input: parseArguments(event.args),
+      toolCallId: event.toolCallId, name: event.name, state: 'running', input,
       inputText: prior?.inputText, display: event.display, approvalId: prior?.approvalId,
-      taskId: prior?.taskId, agentRefs: prior?.agentRefs, view: prior?.view, todoId: prior?.todoId,
+      taskId: prior?.taskId, agentRefs: prior?.agentRefs, view: prior?.view, todoId,
     });
     this.toolFrames.set(event.toolCallId, { turnId, stepId: step.stepId, frame });
     ops.push({ op: 'frame.upsert', turnId, stepId: step.stepId, frame });
@@ -959,6 +963,12 @@ function parseArguments(value: unknown): unknown {
   } catch {
     return value;
   }
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+    ? value as Record<string, unknown>
+    : {};
 }
 
 function messageText(message: ContextMessage): string {

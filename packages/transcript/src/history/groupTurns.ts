@@ -83,7 +83,7 @@ interface StepDraft {
 }
 
 /** Origins whose content is context, not display — folded away, not shown. */
-const HIDDEN_USER_ORIGINS = new Set(['injection', 'system_trigger', 'retry']);
+const HIDDEN_USER_ORIGINS = new Set(['injection', 'system_trigger', 'retry', 'team_message']);
 /**
  * Hidden origins that nonetheless OPEN a real engine turn
  * (`MessageStepRequest` with `admission: 'newTurn'`, e.g. goal continuation;

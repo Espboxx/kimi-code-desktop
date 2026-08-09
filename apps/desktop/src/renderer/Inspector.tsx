@@ -18,10 +18,12 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 import type { SessionDetailsSnapshot } from '../shared/desktop-api';
+import type { TodoItem } from '../shared/desktop-api';
 import { AgentActivityTree } from './AgentActivity';
 import type { AgentActivityForest } from './agent-activity';
 import { contextPercentage, contextProgress } from './composer-utils';
 import { classNames, formatJson, number, record, text } from './ui-utils';
+import { TodoListPanel } from './TodoListPanel';
 
 type InspectorTab = 'plan' | 'agents' | 'tasks' | 'goal' | 'context';
 
@@ -34,6 +36,8 @@ interface InspectorProps {
   readonly onTaskOutput: (taskId: string) => void;
   readonly planModePending: boolean;
   readonly onSetPlanMode: (enabled: boolean) => Promise<void>;
+  readonly todos: readonly TodoItem[];
+  readonly todoReadOnly: boolean;
 }
 
 export function Inspector(props: InspectorProps) {
@@ -41,7 +45,7 @@ export function Inspector(props: InspectorProps) {
   const tabs: Array<{ id: InspectorTab; label: string; icon: React.ReactNode }> = [
     { id: 'plan', label: 'Plan', icon: <FileText size={13} /> },
     { id: 'agents', label: 'Agents', icon: <Users size={13} /> },
-    { id: 'tasks', label: '任务', icon: <ListChecks size={13} /> },
+    { id: 'tasks', label: '后台任务', icon: <ListChecks size={13} /> },
     { id: 'goal', label: 'Goal', icon: <Gauge size={13} /> },
     { id: 'context', label: '上下文', icon: <Brain size={13} /> },
   ];
@@ -58,6 +62,12 @@ export function Inspector(props: InspectorProps) {
           >{item.icon}<span>{item.label}</span></button>
         ))}
       </div>
+      <TodoListPanel
+        key={props.sessionId ?? 'no-session'}
+        sessionId={props.sessionId}
+        todos={props.todos}
+        readOnly={props.todoReadOnly}
+      />
       <div className="inspector-content">
         {props.sessionId === undefined ? <div className="inspector-empty">选择会话后可查看运行状态</div> : (
           <>

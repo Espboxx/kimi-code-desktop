@@ -625,6 +625,28 @@ describe('groupMessagesIntoSnapshot (cold path)', () => {
     expect(cronTurn?.kind === 'turn' && cronTurn.origin.kind).toBe('cron');
   });
 
+  it('keeps delivered Team messages out of ordinary user turns', () => {
+    const snapshot = groupMessagesIntoSnapshot([
+      {
+        role: 'user',
+        content: [{ type: 'text', text: '[member:agent-1] internal coordination' }],
+        toolCalls: [],
+        origin: {
+          kind: 'team_message',
+          teamId: 'team-1',
+          channelId: 'general',
+          fromSeq: 2,
+          toSeq: 3,
+          messageIds: ['m1'],
+        } as { kind: string },
+      },
+      { role: 'user', content: [{ type: 'text', text: 'visible prompt' }], toolCalls: [], origin: { kind: 'user' } },
+    ]);
+
+    expect(snapshot.items).toHaveLength(1);
+    expect(snapshot.items[0]).toMatchObject({ kind: 'turn', prompt: 'visible prompt' });
+  });
+
   it('maps legacy background_task origins to task turns, preserving the taskId', () => {
     const snapshot = groupMessagesIntoSnapshot([
       { role: 'user', content: [{ type: 'text', text: 'hi' }], toolCalls: [], origin: { kind: 'user' } },

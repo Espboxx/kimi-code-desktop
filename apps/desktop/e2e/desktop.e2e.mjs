@@ -35,6 +35,7 @@ let secondApp;
 let provider;
 let persistedComposerHeight;
 let secondarySessionId;
+let teamSessionId;
 
 try {
   await Promise.all([
@@ -77,6 +78,35 @@ try {
   }, { id: sessionId, title: automaticTitle });
   await page.evaluate((id) => window.kimiDesktop.session.rename(id, 'Desktop E2E Session'), sessionId);
   await page.locator('.workbench-tab').filter({ hasText: 'Desktop E2E Session' }).waitFor({ state: 'visible' });
+
+  const todoPanel = page.locator('.todo-fixed-panel');
+  await todoPanel.waitFor({ state: 'visible' });
+  assert.match(await page.locator('.inspector-tabs').innerText(), /后台任务/);
+  await submitPrompt(page, 'Create a TodoList with one running and one pending desktop task.');
+  await waitForAssistant(page, 'TodoList updated by Kimi.');
+  await todoPanel.getByText('Inspect desktop runtime', { exact: true }).waitFor();
+  assert.match(await todoPanel.locator('.todo-group-in_progress .todo-group-heading').innerText(), /1/);
+  assert.match(await todoPanel.locator('.todo-group-pending .todo-group-heading').innerText(), /1/);
+
+  const pendingTodo = todoPanel.locator('.todo-item').filter({ hasText: 'Run desktop tests' });
+  await pendingTodo.locator('select').selectOption('in_progress');
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll('.todo-group-in_progress .todo-title')]
+      .some((element) => element.textContent === 'Run desktop tests'));
+  const editableTodo = todoPanel.locator('.todo-item').filter({ hasText: 'Run desktop tests' });
+  await editableTodo.getByTitle('修改名称').click();
+  const todoTitleInput = todoPanel.locator('.todo-title-input');
+  await todoTitleInput.fill('Run complete desktop suite');
+  await todoPanel.getByTitle('保存名称').click();
+  await todoPanel.getByText('Run complete desktop suite', { exact: true }).waitFor();
+
+  await todoPanel.locator('.todo-add-row input').fill('Delete temporary task');
+  await todoPanel.getByTitle('新增任务').click();
+  const temporaryTodo = todoPanel.locator('.todo-item').filter({ hasText: 'Delete temporary task' });
+  await temporaryTodo.waitFor();
+  await temporaryTodo.getByTitle('删除任务').click();
+  await temporaryTodo.getByTitle('再次点击确认删除').click();
+  await temporaryTodo.waitFor({ state: 'hidden' });
 
   const planButton = composerControls.getByTitle('Plan 模式');
   await planButton.evaluate((button) => { button.click(); button.click(); });
@@ -322,6 +352,79 @@ try {
   await auditAndScreenshot(firstApp, page, 1_620, 1_040, join(artifactDir, 'swarm-completed-1620x1040.png'));
   await auditAndScreenshot(firstApp, page, 1_180, 760, join(artifactDir, 'swarm-completed-1180x760.png'));
   assert.equal(await readFile(swarmOutputPath, 'utf8'), 'swarm-approved\n');
+
+  await page.evaluate(() => window.kimiDesktop.config.set({
+    experimental: { team_collaboration: true },
+  }));
+  await page.waitForFunction(async () =>
+    (await window.kimiDesktop.config.get()).experimentalFeatures.some((feature) => {
+      const value = /** @type {{ id?: string; enabled?: boolean }} */ (feature);
+      return value.id === 'team_collaboration' && value.enabled === true;
+    }));
+  teamSessionId = await page.evaluate(() => window.kimiDesktop.session.create({
+    model: 'desktop-test',
+    thinking: 'off',
+    permission: 'manual',
+  }));
+  await page.evaluate(async (id) => {
+    await window.kimiDesktop.session.rename(id, 'Desktop Team E2E');
+    await window.kimiDesktop.turn.setSwarmMode(true, id);
+  }, teamSessionId);
+  await selectSessionByTitle(page, 'Desktop Team E2E');
+  await submitPrompt(page, 'Launch a Team Mode batch and wait for live updates.');
+  const teamTab = page.locator('.workbench-tab').filter({ hasText: 'Desktop Team E2E · 团队' });
+  await teamTab.waitFor({ state: 'visible', timeout: 30_000 });
+  assert.equal(await teamTab.getAttribute('aria-selected'), 'false', 'Team creation should not steal focus');
+  try {
+    await waitForAssistant(page, 'Team coordination resumed after a live message.', 45_000);
+  } catch (error) {
+    const diagnostic = await page.evaluate(() => window.kimiDesktop.host.snapshot());
+    assert.fail(`Team coordination did not resume: ${JSON.stringify({
+      error: error instanceof Error ? error.message : String(error),
+      teamSessionId,
+      activeSessionId: diagnostic.activeSessionId,
+      team: teamSessionId === undefined ? undefined : diagnostic.teams[teamSessionId],
+      transcript: diagnostic.transcript,
+      providerRequests: provider.requests.slice(-12),
+    })}`);
+  }
+  const teamWaitOutput = await page.evaluate(async () => {
+    const items = (await window.kimiDesktop.host.snapshot()).transcript?.transcripts.main?.items ?? [];
+    let latest;
+    for (const item of items) {
+      if (item.kind !== 'turn') continue;
+      for (const step of item.steps) {
+        for (const frame of step.frames) {
+          if (frame.kind !== 'tool' || frame.name !== 'TeamWait') continue;
+          latest = frame.output;
+          if (frame.output?.includes('"type":"message.sent"')) return frame.output;
+        }
+      }
+    }
+    return latest;
+  });
+  assert.match(teamWaitOutput ?? '', /"type":"message\.sent"/, `TeamWait was not woken by a team message: ${teamWaitOutput ?? 'missing'}`);
+  await page.waitForFunction(async (id) =>
+    ((await window.kimiDesktop.host.snapshot()).teams[id]?.snapshot.latestChannelSeq ?? 0) >= 2,
+  teamSessionId, { timeout: 30_000 });
+  await teamTab.locator('em[title*="未读团队消息"]').waitFor({ state: 'visible', timeout: 30_000 });
+  await teamTab.locator('.workbench-tab-main').click();
+  const teamPage = page.locator('.team-page');
+  await teamPage.waitFor({ state: 'visible' });
+  await page.waitForFunction(() => document.querySelectorAll('.team-message').length >= 2);
+  assert.ok(await teamPage.locator('.team-assignment-node').count() >= 2, 'Team assignments are missing');
+  assert.match(await teamPage.innerText(), /team-alpha|team-beta/);
+  const teamComposer = teamPage.locator('.team-composer textarea');
+  await teamComposer.fill('User follow-up from the Team channel.');
+  await teamPage.locator('.team-composer button').click();
+  await teamPage.getByText('User follow-up from the Team channel.', { exact: true }).waitFor();
+  assert.equal(await page.locator('.approval-panel').count(), 0, 'Team messaging must not request tool approval');
+  const persistedTeamTabs = await page.evaluate(() => Object.values(localStorage)
+    .filter((value) => value.includes('"kind":"team"')));
+  assert.ok(persistedTeamTabs.length > 0, `Team tab was not persisted: ${JSON.stringify(persistedTeamTabs)}`);
+  await auditAndScreenshot(firstApp, page, 1_620, 1_040, join(artifactDir, 'team-running-1620x1040.png'));
+  await auditAndScreenshot(firstApp, page, 1_180, 760, join(artifactDir, 'team-running-1180x760.png'));
+  await selectSessionByTitle(page, 'Desktop E2E Session');
   assert.equal(await page.locator('.agent-select select').inputValue(), 'main');
   await assertActiveSessionSettings(page, {
     sessionId,
@@ -367,11 +470,42 @@ try {
     swarmMode: true,
   });
 
+  const timeline = page.locator('.timeline-scroll');
+  const compactionMarkersBefore = await page.evaluate(async () => {
+    const snapshot = await window.kimiDesktop.host.snapshot();
+    return snapshot.transcript?.transcripts.main?.items.filter((item) =>
+      item.kind === 'marker' && item.marker === 'compaction').length ?? 0;
+  });
+  const historyScroll = await timeline.evaluate((element) => {
+    element.scrollTop = 0;
+    return {
+      top: element.scrollTop,
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    };
+  });
+  assert.ok(historyScroll.scrollHeight > historyScroll.clientHeight, 'timeline fixture is not scrollable');
+  await page.evaluate((id) => window.kimiDesktop.turn.compact('Keep the desktop E2E facts.', id), sessionId);
+  await page.waitForFunction(async (before) => {
+    const snapshot = await window.kimiDesktop.host.snapshot();
+    const count = snapshot.transcript?.transcripts.main?.items.filter((item) =>
+      item.kind === 'marker' && item.marker === 'compaction').length ?? 0;
+    return count >= before + 2;
+  }, compactionMarkersBefore, { timeout: 45_000 });
+  assert.ok(await timeline.evaluate((element) => element.scrollTop) <= historyScroll.top + 2,
+    'system markers forced the timeline away from history');
+  await auditAndScreenshot(firstApp, page, 1_620, 1_040, join(artifactDir, 'timeline-history-1620x1040.png'));
+  await auditAndScreenshot(firstApp, page, 1_180, 760, join(artifactDir, 'timeline-history-1180x760.png'));
+
   await submitPrompt(page, 'Hold this turn until I cancel it.');
   const cancelButton = page.locator('.composer .cancel-button');
   await cancelButton.waitFor({ state: 'visible', timeout: 30_000 });
+  assert.equal(await todoPanel.locator('.todo-add-row input').isDisabled(), true, 'TodoList should be read-only while an Agent runs');
+  assert.ok(await timeline.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight) < 120,
+    'user submission did not restore timeline auto-follow');
   await cancelButton.click();
   await page.waitForFunction(async () => (await window.kimiDesktop.host.snapshot()).session.status?.busy === false, undefined, { timeout: 30_000 });
+  await page.waitForFunction(() => !document.querySelector('.todo-add-row input')?.disabled);
   assert.ok(provider.cancelledStreams >= 1, 'provider stream was not aborted by turn.cancel');
 
   await page.evaluate(async ({ id, directory }) => {
@@ -588,6 +722,13 @@ try {
     swarmMode: true,
   });
 
+  if (await page.locator('.workbench-tab-main[title^="团队频道"]').count() === 0) {
+    await selectSessionByTitle(page, 'Desktop Team E2E');
+    await page.locator('.session-row.selected .session-actions button[title="打开团队频道"]').click();
+    await page.locator('.workbench-tab-main[title^="团队频道"]').waitFor({ state: 'visible' });
+    await selectSessionByTitle(page, 'Desktop E2E Session');
+  }
+
   await openSettingsAndVerify(page);
   await auditAndScreenshot(firstApp, page, 1_620, 1_040, join(artifactDir, 'kimi-desktop-1620x1040.png'));
   await page.locator('.tree-node[title^="sample.txt"]').click();
@@ -629,6 +770,21 @@ try {
   const restored = await restoredPage.evaluate(() => window.kimiDesktop.host.snapshot());
   assert.equal(restored.activeSessionId, sessionId);
   assert.ok((restored.transcript?.agents.length ?? 0) >= 3);
+  await restoredPage.locator('.todo-fixed-panel').getByText('Run complete desktop suite', { exact: true }).waitFor();
+  const restoredTeamTab = restoredPage.locator('.workbench-tab-main[title^="团队频道"]');
+  try {
+    await restoredTeamTab.waitFor({ state: 'visible', timeout: 10_000 });
+  } catch (error) {
+    const restoreDiagnostic = await restoredPage.evaluate(async () => ({
+      storage: Object.fromEntries(Object.entries(localStorage)),
+      snapshot: await window.kimiDesktop.host.snapshot(),
+      tabs: [...document.querySelectorAll('.workbench-tab-main')].map((tab) => ({ title: tab.getAttribute('title'), text: tab.textContent })),
+    }));
+    assert.fail(`Team tab did not restore: ${JSON.stringify({ error: error instanceof Error ? error.message : String(error), restoreDiagnostic })}`);
+  }
+  await restoredTeamTab.click();
+  await restoredPage.locator('.team-page').getByText('User follow-up from the Team channel.', { exact: true }).waitFor();
+  await selectSessionByTitle(restoredPage, 'Desktop E2E Session');
   await restoredPage.locator('.inspector-tabs button').nth(1).click();
   await restoredPage.waitForFunction(() => document.querySelectorAll('.inspector .agent-activity-row').length >= 3);
   assert.ok(
@@ -643,6 +799,7 @@ try {
   const restoredComposerHeight = await restoredPage.locator('.composer textarea').evaluate((element) => Math.round(element.getBoundingClientRect().height));
   assert.equal(restoredComposerHeight, persistedComposerHeight, 'composer height was not restored across app restart');
   await selectSessionByTitle(restoredPage, 'Desktop E2E Secondary');
+  assert.equal(await restoredPage.locator('.todo-fixed-panel .todo-item').count(), 0, 'TodoList leaked across sessions');
   await assertActiveSessionSettings(restoredPage, {
     sessionId: secondarySessionId,
     model: 'desktop-test',
@@ -688,6 +845,7 @@ try {
     ok: true,
     sessionId,
     secondarySessionId,
+    teamSessionId,
     providerRequests: provider.requests.length,
     providerAuthorizationObserved: provider.requests.some((request) => request.authorization === `Bearer ${providerToken}`),
     providerRetryAttempts: provider.transientAttempts,
@@ -706,6 +864,10 @@ try {
       join(artifactDir, 'swarm-interactions-1180x760.png'),
       join(artifactDir, 'swarm-completed-1620x1040.png'),
       join(artifactDir, 'swarm-completed-1180x760.png'),
+      join(artifactDir, 'timeline-history-1620x1040.png'),
+      join(artifactDir, 'timeline-history-1180x760.png'),
+      join(artifactDir, 'team-running-1620x1040.png'),
+      join(artifactDir, 'team-running-1180x760.png'),
     ],
     processLogs,
   };
@@ -931,6 +1093,8 @@ async function openSettingsAndVerify(page) {
   await dialog.waitFor({ state: 'visible' });
   await dialog.locator('.settings-nav button').nth(3).click();
   await dialog.getByText('desktop-fixture', { exact: false }).waitFor();
+  await dialog.locator('.settings-nav button').last().click();
+  await dialog.getByLabel('禁用 team_collaboration').waitFor();
   await dialog.locator('.settings-nav button').first().click();
   await dialog.getByText('未登录', { exact: true }).waitFor();
   await dialog.locator('.dialog-header .icon-button').click();
@@ -1047,10 +1211,32 @@ async function startProvider() {
       requests.push({
         url: request.url,
         authorization: request.headers.authorization,
+        role: last.role,
+        toolName: last.role === 'tool' ? findToolName(messages, last.tool_call_id) : undefined,
         messageCount: messages.length,
         prompt: lastText,
         hasImage: JSON.stringify(messages).includes('image_url'),
       });
+
+      if (historyText.includes('Launch a Team Mode batch and wait for live updates.')) {
+        if (hasToolCall(messages, 'AgentSwarm')) {
+          const waitResults = messages.filter((message) => message.role === 'tool'
+            && findToolName(messages, message.tool_call_id) === 'TeamWait');
+          if (waitResults.some((message) => messageText(message).includes('"type":"message.sent"'))) {
+            return sendText(response, 'Team coordination resumed after a live message.', ++responseId);
+          }
+          const waitNumber = waitResults.length + 1;
+          return sendTool(response, 'TeamWait', { timeout_seconds: 10 }, `team-wait-call-${String(waitNumber)}`, ++responseId);
+        }
+      }
+      if (historyText.includes('team-alpha') && !hasToolCall(messages, 'TeamSend')) {
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
+        return sendTool(response, 'TeamSend', { message: 'team-alpha finding is ready' }, 'team-send-alpha', ++responseId);
+      }
+      if (historyText.includes('team-beta') && !hasToolCall(messages, 'TeamSend')) {
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 900));
+        return sendTool(response, 'TeamSend', { message: 'team-beta finding is ready' }, 'team-send-beta', ++responseId);
+      }
 
       if (last.role === 'tool') {
         const toolName = findToolName(messages, last.tool_call_id);
@@ -1059,7 +1245,23 @@ async function startProvider() {
         if (toolName === 'AskUserQuestion') {
           return sendText(response, historyText.includes('Review beta') ? 'Beta question resolved.' : 'Question answered with the selected target.', ++responseId);
         }
-        if (toolName === 'AgentSwarm') return sendText(response, 'Swarm complete with two agent results.', ++responseId);
+        if (toolName === 'AgentSwarm') {
+          if (historyText.includes('Launch a Team Mode batch and wait for live updates.')) {
+            return sendTool(response, 'TeamWait', { timeout_seconds: 10 }, 'team-wait-call-1', ++responseId);
+          }
+          return sendText(response, 'Swarm complete with two agent results.', ++responseId);
+        }
+        if (toolName === 'TeamSend') {
+          return sendText(
+            response,
+            historyText.includes('team-alpha') ? 'Team alpha completed.' : 'Team beta completed.',
+            ++responseId,
+          );
+        }
+        if (toolName === 'TeamWait') {
+          return sendText(response, 'Team coordination resumed after a live message.', ++responseId);
+        }
+        if (toolName === 'TodoList') return sendText(response, 'TodoList updated by Kimi.', ++responseId);
       }
       if (lastText.includes('Edit sample.txt through an approval request.')) {
         return sendTool(response, 'Edit', {
@@ -1082,6 +1284,14 @@ async function startProvider() {
       if (lastText.includes('Render the attached image in the transcript.')) {
         return sendText(response, 'Attached image rendered.', ++responseId);
       }
+      if (lastText.includes('Create a TodoList with one running and one pending desktop task.')) {
+        return sendTool(response, 'TodoList', {
+          todos: [
+            { title: 'Inspect desktop runtime', status: 'in_progress' },
+            { title: 'Run desktop tests', status: 'pending' },
+          ],
+        }, 'todo-call-1', ++responseId);
+      }
       if (lastText.includes('Run a two-agent swarm over alpha and beta.')) {
         return sendTool(response, 'AgentSwarm', {
           description: 'Review fixtures',
@@ -1089,6 +1299,22 @@ async function startProvider() {
           items: ['alpha', 'beta'],
           subagent_type: 'interactive-worker',
         }, 'swarm-call-1', ++responseId);
+      }
+      if (lastText.includes('Launch a Team Mode batch and wait for live updates.')) {
+        return sendTool(response, 'AgentSwarm', {
+          description: 'Coordinate Team Mode fixtures',
+          prompt_template: 'Inspect {{item}}, send one update with TeamSend, then finish.',
+          items: ['team-alpha', 'team-beta'],
+          subagent_type: 'explore',
+        }, 'team-swarm-call-1', ++responseId);
+      }
+      if (lastText.includes('Inspect team-alpha, send one update with TeamSend, then finish.')) {
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
+        return sendTool(response, 'TeamSend', { message: 'team-alpha finding is ready' }, 'team-send-alpha', ++responseId);
+      }
+      if (lastText.includes('Inspect team-beta, send one update with TeamSend, then finish.')) {
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 900));
+        return sendTool(response, 'TeamSend', { message: 'team-beta finding is ready' }, 'team-send-beta', ++responseId);
       }
       if (lastText.includes('Recover after one transient provider failure.')) {
         transientAttempts += 1;
@@ -1167,6 +1393,11 @@ function findToolName(messages, toolCallId) {
     if (call !== undefined) return call.function?.name;
   }
   return undefined;
+}
+
+function hasToolCall(messages, toolName) {
+  return messages.some((message) => Array.isArray(message?.tool_calls)
+    && message.tool_calls.some((call) => call?.function?.name === toolName));
 }
 
 function sendText(response, content, id) {

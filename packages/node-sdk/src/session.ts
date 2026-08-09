@@ -37,6 +37,10 @@ import type {
   SkillSummary,
   PluginCommandDef,
   ThinkingEffort,
+  TodoItem,
+  TeamMessage,
+  TeamOperation,
+  TeamSnapshot,
   Unsubscribe,
 } from '#/types';
 
@@ -73,6 +77,67 @@ export function capabilityRpc(rpc: SDKRpcClientBase): CapabilityRpcSurface {
     throw new TypeError('The capability surface is unavailable on this engine (requires v2).');
   }
   return candidate as CapabilityRpcSurface;
+}
+
+interface TodoRpcSurface {
+  getTodos(input: { readonly sessionId: string }): Promise<readonly TodoItem[]>;
+  setTodos(input: {
+    readonly sessionId: string;
+    readonly todos: readonly TodoItem[];
+  }): Promise<void>;
+  onTodosChanged(
+    input: { readonly sessionId: string },
+    listener: (todos: readonly TodoItem[]) => void,
+  ): Unsubscribe;
+}
+
+function todoRpc(rpc: SDKRpcClientBase): TodoRpcSurface {
+  const candidate = rpc as Partial<TodoRpcSurface>;
+  if (
+    typeof candidate.getTodos !== 'function' ||
+    typeof candidate.setTodos !== 'function' ||
+    typeof candidate.onTodosChanged !== 'function'
+  ) {
+    throw new TypeError('The TodoList surface is unavailable on this engine (requires v2).');
+  }
+  return candidate as TodoRpcSurface;
+}
+
+interface TeamRpcSurface {
+  getTeamSnapshot(input: { readonly sessionId: string }): Promise<TeamSnapshot>;
+  getTeamOperations(input: {
+    readonly sessionId: string;
+    readonly afterSeq: number;
+    readonly limit?: number;
+  }): Promise<readonly TeamOperation[]>;
+  getTeamHistory(input: {
+    readonly sessionId: string;
+    readonly beforeChannelSeq?: number;
+    readonly limit?: number;
+  }): Promise<readonly TeamMessage[]>;
+  sendTeamMessage(input: {
+    readonly sessionId: string;
+    readonly body: string;
+    readonly clientMessageId: string;
+  }): Promise<TeamMessage>;
+  onTeamOperation(
+    input: { readonly sessionId: string },
+    listener: (operation: TeamOperation) => void,
+  ): Unsubscribe;
+}
+
+function teamRpc(rpc: SDKRpcClientBase): TeamRpcSurface {
+  const candidate = rpc as Partial<TeamRpcSurface>;
+  if (
+    typeof candidate.getTeamSnapshot !== 'function' ||
+    typeof candidate.getTeamOperations !== 'function' ||
+    typeof candidate.getTeamHistory !== 'function' ||
+    typeof candidate.sendTeamMessage !== 'function' ||
+    typeof candidate.onTeamOperation !== 'function'
+  ) {
+    throw new TypeError('The Team Mode surface is unavailable on this engine (requires v2).');
+  }
+  return candidate as TeamRpcSurface;
 }
 
 export class Session {
@@ -117,6 +182,55 @@ export class Session {
         listener(event);
       }
     });
+  }
+
+  async getTodos(): Promise<readonly TodoItem[]> {
+    this.ensureOpen();
+    return todoRpc(this.rpc).getTodos({ sessionId: this.id });
+  }
+
+  async setTodos(todos: readonly TodoItem[]): Promise<void> {
+    this.ensureOpen();
+    await todoRpc(this.rpc).setTodos({ sessionId: this.id, todos });
+  }
+
+  onTodosChanged(listener: (todos: readonly TodoItem[]) => void): Unsubscribe {
+    this.ensureOpen();
+    return todoRpc(this.rpc).onTodosChanged({ sessionId: this.id }, listener);
+  }
+
+  async getTeamSnapshot(): Promise<TeamSnapshot> {
+    this.ensureOpen();
+    return teamRpc(this.rpc).getTeamSnapshot({ sessionId: this.id });
+  }
+
+  async getTeamOperations(input: {
+    readonly afterSeq: number;
+    readonly limit?: number;
+  }): Promise<readonly TeamOperation[]> {
+    this.ensureOpen();
+    return teamRpc(this.rpc).getTeamOperations({ sessionId: this.id, ...input });
+  }
+
+  async getTeamHistory(input: {
+    readonly beforeChannelSeq?: number;
+    readonly limit?: number;
+  } = {}): Promise<readonly TeamMessage[]> {
+    this.ensureOpen();
+    return teamRpc(this.rpc).getTeamHistory({ sessionId: this.id, ...input });
+  }
+
+  async sendTeamMessage(input: {
+    readonly body: string;
+    readonly clientMessageId: string;
+  }): Promise<TeamMessage> {
+    this.ensureOpen();
+    return teamRpc(this.rpc).sendTeamMessage({ sessionId: this.id, ...input });
+  }
+
+  onTeamOperation(listener: (operation: TeamOperation) => void): Unsubscribe {
+    this.ensureOpen();
+    return teamRpc(this.rpc).onTeamOperation({ sessionId: this.id }, listener);
   }
 
   setApprovalHandler(handler: ApprovalHandler | undefined): void {

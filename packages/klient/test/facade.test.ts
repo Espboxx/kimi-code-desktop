@@ -240,6 +240,82 @@ describe('session skills routing', () => {
   });
 });
 
+describe('session todos routing', () => {
+  it('reads, replaces, and subscribes to the session TodoList', async () => {
+    const channel = new FakeChannel();
+    const klient = createKlientFromChannel(channel);
+    const todos = [{ title: 'Inspect runtime', status: 'in_progress' as const }];
+
+    channel.result = todos;
+    await expect(klient.session('s1').todos.get()).resolves.toEqual(todos);
+    expect(channel.calls[0]).toEqual({
+      scope: { sessionId: 's1' },
+      service: 'sessionTodoService',
+      method: 'getTodos',
+      args: [],
+    });
+
+    channel.result = undefined;
+    await klient.session('s1').todos.set(todos);
+    expect(channel.calls[1]).toEqual({
+      scope: { sessionId: 's1' },
+      service: 'sessionTodoService',
+      method: 'setTodos',
+      args: [todos],
+    });
+
+    const seen: unknown[] = [];
+    klient.session('s1').events.on('todos.changed', (event) => seen.push(event));
+    expect(channel.subscriptions[0]?.source).toEqual({
+      kind: 'emitter',
+      service: 'sessionTodoService',
+      event: 'onDidChange',
+    });
+    channel.emit(0, todos);
+    await tick();
+    expect(seen).toEqual([todos]);
+  });
+});
+
+describe('session collaboration routing', () => {
+  it('routes snapshot, history, send, and live operations through the session service', async () => {
+    const channel = new FakeChannel();
+    const klient = createKlientFromChannel(channel);
+    const session = klient.session('s1');
+    const snapshot = {
+      state: 'ready' as const, members: [], batches: [], assignments: [], latestSeq: 0, latestChannelSeq: 0,
+    };
+    channel.result = snapshot;
+    await expect(session.collaboration.snapshot()).resolves.toEqual(snapshot);
+    expect(channel.calls[0]).toEqual({
+      scope: { sessionId: 's1' }, service: 'sessionCollaborationService', method: 'snapshot', args: [],
+    });
+
+    const message = {
+      id: 'm1', teamId: 'team-1', channelId: 'general' as const, seq: 2, channelSeq: 1,
+      sender: { actorKind: 'user' as const, actorId: 'desktop-user', role: 'user' as const },
+      body: 'Coordinate', clientMessageId: 'retry-1', createdAt: 2,
+    };
+    channel.result = message;
+    await expect(session.collaboration.sendUserMessage({ body: 'Coordinate', clientMessageId: 'retry-1' }))
+      .resolves.toEqual(message);
+    expect(channel.calls[1]).toEqual({
+      scope: { sessionId: 's1' }, service: 'sessionCollaborationService', method: 'sendUserMessage',
+      args: [{ body: 'Coordinate', clientMessageId: 'retry-1' }],
+    });
+
+    const operation = { version: 1 as const, type: 'message.sent' as const, seq: 2, at: 2, message };
+    const seen: unknown[] = [];
+    session.events.on('collaboration.operation', (event) => seen.push(event));
+    expect(channel.subscriptions[0]?.source).toEqual({
+      kind: 'emitter', service: 'sessionCollaborationService', event: 'onDidOperate',
+    });
+    channel.emit(0, operation);
+    await tick();
+    expect(seen).toEqual([operation]);
+  });
+});
+
 describe('agent mcp / compaction routing', () => {
   it('getMcpServers returns the live snapshot with the agent scope', async () => {
     const channel = new FakeChannel();

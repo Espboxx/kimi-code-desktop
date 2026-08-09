@@ -30,6 +30,7 @@ import type {
 import { InlineAgentActivity } from './AgentActivity';
 import type { AgentActivityForest } from './agent-activity';
 import { InteractionPanel } from './InteractionPanel';
+import { decideTimelineAutoFollow } from './timeline-scroll';
 import { classNames, formatJson, record, text } from './ui-utils';
 
 interface TimelineProps {
@@ -40,6 +41,7 @@ interface TimelineProps {
   readonly onSelectAgent: (agentId: string) => void;
   readonly sessionId?: string;
   readonly version: number;
+  readonly followRequest: number;
 }
 
 export function Timeline({
@@ -50,10 +52,13 @@ export function Timeline({
   onSelectAgent,
   sessionId,
   version,
+  followRequest,
 }: TimelineProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const shouldStick = useRef(true);
-  const previousTailId = useRef<string | undefined>(undefined);
+  const previousStreamKey = useRef<string | undefined>(undefined);
+  const previousFollowRequest = useRef(followRequest);
+  const pendingFollow = useRef(false);
   const items = transcript?.getItems() ?? [];
   const tasks = transcript?.getTasks() ?? new Map<string, TranscriptTask>();
   const interactions = transcript?.getInteractions() ?? new Map<string, TranscriptInteraction>();
@@ -67,17 +72,26 @@ export function Timeline({
     estimateSize: (index) => items[index]?.kind === 'turn' ? 260 : 56,
     overscan: 5,
   });
-  const tail = items.at(-1);
-  const tailId = tail === undefined ? undefined : itemId(tail);
+  const streamKey = sessionId === undefined ? undefined : `${sessionId}:${selectedAgentId}`;
 
   useEffect(() => {
-    const appended = previousTailId.current !== undefined && previousTailId.current !== tailId;
-    previousTailId.current = tailId;
-    if ((shouldStick.current || appended) && virtualizer.options.count > 0) {
+    const streamChanged = previousStreamKey.current !== streamKey;
+    const followRequested = previousFollowRequest.current !== followRequest;
+    previousStreamKey.current = streamKey;
+    previousFollowRequest.current = followRequest;
+    const decision = decideTimelineAutoFollow({
+      hasContent: virtualizer.options.count > 0,
+      nearBottom: shouldStick.current,
+      streamChanged,
+      followRequested,
+      pendingFollow: pendingFollow.current,
+    });
+    pendingFollow.current = decision.pendingFollow;
+    if (decision.shouldFollow) {
       shouldStick.current = true;
       virtualizer.scrollToIndex(virtualizer.options.count - 1, { align: 'end' });
     }
-  }, [tailId, version, virtualizer]);
+  }, [followRequest, streamKey, version, virtualizer]);
 
   if (transcript === undefined || sessionId === undefined) {
     return (

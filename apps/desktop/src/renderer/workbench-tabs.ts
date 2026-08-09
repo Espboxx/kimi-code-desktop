@@ -6,6 +6,12 @@ export interface SessionWorkbenchTab {
   readonly sessionId: string;
 }
 
+export interface TeamWorkbenchTab {
+  readonly id: string;
+  readonly kind: 'team';
+  readonly sessionId: string;
+}
+
 export interface FileWorkbenchTab {
   readonly id: string;
   readonly kind: 'file';
@@ -29,7 +35,7 @@ export interface DiffWorkbenchTab {
   readonly error?: string;
 }
 
-export type WorkbenchTab = SessionWorkbenchTab | FileWorkbenchTab | DiffWorkbenchTab;
+export type WorkbenchTab = SessionWorkbenchTab | TeamWorkbenchTab | FileWorkbenchTab | DiffWorkbenchTab;
 
 export interface WorkbenchTabState {
   readonly tabs: readonly WorkbenchTab[];
@@ -38,13 +44,14 @@ export interface WorkbenchTabState {
 }
 
 interface PersistedWorkbenchState {
-  readonly version: 1;
+  readonly version: 1 | 2;
   readonly tabs: readonly PersistedWorkbenchTab[];
   readonly activeId?: string;
 }
 
 type PersistedWorkbenchTab =
   | { readonly kind: 'session'; readonly sessionId: string }
+  | { readonly kind: 'team'; readonly sessionId: string }
   | { readonly kind: 'file'; readonly path: string }
   | { readonly kind: 'diff'; readonly path: string; readonly area: GitDiffArea };
 
@@ -52,6 +59,10 @@ export const EMPTY_WORKBENCH: WorkbenchTabState = { tabs: [], recentIds: [] };
 
 export function sessionTab(sessionId: string): SessionWorkbenchTab {
   return { id: `session:${sessionId}`, kind: 'session', sessionId };
+}
+
+export function teamTab(sessionId: string): TeamWorkbenchTab {
+  return { id: `team:${sessionId}`, kind: 'team', sessionId };
 }
 
 export function fileTab(path: string): FileWorkbenchTab {
@@ -77,6 +88,23 @@ export function openWorkbenchTab(state: WorkbenchTabState, tab: WorkbenchTab): W
     tabs: exists ? state.tabs : [...state.tabs, tab],
     activeId: tab.id,
     recentIds: touchRecent(state.recentIds, tab.id),
+  };
+}
+
+export function ensureWorkbenchTab(
+  state: WorkbenchTabState,
+  tab: WorkbenchTab,
+  activate = false,
+): WorkbenchTabState {
+  if (state.tabs.some((candidate) => candidate.id === tab.id)) {
+    return activate ? activateWorkbenchTab(state, tab.id) : state;
+  }
+  return {
+    tabs: [...state.tabs, tab],
+    activeId: activate || state.activeId === undefined ? tab.id : state.activeId,
+    recentIds: activate || state.activeId === undefined
+      ? touchRecent(state.recentIds, tab.id)
+      : state.recentIds,
   };
 }
 
@@ -120,12 +148,13 @@ export function cycleWorkbenchTab(state: WorkbenchTabState, backwards = false): 
 
 export function serializeWorkbenchState(state: WorkbenchTabState): string {
   const persisted: PersistedWorkbenchState = {
-    version: 1,
-    tabs: state.tabs.map((tab) => tab.kind === 'session'
-      ? { kind: 'session', sessionId: tab.sessionId }
-      : tab.kind === 'file'
-        ? { kind: 'file', path: tab.path }
-        : { kind: 'diff', path: tab.path, area: tab.area }),
+    version: 2,
+    tabs: state.tabs.map((tab) => {
+      if (tab.kind === 'session') return { kind: 'session', sessionId: tab.sessionId };
+      if (tab.kind === 'team') return { kind: 'team', sessionId: tab.sessionId };
+      if (tab.kind === 'file') return { kind: 'file', path: tab.path };
+      return { kind: 'diff', path: tab.path, area: tab.area };
+    }),
     activeId: state.activeId,
   };
   return JSON.stringify(persisted);
@@ -134,16 +163,19 @@ export function serializeWorkbenchState(state: WorkbenchTabState): string {
 export function restoreWorkbenchState(
   value: string | null,
   validSessionIds: ReadonlySet<string>,
+  validTeamSessionIds: ReadonlySet<string> = new Set(),
 ): WorkbenchTabState {
   if (value === null) return EMPTY_WORKBENCH;
   try {
     const parsed = JSON.parse(value) as Partial<PersistedWorkbenchState>;
-    if (parsed.version !== 1 || !Array.isArray(parsed.tabs)) return EMPTY_WORKBENCH;
+    if ((parsed.version !== 1 && parsed.version !== 2) || !Array.isArray(parsed.tabs)) return EMPTY_WORKBENCH;
     const tabs: WorkbenchTab[] = [];
     for (const raw of parsed.tabs) {
       if (raw === null || typeof raw !== 'object') continue;
       if (raw.kind === 'session' && typeof raw.sessionId === 'string' && validSessionIds.has(raw.sessionId)) {
         tabs.push(sessionTab(raw.sessionId));
+      } else if (raw.kind === 'team' && typeof raw.sessionId === 'string' && validTeamSessionIds.has(raw.sessionId)) {
+        tabs.push(teamTab(raw.sessionId));
       } else if (raw.kind === 'file' && typeof raw.path === 'string' && raw.path.length > 0) {
         tabs.push(fileTab(raw.path));
       } else if (

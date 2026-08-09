@@ -789,6 +789,13 @@ export interface AgentStateSnapshot {
       } | /* RetryOrigin — packages/agent-core-v2/src/agent/contextMemory/types.ts */ {
         readonly kind: 'retry';
         readonly trigger?: string;
+      } | /* TeamMessageOrigin — packages/agent-core-v2/src/agent/contextMemory/types.ts */ {
+        readonly kind: 'team_message';
+        readonly teamId: string;
+        readonly channelId: string;
+        readonly fromSeq: number;
+        readonly toSeq: number;
+        readonly messageIds: readonly string[];
       };
       readonly phase: /* TurnPhase — packages/agent-core-v2/src/agent/activityView/activityView.ts */ 'running' | 'streaming' | 'tool_call' | 'retrying';
       readonly stream?: 'tool_call' | 'assistant' | 'thinking';
@@ -919,6 +926,13 @@ export interface AgentStateSnapshot {
     } | /* RetryOrigin — packages/agent-core-v2/src/agent/contextMemory/types.ts */ {
       readonly kind: 'retry';
       readonly trigger?: string;
+    } | /* TeamMessageOrigin — packages/agent-core-v2/src/agent/contextMemory/types.ts */ {
+      readonly kind: 'team_message';
+      readonly teamId: string;
+      readonly channelId: string;
+      readonly fromSeq: number;
+      readonly toSeq: number;
+      readonly messageIds: readonly string[];
     };
     snapshot: () => /* ActivityTurnState — packages/agent-core-v2/src/agent/activityView/activityView.ts */ {
       readonly turnId: number;
@@ -981,6 +995,13 @@ export interface AgentStateSnapshot {
       } | /* RetryOrigin — packages/agent-core-v2/src/agent/contextMemory/types.ts */ {
         readonly kind: 'retry';
         readonly trigger?: string;
+      } | /* TeamMessageOrigin — packages/agent-core-v2/src/agent/contextMemory/types.ts */ {
+        readonly kind: 'team_message';
+        readonly teamId: string;
+        readonly channelId: string;
+        readonly fromSeq: number;
+        readonly toSeq: number;
+        readonly messageIds: readonly string[];
       };
       readonly phase: /* TurnPhase — packages/agent-core-v2/src/agent/activityView/activityView.ts */ 'running' | 'streaming' | 'tool_call' | 'retrying';
       readonly stream?: 'tool_call' | 'assistant' | 'thinking';

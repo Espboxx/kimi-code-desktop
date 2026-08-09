@@ -10,6 +10,8 @@ import { describe, expect, it } from 'vitest';
 
 import { pluginManifestSchema } from '../src/contract/global/plugins.js';
 import { createSessionOptionsSchema } from '../src/contract/session/lifecycle.js';
+import { todoItemsSchema } from '../src/contract/session/todo.js';
+import { teamOperationSchema, teamSnapshotSchema } from '../src/contract/session/collaboration.js';
 
 type McpTimeoutField = 'startupTimeoutMs' | 'toolTimeoutMs';
 
@@ -63,5 +65,34 @@ describe('MCP timeout contract validation', () => {
       },
     });
     expect(parsed.success).toBe(false);
+  });
+});
+
+describe('TodoList contract validation', () => {
+  it('accepts the three public statuses and rejects blank titles', () => {
+    expect(todoItemsSchema.safeParse([
+      { title: 'Run tests', status: 'pending' },
+      { title: 'Inspect output', status: 'in_progress' },
+      { title: 'Commit', status: 'done' },
+    ]).success).toBe(true);
+    expect(todoItemsSchema.safeParse([{ title: '', status: 'pending' }]).success).toBe(false);
+    expect(todoItemsSchema.safeParse([{ title: 'x', status: 'blocked' }]).success).toBe(false);
+  });
+});
+
+describe('Team collaboration contract validation', () => {
+  it('accepts versioned operations and rejects unknown fields or versions', () => {
+    const snapshot = {
+      state: 'ready', members: [], batches: [], assignments: [], latestSeq: 0, latestChannelSeq: 0,
+    };
+    expect(teamSnapshotSchema.safeParse(snapshot).success).toBe(true);
+    expect(teamSnapshotSchema.safeParse({ ...snapshot, secret: 'leak' }).success).toBe(false);
+
+    const operation = {
+      version: 1, type: 'team.created', seq: 1, at: 1,
+      team: { id: 'team-1', sessionId: 's1', channelId: 'general', leaderAgentId: 'main', createdAt: 1 },
+    };
+    expect(teamOperationSchema.safeParse(operation).success).toBe(true);
+    expect(teamOperationSchema.safeParse({ ...operation, version: 2 }).success).toBe(false);
   });
 });

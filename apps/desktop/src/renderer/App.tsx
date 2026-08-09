@@ -26,6 +26,7 @@ import { SettingsDialog } from './SettingsDialog';
 import { Sidebar, type SessionAction } from './Sidebar';
 import { SwarmEntryController, type SwarmPermissionPrompt } from './swarm-ui';
 import { SwarmPermissionDialog } from './SwarmPermissionDialog';
+import { TeamPage } from './TeamPage';
 import { Timeline } from './Timeline';
 import { classNames, record, text } from './ui-utils';
 import {
@@ -39,12 +40,14 @@ import {
   closeWorkbenchTab,
   cycleWorkbenchTab,
   EMPTY_WORKBENCH,
+  ensureWorkbenchTab,
   fileTab,
   openWorkbenchTab,
   patchWorkbenchTab,
   restoreWorkbenchState,
   serializeWorkbenchState,
   sessionTab,
+  teamTab,
   workbenchStorageKey,
   type FileWorkbenchTab,
   type WorkbenchTab,
@@ -94,11 +97,15 @@ export function App() {
   const [dirtyPromptError, setDirtyPromptError] = useState<string>();
   const [memoryDiff, setMemoryDiff] = useState<MemoryDiffState>();
   const [planPendingSessions, setPlanPendingSessions] = useState<ReadonlySet<string>>(() => new Set());
+  const [timelineFollowRequest, setTimelineFollowRequest] = useState(0);
+  const [seenTeamSeqs, setSeenTeamSeqs] = useState<Record<string, number>>({});
   const workbenchRef = useRef(workbench);
   const loadingTabs = useRef(new Set<string>());
   const savingPaths = useRef(new Set<string>());
   const sessionActivation = useRef<{ desired?: string; running: boolean }>({ running: false });
   const planPendingRef = useRef(new Set<string>());
+  const knownTeamSessions = useRef(new Set<string>());
+  const closedTeamTabs = useRef(new Set<string>());
   workbenchRef.current = workbench;
 
   const [swarmEntryController] = useState(() => new SwarmEntryController(
@@ -117,6 +124,10 @@ export function App() {
     () => buildAgentActivityForest(state.transcript),
     [state.transcript, state.transcriptVersion],
   );
+  const todos = state.transcript?.getAgent('main')?.getTodo('todo')?.items ?? [];
+  const todoReadOnly = snapshot?.session.status?.busy === true ||
+    agentActivity.counts.running > 0 ||
+    agentActivity.counts.waiting > 0;
 
   const activateSessionRuntime = useCallback((sessionId: string) => {
     const activation = sessionActivation.current;
@@ -219,29 +230,50 @@ export function App() {
 
   const dirtyTabs = useMemo(() => workbench.tabs.filter((tab): tab is FileWorkbenchTab => tab.kind === 'file' && tab.dirty), [workbench.tabs]);
   const activeTab = workbench.tabs.find((tab) => tab.id === workbench.activeId);
-  const activeWorkbenchSessionId = activeTab?.kind === 'session' ? activeTab.sessionId : undefined;
+  const activeWorkbenchSessionId = activeTab?.kind === 'session' || activeTab?.kind === 'team'
+    ? activeTab.sessionId
+    : undefined;
   const monacoTheme = theme === 'dark' || (theme === 'system' && systemDark) ? 'vs-dark' : 'vs';
 
   useEffect(() => {
-    if (snapshot === undefined) return;
+    if (snapshot === undefined || snapshot.loading) return;
     const root = snapshot.workspace.root;
     if (root.length === 0 || hydratedRoot === root) return;
     const restored = restoreWorkbenchState(
       localStorage.getItem(workbenchStorageKey(root)),
+      new Set(snapshot.sessions.map((session) => session.id)),
       new Set(snapshot.sessions.map((session) => session.id)),
     );
     const initial = restored.tabs.length === 0 && snapshot.activeSessionId !== undefined
       ? openWorkbenchTab(restored, sessionTab(snapshot.activeSessionId))
       : restored;
     setWorkbench(initial);
+    knownTeamSessions.current = new Set(Object.keys(state.teams));
+    closedTeamTabs.current.clear();
+    setSeenTeamSeqs(readSeenTeamSeqs(teamSeenStorageKey(root)));
     setHydratedRoot(root);
     loadingTabs.current.clear();
-  }, [hydratedRoot, snapshot]);
+  }, [hydratedRoot, snapshot, state.teams]);
 
   useEffect(() => {
     if (snapshot === undefined || hydratedRoot !== snapshot.workspace.root) return;
     localStorage.setItem(workbenchStorageKey(snapshot.workspace.root), serializeWorkbenchState(workbench));
   }, [hydratedRoot, snapshot, workbench]);
+
+  useEffect(() => {
+    if (snapshot === undefined || hydratedRoot !== snapshot.workspace.root) return;
+    localStorage.setItem(teamSeenStorageKey(snapshot.workspace.root), JSON.stringify(seenTeamSeqs));
+  }, [hydratedRoot, seenTeamSeqs, snapshot]);
+
+  useEffect(() => {
+    if (snapshot === undefined || hydratedRoot !== snapshot.workspace.root) return;
+    for (const sessionId of Object.keys(state.teams)) {
+      if (knownTeamSessions.current.has(sessionId)) continue;
+      knownTeamSessions.current.add(sessionId);
+      if (closedTeamTabs.current.has(sessionId)) continue;
+      setWorkbench((current) => ensureWorkbenchTab(current, teamTab(sessionId), current.tabs.length === 0));
+    }
+  }, [hydratedRoot, snapshot, state.teamVersion, state.teams]);
 
   useEffect(() => {
     const sessionId = snapshot?.activeSessionId;
@@ -335,12 +367,13 @@ export function App() {
       setDirtyPromptError(undefined);
       return;
     }
+    if (tab.kind === 'team') closedTeamTabs.current.add(tab.sessionId);
     setWorkbench((current) => closeWorkbenchTab(current, tab.id));
   }, []);
 
   const activateTab = useCallback((tab: WorkbenchTab) => {
     setWorkbench((current) => activateWorkbenchTab(current, tab.id));
-    if (tab.kind === 'session') {
+    if (tab.kind === 'session' || tab.kind === 'team') {
       void window.kimiDesktop.session.resume(tab.sessionId).catch((error) => setSwarmActionError(rendererError(error, 'session.resume_failed')));
     }
   }, []);
@@ -397,7 +430,7 @@ export function App() {
   }
 
   const status = snapshot.session.status;
-  const selectedSession = activeTab?.kind === 'session'
+  const selectedSession = activeTab?.kind === 'session' || activeTab?.kind === 'team'
     ? snapshot.sessions.find((session) => session.id === activeTab.sessionId)
     : snapshot.sessions.find((session) => session.id === snapshot.activeSessionId);
   const transcript = state.transcript?.getAgent(selectedAgentId) ?? state.transcript?.getAgent('main');
@@ -415,6 +448,26 @@ export function App() {
     setWorkbench((current) => openWorkbenchTab(current, tab));
     activateSessionRuntime(sessionId);
   };
+  const openTeam = (sessionId: string) => {
+    closedTeamTabs.current.delete(sessionId);
+    setWorkbench((current) => openWorkbenchTab(current, teamTab(sessionId)));
+    activateSessionRuntime(sessionId);
+  };
+  const selectTeamAgent = (sessionId: string, agentId: string) => {
+    setSelectedAgents((current) => ({ ...current, [sessionId]: agentId }));
+    setWorkbench((current) => openWorkbenchTab(current, sessionTab(sessionId)));
+    activateSessionRuntime(sessionId);
+  };
+  const markTeamSeen = (sessionId: string, channelSeq: number) => {
+    setSeenTeamSeqs((current) => (current[sessionId] ?? 0) >= channelSeq
+      ? current
+      : { ...current, [sessionId]: channelSeq });
+  };
+  const teamBadges = Object.fromEntries(Object.entries(state.teams).map(([sessionId, teamState]) => [sessionId, {
+    unread: Math.max(0, teamState.snapshot.latestChannelSeq - (seenTeamSeqs[sessionId] ?? 0)),
+    running: teamState.snapshot.assignments.filter((assignment) => assignment.status === 'running' || assignment.status === 'queued').length,
+    failed: teamState.snapshot.assignments.filter((assignment) => assignment.status === 'failed').length,
+  }]));
   const createSession = async () => openSession(await window.kimiDesktop.session.create());
   const chooseWorkspace = () => {
     if (dirtyTabs.length > 0) {
@@ -500,11 +553,13 @@ export function App() {
           openSessionIds={openSessionIds}
           sessionStatuses={state.sessionStatuses}
           pendingInteractionCounts={state.pendingInteractionCounts}
+          teamBadges={teamBadges}
           onChooseWorkspace={chooseWorkspace}
           onRefreshWorkspace={() => void window.kimiDesktop.workspace.refresh()}
           onOpenFile={openFile}
           onNewSession={() => void createSession()}
           onSelectSession={openSession}
+          onOpenTeam={openTeam}
           onReloadSession={(sessionId) => void window.kimiDesktop.session.reload(sessionId)}
           onSessionAction={(session, action) => setSessionDialog({ session, action })}
         />
@@ -514,6 +569,7 @@ export function App() {
             sessions={snapshot.sessions}
             statuses={state.sessionStatuses}
             pendingCounts={state.pendingInteractionCounts}
+            teamBadges={teamBadges}
             onActivate={activateTab}
             onClose={requestCloseTab}
           />
@@ -545,6 +601,7 @@ export function App() {
                 onSelectAgent={setSelectedAgentId}
                 sessionId={snapshot.activeSessionId}
                 version={state.transcriptVersion}
+                followRequest={timelineFollowRequest}
               />
               <PendingInteractionDock store={state.transcript} sessionId={snapshot.activeSessionId} selectedAgentId={selectedAgentId} version={state.transcriptVersion} onSelectAgent={setSelectedAgentId} />
               <Composer
@@ -555,7 +612,10 @@ export function App() {
                 skills={snapshot.session.skills}
                 pluginCommands={snapshot.session.pluginCommands}
                 commands={snapshot.session.commands}
-                onSubmit={(input) => window.kimiDesktop.turn.submit({ sessionId: snapshot.activeSessionId, ...input })}
+                onSubmit={(input) => {
+                  setTimelineFollowRequest((current) => current + 1);
+                  return window.kimiDesktop.turn.submit({ sessionId: snapshot.activeSessionId, ...input });
+                }}
                 onCancel={() => window.kimiDesktop.turn.cancel(snapshot.activeSessionId)}
                 swarmPermissionPending={swarmPermission !== undefined}
                 onEnterSwarm={enterSwarm}
@@ -563,6 +623,17 @@ export function App() {
                 onSetPlanMode={setPlanMode}
               />
             </div>
+          )}
+          {activeTab?.kind === 'team' && state.teams[activeTab.sessionId] === undefined && (
+            <div className="editor-state"><CircleDashed className="spin" size={17} /><span>正在恢复团队频道</span></div>
+          )}
+          {activeTab?.kind === 'team' && state.teams[activeTab.sessionId] !== undefined && (
+            <TeamPage
+              sessionId={activeTab.sessionId}
+              state={state.teams[activeTab.sessionId]!}
+              onSeen={(channelSeq) => markTeamSeen(activeTab.sessionId, channelSeq)}
+              onSelectAgent={(agentId) => selectTeamAgent(activeTab.sessionId, agentId)}
+            />
           )}
           {activeTab?.kind === 'file' && (
             <FileEditorView
@@ -588,6 +659,8 @@ export function App() {
           onSelectAgent={setSelectedAgentId}
           planModePending={planModePending}
           onSetPlanMode={setPlanMode}
+          todos={todos}
+          todoReadOnly={todoReadOnly}
           onTaskOutput={(taskId) => {
             setTaskOutput({ taskId });
             void window.kimiDesktop.task.output(taskId, 200_000, snapshot.activeSessionId).then((output) => setTaskOutput({ taskId, output }));
@@ -620,6 +693,21 @@ export function App() {
       {snapshot.loading && <div className="loading-line" />}
     </div>
   );
+}
+
+function teamSeenStorageKey(workspaceRoot: string): string {
+  return `${workbenchStorageKey(workspaceRoot)}.team-seen`;
+}
+
+function readSeenTeamSeqs(key: string): Record<string, number> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, unknown>;
+    return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, number] => (
+      Number.isSafeInteger(entry[1]) && (entry[1] as number) >= 0
+    )));
+  } catch {
+    return {};
+  }
 }
 
 function rendererError(error: unknown, fallbackCode: string): RendererError {

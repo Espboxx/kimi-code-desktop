@@ -142,6 +142,15 @@ export interface RetryOrigin {
   readonly trigger?: string;
 }
 
+export interface TeamMessageOrigin {
+  readonly kind: 'team_message';
+  readonly teamId: string;
+  readonly channelId: string;
+  readonly fromSeq: number;
+  readonly toSeq: number;
+  readonly messageIds: readonly string[];
+}
+
 export type PromptOrigin =
   | UserPromptOrigin
   | SkillActivationOrigin
@@ -155,7 +164,8 @@ export type PromptOrigin =
   | CronJobOrigin
   | CronMissedOrigin
   | HookResultOrigin
-  | RetryOrigin;
+  | RetryOrigin
+  | TeamMessageOrigin;
 
 export type GoalStatus = 'active' | 'paused' | 'blocked' | 'complete';
 export type GoalActor = 'user' | 'model' | 'runtime' | 'system';
@@ -1108,6 +1118,15 @@ export const retryOriginSchema = z.object({
   trigger: z.string().optional(),
 }) satisfies z.ZodType<RetryOrigin>;
 
+export const teamMessageOriginSchema = z.object({
+  kind: z.literal('team_message'),
+  teamId: z.string(),
+  channelId: z.string(),
+  fromSeq: z.number(),
+  toSeq: z.number(),
+  messageIds: z.array(z.string()),
+}) satisfies z.ZodType<TeamMessageOrigin>;
+
 export const promptOriginSchema = z.discriminatedUnion('kind', [
   userPromptOriginSchema,
   skillActivationOriginSchema,
@@ -1122,6 +1141,7 @@ export const promptOriginSchema = z.discriminatedUnion('kind', [
   cronMissedOriginSchema,
   hookResultOriginSchema,
   retryOriginSchema,
+  teamMessageOriginSchema,
 ]) satisfies z.ZodType<PromptOrigin>;
 
 export const goalStatusSchema = z.enum(['active', 'paused', 'blocked', 'complete']) satisfies z.ZodType<GoalStatus>;

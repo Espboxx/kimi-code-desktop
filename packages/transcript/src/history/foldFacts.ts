@@ -139,7 +139,12 @@ function isVisibleTurnOrigin(origin: unknown): boolean {
   if (kind === 'skill_activation' || kind === 'plugin_command') {
     return (origin as { trigger?: unknown } | undefined)?.trigger === 'user-slash';
   }
-  if (kind === 'injection' || kind === 'retry' || kind === 'compaction_summary') return false;
+  if (
+    kind === 'injection' ||
+    kind === 'retry' ||
+    kind === 'compaction_summary' ||
+    kind === 'team_message'
+  ) return false;
   // user / cron / task / hook / shell_command / unknown kinds open visible turns.
   return true;
 }

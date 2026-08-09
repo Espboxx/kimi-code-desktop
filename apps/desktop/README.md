@@ -8,30 +8,43 @@ configuration secrets, or direct filesystem access.
 
 The desktop workbench provides the workspace tree, persisted Kimi sessions,
 the transcript timeline, native subagent and swarm activity, plan and goal
-state, background tasks, context controls, Git changes, a session shell,
+state, a fixed TodoList, background tasks, context controls, Team channels,
 extensions, MCP management, authentication, configuration, and diagnostics.
 It consumes `@moonshot-ai/kimi-code-sdk` and `@moonshot-ai/transcript`; it does
 not embed `dist-web` or import `agent-core-v2` directly.
 
 ## Workbench
 
-The central editor group keeps session, workspace file, and Git diff tabs in a
+The central editor group keeps session, workspace file, Git diff, and Team tabs in a
 single MRU list. Workspace files use the locally bundled Monaco Editor with
 manual save, search, undo, theme synchronization, and persisted tab/view state.
 Use `Ctrl+S` to save, `Ctrl+W` to close the active tab, and `Ctrl+Tab` to move
 through recent tabs. Closing a dirty tab or the application requires an
 explicit save, discard, or cancel decision.
 
-Explorer decorations aggregate Git state through directories. The Changes
-panel separates merge, staged, and working-tree changes and preserves the
-directory hierarchy. Opening a staged entry compares `HEAD` to the index;
-opening a working entry compares the index to the worktree. The raw patch view
-remains available from each change row.
+Explorer decorations aggregate Git state through directories. The former
+bottom Changes, raw Diff, Session Shell, and Events panel is not mounted; Git
+diff tabs saved by earlier builds can still be restored.
 
 Editing is limited to existing UTF-8 regular files inside the workspace, up to
 2 MiB. Symlinks, path traversal, binary files, and oversized files are read
 only. Saves use optimistic content versions and atomic replacement; external
 changes reload clean tabs or surface an explicit conflict for dirty tabs.
+
+## Experimental Team Mode
+
+Set `KIMI_CODE_EXPERIMENTAL_TEAM_COLLABORATION=1` before launching Desktop to
+enable session-scoped Team collaboration. The first Swarm creates one Team and
+the `general` channel. Its Team tab opens in the background, shows live members,
+messages, nested assignments, unread counts, and running or failed badges, and
+does not steal focus from an editor or conversation. Closing the tab only
+closes the view.
+
+In Team Mode, `AgentSwarm` launches work without blocking the leader. Agents
+coordinate through `TeamSend`, inspect work through `TeamStatus`, and wait
+without polling through `TeamWait`. User messages sent from the Team page keep
+the same idempotency key when retried after a failure. Team data is restored
+from its session log and remains separate from the transcript replica.
 
 ## Run
 

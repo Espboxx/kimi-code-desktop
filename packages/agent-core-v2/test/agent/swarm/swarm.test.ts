@@ -40,6 +40,8 @@ import { IFileSystemStorageService } from '#/persistence/interface/storage';
 import { AGENT_WIRE_RECORD_KEY, type WireRecord } from '#/wire/record';
 import { type DomainEvent, IEventBus } from '#/app/event/eventBus';
 import { EventBusService } from '#/app/event/eventBusService';
+import type { ISessionCollaborationService } from '#/features/collaboration/collaboration';
+import { TEAM_COLLABORATION_FLAG_ID } from '#/features/collaboration/flag';
 
 import { stubContextMemory } from '../contextMemory/stubs';
 import { executeTool } from '../../tools/fixtures/execute-tool';
@@ -82,7 +84,18 @@ function mockSwarmHost({
   readonly getSwarmItem?: (...args: any[]) => any;
 } = {}) {
   return {
-    swarmService: { _serviceBrand: undefined, getSwarmItem, run, cancel: vi.fn() },
+    swarmService: {
+      _serviceBrand: undefined,
+      getSwarmItem,
+      launch: ((args) => ({
+        batchId: 'test-swarm-batch',
+        accepted: args.tasks,
+        completion: run(args),
+      })) as ISessionSwarmService['launch'],
+      run,
+      cancel: vi.fn(),
+      settle: async () => {},
+    },
     callerAgentId: 'main',
   };
 }
@@ -182,6 +195,7 @@ describe('AgentSwarmService', () => {
       getSwarmItem: async () => undefined,
       run: async () => [],
       cancel: () => {},
+      settle: async () => {},
     });
     executorEvents = stubToolExecutorEvents();
     permissionGateRan = false;
@@ -463,6 +477,107 @@ describe('AgentSwarmTool', () => {
     if (execution.isError === true) throw new Error('expected a successful execution');
     expect(execution.approvalRule).toBe('AgentSwarm');
     expect(execution.matchesRule).toBeUndefined();
+  });
+
+  it('returns a durable launch receipt without waiting when Team Mode is enabled', async () => {
+    let settleCompletion: ((results: readonly SessionSwarmRunResult<unknown>[]) => void) | undefined;
+    const completion = new Promise<readonly SessionSwarmRunResult<unknown>[]>((resolve) => {
+      settleCompletion = resolve;
+    });
+    const host = mockSwarmHost();
+    const launch = vi.fn((args: Parameters<ISessionSwarmService['launch']>[0]) => ({
+      batchId: 'scheduler-batch',
+      accepted: args.tasks,
+      completion,
+    }));
+    host.swarmService.launch = launch as ISessionSwarmService['launch'];
+    const collaboration = {
+      _serviceBrand: undefined,
+      prepareSwarmBatch: vi.fn().mockResolvedValue({
+        batchId: 'team-batch',
+        assignments: [
+          { id: 'assignment-1', description: 'Review files #1 (coder)' },
+          { id: 'assignment-2', description: 'Review files #2 (coder)' },
+        ],
+      }),
+      bindAssignment: vi.fn(),
+      settleAssignment: vi.fn(),
+      settleBatch: vi.fn(),
+    } as unknown as ISessionCollaborationService;
+    const tool = new AgentSwarmTool(
+      host.swarmService,
+      makeAgentScopeContext({ agentId: host.callerAgentId, agentScope: '' }),
+      mockSwarmMode(),
+      stubConfig(),
+      stubFlag((id) => id === TEAM_COLLABORATION_FLAG_ID),
+      stubSwarmCatalog(),
+      stubCallerProfile(),
+      stubModelCatalog(),
+      collaboration,
+    );
+
+    const result = await executeTool(tool, context({
+      description: 'Review files',
+      prompt_template: 'Review {{item}}',
+      items: ['src/a.ts', 'src/b.ts'],
+    }));
+
+    expect(launch).toHaveBeenCalledOnce();
+    expect(host.swarmService.run).not.toHaveBeenCalled();
+    expect(result.output).toContain('<agent_swarm_started>');
+    expect(result.output).toContain('<batch_id>team-batch</batch_id>');
+    expect(result.output).toContain('Use TeamStatus, TeamSend, and TeamWait');
+    settleCompletion?.([]);
+    await Promise.resolve();
+  });
+
+  it('marks the durable Team batch failed when scheduler admission throws', async () => {
+    const host = mockSwarmHost();
+    host.swarmService.launch = vi.fn(() => {
+      throw new Error('scheduler unavailable');
+    }) as ISessionSwarmService['launch'];
+    const collaboration = {
+      _serviceBrand: undefined,
+      prepareSwarmBatch: vi.fn().mockResolvedValue({
+        batchId: 'team-batch',
+        assignments: [
+          { id: 'assignment-1', description: 'Review files #1 (coder)' },
+          { id: 'assignment-2', description: 'Review files #2 (coder)' },
+        ],
+      }),
+      bindAssignment: vi.fn(),
+      settleAssignment: vi.fn().mockResolvedValue(undefined),
+      settleBatch: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ISessionCollaborationService;
+    const tool = new AgentSwarmTool(
+      host.swarmService,
+      makeAgentScopeContext({ agentId: host.callerAgentId, agentScope: '' }),
+      mockSwarmMode(),
+      stubConfig(),
+      stubFlag((id) => id === TEAM_COLLABORATION_FLAG_ID),
+      stubSwarmCatalog(),
+      stubCallerProfile(),
+      stubModelCatalog(),
+      collaboration,
+    );
+
+    const result = await executeTool(tool, context({
+      description: 'Review files',
+      prompt_template: 'Review {{item}}',
+      items: ['src/a.ts', 'src/b.ts'],
+    }));
+
+    expect(result).toMatchObject({ isError: true, output: 'scheduler unavailable' });
+    expect(collaboration.settleAssignment).toHaveBeenCalledTimes(2);
+    expect(collaboration.settleAssignment).toHaveBeenCalledWith(expect.objectContaining({
+      assignmentId: 'assignment-1',
+      status: 'failed',
+      error: 'scheduler unavailable',
+    }));
+    expect(collaboration.settleBatch).toHaveBeenCalledWith({
+      batchId: 'team-batch',
+      status: 'failed',
+    });
   });
 
   it('description states the enforced input requirements', () => {

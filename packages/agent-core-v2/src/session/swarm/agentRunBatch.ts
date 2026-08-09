@@ -27,6 +27,7 @@ export interface AgentRunAttemptOptions {
   readonly signal: AbortSignal;
   readonly onReady?: () => void;
   readonly suppressRateLimitFailureEvent?: boolean;
+  readonly onAgentBound?: (agentId: string) => Promise<void>;
 }
 
 export interface AgentSpawnAttemptOptions extends AgentRunAttemptOptions {
@@ -100,8 +101,9 @@ type ActiveAttempt<T> = {
   timedOut: boolean;
 };
 
-export type AgentRunBatchOptions = {
+export type AgentRunBatchOptions<T = unknown> = {
   readonly maxConcurrency?: number;
+  readonly onResult?: (result: AgentRunResult<T>) => void;
 };
 
 export class AgentRunBatch<T> {
@@ -132,9 +134,9 @@ export class AgentRunBatch<T> {
   constructor(
     private readonly launcher: AgentRunBatchLauncher,
     tasks: readonly QueuedAgentRunTask<T>[],
-    options: AgentRunBatchOptions = {},
+    private readonly options: AgentRunBatchOptions<T> = {},
   ) {
-    this.maxConcurrency = options.maxConcurrency;
+    this.maxConcurrency = this.options.maxConcurrency;
     this.states = tasks.map((task, index) => ({
       index,
       task,
@@ -290,6 +292,7 @@ export class AgentRunBatch<T> {
         this.markAttemptReady(attempt);
       },
       suppressRateLimitFailureEvent: true,
+      onAgentBound: task.onAgentBound,
     };
 
     let handle: AgentRunAttemptHandle;
@@ -370,15 +373,15 @@ export class AgentRunBatch<T> {
     if (this.finished) return;
 
     if ('status' in outcome) {
-      this.results[attempt.state.index] = outcome;
+      this.recordResult(attempt.state.index, outcome);
     } else if (this.isOnlyUnfinishedTask(attempt.state)) {
-      this.results[attempt.state.index] = {
+      this.recordResult(attempt.state.index, {
         task: attempt.state.task,
         agentId: outcome.agentId,
         status: 'failed',
         state: 'started',
         error: outcome.error,
-      };
+      });
     } else {
       this.requeueRateLimited(attempt, outcome.agentId);
     }
@@ -388,12 +391,12 @@ export class AgentRunBatch<T> {
   private handleAttemptError(attempt: ActiveAttempt<T>, error: unknown): void {
     if (!this.releaseAttempt(attempt)) return;
     if (this.finished) return;
-    this.results[attempt.state.index] = {
+    this.recordResult(attempt.state.index, {
       task: attempt.state.task,
       agentId: attempt.state.agentId,
       status: 'failed',
       error: error instanceof Error ? error.message : String(error),
-    };
+    });
     this.schedule();
   }
 
@@ -533,8 +536,7 @@ export class AgentRunBatch<T> {
   private finishWithUserCancellation(): void {
     if (this.finished) return;
 
-    this.finish(
-      this.states.map((state) => {
+    const results: Array<AgentRunResult<T>> = this.states.map((state): AgentRunResult<T> => {
         const result = this.results[state.index];
         if (result !== undefined) return result;
 
@@ -556,8 +558,17 @@ export class AgentRunBatch<T> {
           error:
             'The user manually interrupted this subagent batch before this subagent was started.',
         };
-      }),
-    );
+      });
+    results.forEach((result, index) => {
+      if (this.results[index] === undefined) this.recordResult(index, result);
+    });
+    this.finish(results);
+  }
+
+  private recordResult(index: number, result: AgentRunResult<T>): void {
+    if (this.results[index] !== undefined) return;
+    this.results[index] = result;
+    this.options.onResult?.(result);
   }
 
   private finish(results: Array<AgentRunResult<T>>): void {
@@ -653,4 +664,3 @@ export function resolveSwarmMaxConcurrency(
   }
   return value;
 }
-

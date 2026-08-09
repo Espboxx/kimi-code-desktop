@@ -6,11 +6,13 @@ import {
   activateWorkbenchTab,
   closeWorkbenchTab,
   diffTab,
+  ensureWorkbenchTab,
   fileTab,
   openWorkbenchTab,
   restoreWorkbenchState,
   serializeWorkbenchState,
   sessionTab,
+  teamTab,
 } from './workbench-tabs';
 
 describe('workbench tab state', () => {
@@ -35,6 +37,18 @@ describe('workbench tab state', () => {
     const restored = restoreWorkbenchState(serialized, new Set());
     expect(restored.tabs.map((tab) => tab.kind)).toEqual(['file', 'diff']);
     expect(restored.tabs[0]).toMatchObject({ kind: 'file', loading: true, dirty: false });
+  });
+
+  it('opens Team tabs in the background and restores only existing teams', () => {
+    let state = openWorkbenchTab({ tabs: [], recentIds: [] }, fileTab('src/main.ts'));
+    state = ensureWorkbenchTab(state, teamTab('s1'));
+    expect(state.activeId).toBe('file:src/main.ts');
+    expect(state.tabs.at(-1)).toEqual(teamTab('s1'));
+
+    const serialized = serializeWorkbenchState(state);
+    expect(restoreWorkbenchState(serialized, new Set(['s1']), new Set()).tabs).toHaveLength(1);
+    const restored = restoreWorkbenchState(serialized, new Set(['s1']), new Set(['s1']));
+    expect(restored.tabs.map((tab) => tab.id)).toEqual(['file:src/main.ts', 'team:s1']);
   });
 });
 

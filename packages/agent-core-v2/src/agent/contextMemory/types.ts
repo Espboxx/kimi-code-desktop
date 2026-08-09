@@ -91,6 +91,15 @@ export interface RetryOrigin {
   readonly trigger?: string;
 }
 
+export interface TeamMessageOrigin {
+  readonly kind: 'team_message';
+  readonly teamId: string;
+  readonly channelId: string;
+  readonly fromSeq: number;
+  readonly toSeq: number;
+  readonly messageIds: readonly string[];
+}
+
 export type PromptOrigin =
   | UserPromptOrigin
   | SkillActivationOrigin
@@ -103,7 +112,8 @@ export type PromptOrigin =
   | CronJobOrigin
   | CronMissedOrigin
   | HookResultOrigin
-  | RetryOrigin;
+  | RetryOrigin
+  | TeamMessageOrigin;
 
 export type ContextMessage = Message & {
   readonly id?: string;

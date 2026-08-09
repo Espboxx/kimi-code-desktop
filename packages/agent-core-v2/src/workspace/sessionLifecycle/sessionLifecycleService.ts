@@ -835,7 +835,12 @@ export class SessionLifecycleService extends Disposable implements ISessionLifec
   ): Promise<void> {
     for (const entry of entries) {
       const rel = relBase === '' ? entry.name : `${relBase}/${entry.name}`;
-      if (rel === 'state.json' || rel === 'logs' || entry.name === AGENT_WIRE_RECORD_KEY) {
+      if (
+        rel === 'state.json' ||
+        rel === 'logs' ||
+        rel === 'collaboration' ||
+        entry.name === AGENT_WIRE_RECORD_KEY
+      ) {
         continue;
       }
       if (entry.isSymbolicLink === true) continue;
