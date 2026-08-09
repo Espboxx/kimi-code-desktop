@@ -15,7 +15,6 @@ import {
   RefreshCw,
   RotateCcw,
   Trash2,
-  Users,
   X,
 } from 'lucide-react';
 
@@ -43,13 +42,11 @@ interface SidebarProps {
   readonly openSessionIds: ReadonlySet<string>;
   readonly sessionStatuses: Readonly<Record<string, SessionStatusSnapshot>>;
   readonly pendingInteractionCounts: Readonly<Record<string, number>>;
-  readonly teamBadges?: Readonly<Record<string, { readonly unread: number; readonly running: number; readonly failed: number }>>;
   readonly onChooseWorkspace: () => void;
   readonly onRefreshWorkspace: () => void;
   readonly onOpenFile: (path: string) => void;
   readonly onNewSession: () => void;
   readonly onSelectSession: (sessionId: string) => void;
-  readonly onOpenTeam: (sessionId: string) => void;
   readonly onReloadSession: (sessionId: string) => void;
   readonly onSessionAction: (session: SessionListItem, action: SessionAction) => void;
 }
@@ -102,7 +99,6 @@ export function Sidebar(props: SidebarProps) {
           {props.sessions.length === 0 ? <div className="sidebar-empty">当前工作区暂无会话</div> : props.sessions.map((session) => {
             const status = props.sessionStatuses[session.id];
             const pending = props.pendingInteractionCounts[session.id] ?? 0;
-            const teamBadge = props.teamBadges?.[session.id];
             return (
               <div className={classNames(
                 'session-row',
@@ -117,13 +113,9 @@ export function Sidebar(props: SidebarProps) {
                   </span>
                   {status?.busy === true && <span className="session-state-label">Working</span>}
                   {pending > 0 && <span className="session-pending" title={`${pending} 个待处理交互`}>{pending}</span>}
-                  {(teamBadge?.running ?? 0) > 0 && <span className="session-team-running" title={`${teamBadge?.running} 个团队任务运行中`}>T{teamBadge?.running}</span>}
-                  {(teamBadge?.failed ?? 0) > 0 && <span className="session-team-failed" title={`${teamBadge?.failed} 个团队任务失败`}>!{teamBadge?.failed}</span>}
-                  {(teamBadge?.unread ?? 0) > 0 && <span className="session-team-unread" title={`${teamBadge?.unread} 条未读团队消息`}>{teamBadge?.unread}</span>}
                 </button>
                 {session.id === props.activeSessionId && (
                   <div className="session-actions">
-                    {teamBadge !== undefined && <button onClick={() => props.onOpenTeam(session.id)} title="打开团队频道"><Users size={13} /></button>}
                     <button onClick={() => props.onReloadSession(session.id)} title="重载会话"><RotateCcw size={13} /></button>
                     <button onClick={() => props.onSessionAction(session, 'rename')} title="重命名"><Pencil size={13} /></button>
                     <button onClick={() => props.onSessionAction(session, 'fork')} title="分叉"><GitFork size={13} /></button>

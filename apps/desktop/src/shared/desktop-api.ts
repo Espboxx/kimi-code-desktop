@@ -5,6 +5,7 @@ import type {
 } from '@moonshot-ai/transcript';
 import type { TeamMessage, TeamOperation, TeamSnapshot } from './team-types';
 import type { TeamStateSnapshot } from './team-state';
+import type { DesktopSurface } from './team-session';
 
 export type {
   TeamAssignment,
@@ -17,6 +18,7 @@ export type {
   TeamSnapshot,
 } from './team-types';
 export type { TeamStateSnapshot } from './team-state';
+export type { DesktopSurface } from './team-session';
 
 export type TodoStatus = 'pending' | 'in_progress' | 'done';
 export interface TodoItem {
@@ -127,6 +129,21 @@ export interface SessionListItem {
   readonly active: boolean;
   readonly selected: boolean;
   readonly lastTurnReason?: 'completed' | 'cancelled' | 'failed';
+  readonly surface: DesktopSurface;
+}
+
+export interface DesktopSessionCreateOptions {
+  readonly model?: string;
+  readonly thinking?: string;
+  readonly permission?: 'manual' | 'auto' | 'yolo';
+  readonly planMode?: boolean;
+  readonly additionalDirs?: readonly string[];
+  readonly surface?: DesktopSurface;
+}
+
+export interface TeamSubmitResult {
+  readonly message: TeamMessage;
+  readonly wake: 'swarm' | 'steer';
 }
 
 export interface TokenUsageSnapshot {
@@ -301,7 +318,7 @@ export interface KimiDesktopApi {
   };
   readonly session: {
     list(): Promise<readonly SessionListItem[]>;
-    create(options?: unknown): Promise<string>;
+    create(options?: DesktopSessionCreateOptions): Promise<string>;
     select(sessionId: string): Promise<void>;
     resume(sessionId: string): Promise<void>;
     reload(sessionId: string): Promise<void>;
@@ -368,10 +385,12 @@ export interface KimiDesktopApi {
     ): Promise<void>;
   };
   readonly team: {
+    ensure(sessionId: string): Promise<TeamSnapshot>;
     snapshot(sessionId: string): Promise<TeamSnapshot>;
     operations(sessionId: string, afterSeq: number, limit?: number): Promise<readonly TeamOperation[]>;
     history(sessionId: string, beforeChannelSeq?: number, limit?: number): Promise<readonly TeamMessage[]>;
     send(sessionId: string, body: string, clientMessageId: string): Promise<TeamMessage>;
+    submit(sessionId: string, body: string, clientMessageId: string): Promise<TeamSubmitResult>;
   };
   readonly goal: {
     get(sessionId?: string): Promise<unknown>;
@@ -489,10 +508,12 @@ export function createKimiDesktopApi(invoke: Invoke, subscribe: KimiDesktopApi['
         call('task', 'replaceTodos', { sessionId, expected, todos }),
     },
     team: {
+      ensure: (sessionId) => call('team', 'ensure', { sessionId }),
       snapshot: (sessionId) => call('team', 'snapshot', { sessionId }),
       operations: (sessionId, afterSeq, limit) => call('team', 'operations', { sessionId, afterSeq, limit }),
       history: (sessionId, beforeChannelSeq, limit) => call('team', 'history', { sessionId, beforeChannelSeq, limit }),
       send: (sessionId, body, clientMessageId) => call('team', 'send', { sessionId, body, clientMessageId }),
+      submit: (sessionId, body, clientMessageId) => call('team', 'submit', { sessionId, body, clientMessageId }),
     },
     goal: {
       get: (sessionId) => call('goal', 'get', { sessionId }),

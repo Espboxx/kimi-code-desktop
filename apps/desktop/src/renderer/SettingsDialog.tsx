@@ -24,7 +24,11 @@ import {
 } from 'lucide-react';
 
 import type { DesktopSnapshot, JsonRecord } from '../shared/desktop-api';
-import { experimentalFeatureSourceLabel, localizeExperimentalFeature } from './experimental-features';
+import {
+  experimentalFeatureSourceLabel,
+  isVisibleDesktopExperimentalFeature,
+  localizeExperimentalFeature,
+} from './experimental-features';
 import { array, bool, classNames, formatJson, number, record, text } from './ui-utils';
 
 type SettingsTab = 'account' | 'models' | 'mcp' | 'extensions' | 'workspace' | 'diagnostics';
@@ -349,6 +353,7 @@ function DiagnosticsSettings({ snapshot }: { readonly snapshot: DesktopSnapshot 
       setUpdatingFeature(undefined);
     }
   };
+  const visibleFeatures = snapshot.config.experimentalFeatures.filter(isVisibleDesktopExperimentalFeature);
   return (
     <SettingsPage title="诊断与实验特性" description="启动配置、校验结果与原始事件均已脱敏。">
       <section className="settings-section">
@@ -359,7 +364,7 @@ function DiagnosticsSettings({ snapshot }: { readonly snapshot: DesktopSnapshot 
       <section className="settings-section">
         <h3><FlaskConical size={14} />实验特性</h3>
         <div className="feature-list">
-          {snapshot.config.experimentalFeatures.map((raw, index) => {
+          {visibleFeatures.map((raw, index) => {
             const feature = record(raw);
             const id = text(feature['id'], `feature-${index}`);
             const enabled = bool(feature['enabled']);
@@ -383,7 +388,7 @@ function DiagnosticsSettings({ snapshot }: { readonly snapshot: DesktopSnapshot 
               </div>
             );
           })}
-          {snapshot.config.experimentalFeatures.length === 0 && <div className="settings-empty">没有实验特性</div>}
+          {visibleFeatures.length === 0 && <div className="settings-empty">没有实验特性</div>}
         </div>
         {featureError.length > 0 && <div className="form-error"><CircleAlert size={13} />{featureError}</div>}
       </section>

@@ -19,14 +19,18 @@ Kimi Code Desktop 是一个 Windows 优先的 Electron 桌面工作台，把 Kim
 
 ![Kimi Code Desktop 完整工作台](docs/media/desktop-workbench.png)
 
+### 独立 Team 工作台
+
+![Kimi Code Desktop 独立 Team 工作台](docs/media/desktop-team-workbench.png)
+
 截图由隔离的本地 E2E fixture 生成，已移除本机路径、真实会话和凭据信息。
 
 ## 主要功能
 
 - **会话工作台**：持久化 Kimi 会话、流式对话时间线、审批与提问、上下文状态、Plan、Goal、TodoList 和后台任务集中展示。
 - **代码与 Git**：工作区文件树、Git 状态聚合、Git diff 标签页，以及内置 Monaco Editor；支持保存、搜索、撤销和脏文件关闭确认。
-- **Agent 可观测性**：查看主 Agent、子 Agent、Swarm 的运行、完成、失败和交互状态。
-- **Team Mode**：实验性的会话级团队频道、成员状态、嵌套任务、未读计数和实时协作消息。
+- **Agent 可观测性**：查看主 Agent、子 Agent 和并行任务的运行、完成、失败与交互状态。
+- **独立 Team 工作台**：在顶层“团队”面板中管理多 Agent 任务、频道、成员、嵌套分工、未读消息和 Agent 详情，不再与普通会话混在一起。
 - **配置与扩展**：在 Desktop 内管理登录、模型、MCP、Skills、Plugins、诊断和工作区信任。
 - **安全边界**：渲染进程启用 sandbox 和 context isolation，只能通过经过校验的 `window.kimiDesktop` IPC 调用主进程能力。
 
@@ -34,13 +38,13 @@ Kimi Code Desktop 是一个 Windows 优先的 Electron 桌面工作台，把 Kim
 
 Windows x64 便携版由 `desktop-v*` 标签触发的 GitHub Actions 构建。前往本仓库的 [GitHub Releases](../../releases)，下载：
 
-- `Kimi-Code-Desktop-0.1.1-x64-portable.exe`
-- `Kimi-Code-Desktop-0.1.1-x64-portable.exe.sha256`
+- `Kimi-Code-Desktop-0.2.0-x64-portable.exe`
+- `Kimi-Code-Desktop-0.2.0-x64-portable.exe.sha256`
 
 下载后可在 PowerShell 校验 SHA256：
 
 ```powershell
-$exe = ".\Kimi-Code-Desktop-0.1.1-x64-portable.exe"
+$exe = ".\Kimi-Code-Desktop-0.2.0-x64-portable.exe"
 $expected = (Get-Content "$exe.sha256").Split()[0]
 $actual = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
 $actual -eq $expected
@@ -60,16 +64,16 @@ $actual -eq $expected
 
 选择结果保存在本地并在下次启动时恢复；如果目录已被移动或删除，应用会安全回到欢迎页。`KIMI_DESKTOP_WORKSPACE` 仅用于需要显式覆盖启动目录的开发或自动化场景。
 
-## 实验性 Team Mode
+## 独立 Team 工作台
 
-Team Mode 默认关闭。在启动 Desktop 前设置实验开关：
+Team 是 Desktop 的独立顶层工作台，无需手动设置实验开关：
 
-```powershell
-$env:KIMI_CODE_EXPERIMENTAL_TEAM_COLLABORATION = "1"
-& ".\Kimi-Code-Desktop-0.1.1-x64-portable.exe"
-```
+1. 点击窗口顶部的“团队”。
+2. 点击“新建团队任务”，填写目标、约束和验收标准。
+3. 选择沿用当前默认权限，或仅为该任务使用 YOLO。
+4. 在 `general` 频道跟进工作；点击成员或任务分配可打开对应 Agent 详情。
 
-首次进入 Session Swarm 后会创建会话级 Team 和 `general` 频道。Agent 可通过 `TeamSend`、`TeamStatus` 和 `TeamWait` 协作；团队日志与普通对话时间线分开恢复。该功能仍处于实验阶段，数据格式和交互可能调整。
+每个团队任务使用单独的持久化会话。用户消息写入频道后会主动唤醒组长：空闲组长开始协作回合，正在工作的组长则接收 steer 更新。组长会优先拆分两个或更多相互独立的工作流，成员通过 `TeamSend`、`TeamStatus` 和 `TeamWait` 共享进展、阻塞和交付结果。文件读写记录仍可点击打开目标文件；编辑操作直接显示操作前后差异。旧版本已经产生 Team 数据的会话会在恢复时安全迁移到团队列表。
 
 ## 架构边界
 

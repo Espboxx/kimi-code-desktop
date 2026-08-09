@@ -16,6 +16,7 @@ import { SessionCollaborationService } from '#/features/collaboration/collaborat
 import { CollaborationDeliveryModel, teamDeliveryAdvance } from '#/features/collaboration/deliveryOps';
 import { TEAM_COLLABORATION_FLAG_ID } from '#/features/collaboration/flag';
 import { TeamStatusTool } from '#/features/collaboration/tools/teamStatus';
+import { TeamWaitTool } from '#/features/collaboration/tools/teamWait';
 import { AppendLogStore } from '#/persistence/backends/node-fs/appendLogStore';
 import { InMemoryStorageService } from '#/persistence/backends/memory/inMemoryStorageService';
 import { IAppendLogStore } from '#/persistence/interface/appendLogStore';
@@ -77,6 +78,21 @@ afterEach(() => {
 });
 
 describe('SessionCollaborationService', () => {
+  it('initializes one durable empty team before the first swarm batch', async () => {
+    const { service } = buildService();
+
+    const [first, second] = await Promise.all([service.ensureTeam(), service.ensureTeam()]);
+
+    expect(first.team).toMatchObject({ sessionId: 's1', leaderAgentId: 'main', channelId: 'general' });
+    expect(second.team).toEqual(first.team);
+    expect(first.members).toEqual([
+      expect.objectContaining({ agentId: 'main', role: 'leader', joinedSeq: 1 }),
+    ]);
+    expect((await service.operations({ afterSeq: 0 })).filter(
+      (operation) => operation.type === 'team.created',
+    )).toHaveLength(1);
+  });
+
   it('serializes concurrent operations and isolates message idempotency by actor', async () => {
     const { service } = buildService();
     const [receipt] = await Promise.all([
@@ -171,6 +187,27 @@ describe('SessionCollaborationService', () => {
       }),
     );
     expect((await second.service.history()).at(-1)).toMatchObject({ body: 'New direction' });
+  });
+
+  it('bootstraps members with an explicit communication and handoff protocol', async () => {
+    const { service } = buildService();
+    await service.prepareSwarmBatch({
+      callerAgentId: 'main',
+      assignments: [{ assignmentId: 'a-protocol', profileName: 'coder', description: 'Implement protocol' }],
+    });
+    await service.bindAssignment({
+      assignmentId: 'a-protocol',
+      agentId: 'agent-protocol',
+      parentAgentId: 'main',
+    });
+
+    const delivery = await service.delivery({ agentId: 'agent-protocol', afterSeq: 0 });
+
+    expect(delivery?.bootstrap).toContain('call TeamStatus');
+    expect(delivery?.bootstrap).toContain('TeamSend');
+    expect(delivery?.bootstrap).toContain('Do not duplicate an active teammate assignment');
+    expect(delivery?.bootstrap).toContain('use TeamWait');
+    expect(delivery?.bootstrap).toContain('Before your final response');
   });
 
   it('enforces feature and burst limits with structured errors', async () => {
@@ -287,5 +324,31 @@ describe('TeamStatus tool', () => {
         status: 'completed',
       }),
     })]);
+  });
+});
+
+describe('TeamWait tool', () => {
+  it('returns the message body so teammates can act on channel communication', async () => {
+    const { service } = buildService();
+    await service.ensureTeam();
+    const execution = new TeamWaitTool(service).resolveExecution({ timeout_seconds: 1 });
+    if (execution.isError === true) throw new Error(JSON.stringify(execution.output));
+    const waiting = execution.execute({
+      turnId: 1,
+      toolCallId: 'team-wait-1',
+      signal: new AbortController().signal,
+    });
+    await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+    await service.sendUserMessage({ body: '@agent-1 Please review the failing test', clientMessageId: 'wait-message-1' });
+
+    const result = await waiting;
+    if (typeof result.output !== 'string') throw new Error('TeamWait must return JSON text');
+    expect(JSON.parse(result.output)).toMatchObject({
+      timeout: false,
+      operation: {
+        type: 'message.sent',
+        message: { body: '@agent-1 Please review the failing test' },
+      },
+    });
   });
 });

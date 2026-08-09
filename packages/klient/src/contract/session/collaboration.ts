@@ -122,6 +122,7 @@ export const teamSnapshotSchema = z.object({
 export type TeamSnapshot = z.infer<typeof teamSnapshotSchema>;
 
 export const sessionCollaborationContract = {
+  ensureTeam: { input: z.tuple([]), output: teamSnapshotSchema },
   snapshot: { input: z.tuple([]), output: teamSnapshotSchema },
   operations: {
     input: z.tuple([z.object({

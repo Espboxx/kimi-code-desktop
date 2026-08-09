@@ -76,12 +76,10 @@ export class AgentSwarmService extends Service implements IAgentSwarmService {
   enter(trigger: SwarmModeTrigger): void {
     if (this.wire.getModel(SwarmModel) !== null) return;
     this.wire.dispatch(swarmEnter({ trigger }));
-    if (trigger !== 'tool') {
-      this.reminders.appendSystemReminder(SWARM_MODE_ENTER_REMINDER, {
-        kind: 'injection',
-        variant: 'swarm_mode',
-      });
-    }
+    this.reminders.appendSystemReminder(SWARM_MODE_ENTER_REMINDER, {
+      kind: 'injection',
+      variant: 'swarm_mode',
+    });
   }
 
   exit(): void {
@@ -92,7 +90,6 @@ export class AgentSwarmService extends Service implements IAgentSwarmService {
     const willPop =
       last?.origin?.kind === 'injection' && last.origin.variant === 'swarm_mode';
     this.wire.dispatch(swarmExit({}));
-    if (trigger === 'tool') return;
     if (willPop) {
       this.eventBus.publish({
         type: 'context.spliced',

@@ -21,7 +21,8 @@ export const ITeamWaitTool = createDecorator<ITeamWaitTool>('teamWaitTool');
 export class TeamWaitTool implements ITeamWaitTool {
   declare readonly _serviceBrand: undefined;
   readonly name = 'TeamWait' as const;
-  readonly description = 'Wait without polling for the next team message or assignment status change.';
+  readonly description =
+    'Wait without polling for the next team message or assignment status change and return the full operation.';
   readonly parameters = toInputJsonSchema(TeamWaitInputSchema);
 
   constructor(@ISessionCollaborationService private readonly collaboration: ISessionCollaborationService) {}
@@ -41,7 +42,7 @@ export class TeamWaitTool implements ITeamWaitTool {
         return {
           output: operation === undefined
             ? JSON.stringify({ timeout: true, afterSeq: snapshot.latestSeq })
-            : JSON.stringify({ timeout: false, seq: operation.seq, type: operation.type }),
+            : JSON.stringify({ timeout: false, operation }),
         };
       },
     };

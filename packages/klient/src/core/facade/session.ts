@@ -89,6 +89,7 @@ export interface SessionTodosFacade {
 }
 
 export interface SessionCollaborationFacade {
+  ensureTeam(): Promise<TeamSnapshot>;
   snapshot(): Promise<TeamSnapshot>;
   operations(input: { readonly afterSeq: number; readonly limit?: number }): Promise<readonly TeamOperation[]>;
   history(input?: { readonly beforeChannelSeq?: number; readonly limit?: number }): Promise<readonly TeamMessage[]>;
@@ -269,6 +270,8 @@ export function createSessionFacade(call: ScopedCaller, sessionId: string): Sess
     },
 
     collaboration: {
+      ensureTeam: () =>
+        call(scope, 'sessionCollaborationService', 'ensureTeam', []) as Promise<TeamSnapshot>,
       snapshot: () =>
         call(scope, 'sessionCollaborationService', 'snapshot', []) as Promise<TeamSnapshot>,
       operations: (input) =>

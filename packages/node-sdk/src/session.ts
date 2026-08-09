@@ -104,6 +104,7 @@ function todoRpc(rpc: SDKRpcClientBase): TodoRpcSurface {
 }
 
 interface TeamRpcSurface {
+  ensureTeam(input: { readonly sessionId: string }): Promise<TeamSnapshot>;
   getTeamSnapshot(input: { readonly sessionId: string }): Promise<TeamSnapshot>;
   getTeamOperations(input: {
     readonly sessionId: string;
@@ -129,6 +130,7 @@ interface TeamRpcSurface {
 function teamRpc(rpc: SDKRpcClientBase): TeamRpcSurface {
   const candidate = rpc as Partial<TeamRpcSurface>;
   if (
+    typeof candidate.ensureTeam !== 'function' ||
     typeof candidate.getTeamSnapshot !== 'function' ||
     typeof candidate.getTeamOperations !== 'function' ||
     typeof candidate.getTeamHistory !== 'function' ||
@@ -197,6 +199,11 @@ export class Session {
   onTodosChanged(listener: (todos: readonly TodoItem[]) => void): Unsubscribe {
     this.ensureOpen();
     return todoRpc(this.rpc).onTodosChanged({ sessionId: this.id }, listener);
+  }
+
+  async ensureTeam(): Promise<TeamSnapshot> {
+    this.ensureOpen();
+    return teamRpc(this.rpc).ensureTeam({ sessionId: this.id });
   }
 
   async getTeamSnapshot(): Promise<TeamSnapshot> {

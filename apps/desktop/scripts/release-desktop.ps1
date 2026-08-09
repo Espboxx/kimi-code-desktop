@@ -105,7 +105,8 @@ function Get-WorkspaceFingerprint {
       Where-Object {
         $_ -and
         $_ -notlike '* TO DO list.csv' -and
-        $_ -notmatch '(^|/)[.]tmp/'
+        $_ -notmatch '(^|/)[.]tmp/' -and
+        (Test-Path -LiteralPath (Join-Path $RepositoryRoot $_) -PathType Leaf)
       }
   )
   [System.Array]::Sort($relativePaths, [System.StringComparer]::Ordinal)

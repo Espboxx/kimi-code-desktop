@@ -20,7 +20,8 @@ export const ITeamSendTool = createDecorator<ITeamSendTool>('teamSendTool');
 export class TeamSendTool implements ITeamSendTool {
   declare readonly _serviceBrand: undefined;
   readonly name = 'TeamSend' as const;
-  readonly description = 'Send a message to the current session team general channel.';
+  readonly description =
+    'Send a plan, dependency, finding, blocker, or final handoff to the current session team general channel.';
   readonly parameters = toInputJsonSchema(TeamSendInputSchema);
   private readonly agentId: string;
 

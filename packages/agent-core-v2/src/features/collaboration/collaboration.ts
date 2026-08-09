@@ -26,6 +26,7 @@ export interface ISessionCollaborationService {
   readonly onDidOperate: Event<TeamOperation>;
 
   isEnabled(): boolean;
+  ensureTeam(): Promise<TeamSnapshot>;
   snapshot(): Promise<TeamSnapshot>;
   operations(input: { readonly afterSeq: number; readonly limit?: number }): Promise<readonly TeamOperation[]>;
   history(input?: { readonly beforeChannelSeq?: number; readonly limit?: number }): Promise<readonly TeamMessage[]>;

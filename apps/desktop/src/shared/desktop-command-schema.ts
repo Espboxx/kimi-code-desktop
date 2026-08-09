@@ -49,7 +49,7 @@ export const desktopCommandSchemas = {
 
   'session.list': empty,
   'session.create': z
-    .object({ model: nonEmptyString.optional(), thinking: nonEmptyString.optional(), permission: z.enum(['manual', 'auto', 'yolo']).optional(), planMode: z.boolean().optional(), additionalDirs: z.array(nonEmptyString).optional() })
+    .object({ model: nonEmptyString.optional(), thinking: nonEmptyString.optional(), permission: z.enum(['manual', 'auto', 'yolo']).optional(), planMode: z.boolean().optional(), additionalDirs: z.array(nonEmptyString).optional(), surface: z.enum(['chat', 'team']).optional() })
     .strict()
     .optional(),
   'session.select': z.object({ sessionId: nonEmptyString }).strict(),
@@ -115,6 +115,7 @@ export const desktopCommandSchemas = {
     todos: todoItems,
   }).strict(),
 
+  'team.ensure': z.object({ sessionId: nonEmptyString }).strict(),
   'team.snapshot': z.object({ sessionId: nonEmptyString }).strict(),
   'team.operations': z.object({
     sessionId: nonEmptyString,
@@ -127,6 +128,11 @@ export const desktopCommandSchemas = {
     limit: z.number().int().positive().max(200).optional(),
   }).strict(),
   'team.send': z.object({
+    sessionId: nonEmptyString,
+    body: z.string().min(1).max(8_192),
+    clientMessageId: nonEmptyString,
+  }).strict(),
+  'team.submit': z.object({
     sessionId: nonEmptyString,
     body: z.string().min(1).max(8_192),
     clientMessageId: nonEmptyString,

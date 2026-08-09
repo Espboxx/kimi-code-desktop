@@ -252,6 +252,15 @@ describe('AgentSwarmService', () => {
     expect(reminder?.type === 'text' ? reminder.text : '').toContain('never resume a busy member');
   });
 
+  it('injects the coordination reminder after an AgentSwarm tool enters swarm mode', () => {
+    ix.get(IAgentSwarmService).enter('tool');
+
+    const reminder = contextMemory.messages[0]?.content[0];
+    expect(reminder?.type).toBe('text');
+    expect(reminder?.type === 'text' ? reminder.text : '').toContain('coordinator and integrator');
+    expect(reminder?.type === 'text' ? reminder.text : '').toContain('use TeamWait instead of polling');
+  });
+
   it('dispatch persists enter/exit records and replay rebuilds the trigger (silent)', async () => {
     const swarm = ix.get(IAgentSwarmService);
     swarm.enter('manual');

@@ -12,7 +12,7 @@ import type {
 import { describe, expect, it, vi } from 'vitest';
 
 import type { KimiDesktopNotification } from '../shared/desktop-api';
-import { SessionRuntime } from './session-runtime';
+import { SessionRuntime, teamWakePrompt } from './session-runtime';
 
 describe('SessionRuntime interactions', () => {
   it('keeps an approval pending after invalid input and resolves it once', async () => {
@@ -266,6 +266,71 @@ describe('SessionRuntime interactions', () => {
     }));
     await runtime.close();
   });
+
+  it('initializes Team state explicitly and publishes the reset baseline', async () => {
+    const fixture = createSessionFixture();
+    const notifications: KimiDesktopNotification[] = [];
+    const detected = vi.fn();
+    const runtime = new SessionRuntime({
+      session: fixture.session,
+      mediaCacheDir: 'D:\\workspace\\.media-cache',
+      emit: (notification) => notifications.push(notification),
+      onRawEvent: () => undefined,
+      onStateChanged: () => undefined,
+      onSessionMetadataChanged: () => undefined,
+      onTeamDetected: detected,
+    });
+    await runtime.initialize();
+
+    const snapshot = await runtime.ensureTeam();
+
+    expect(fixture.ensureTeam).toHaveBeenCalledOnce();
+    expect(detected).toHaveBeenCalledOnce();
+    expect(snapshot.team?.id).toBe('team-1');
+    expect(notifications).toContainEqual(expect.objectContaining({
+      type: 'team.reset',
+      sessionId: 's1',
+      state: expect.objectContaining({ snapshot: expect.objectContaining({ team: expect.any(Object) }) }),
+    }));
+    await runtime.close();
+  });
+
+  it('posts a Team message once and wakes an idle leader through swarm', async () => {
+    const fixture = createSessionFixture();
+    const runtime = createRuntime(fixture);
+    await runtime.initialize();
+
+    const first = runtime.submitTeamMessage('Coordinate the implementation', 'client-1');
+    const retry = runtime.submitTeamMessage('Coordinate the implementation', 'client-1');
+
+    await expect(first).resolves.toMatchObject({ wake: 'swarm', message: { channelSeq: 1 } });
+    await expect(retry).resolves.toMatchObject({ wake: 'swarm', message: { channelSeq: 1 } });
+    expect(fixture.sendTeamMessage).toHaveBeenCalledOnce();
+    expect(fixture.swarm).toHaveBeenCalledWith([
+      { type: 'text', text: teamWakePrompt(1, 'Coordinate the implementation') },
+    ]);
+    expect(fixture.steer).not.toHaveBeenCalled();
+    expect(() => runtime.submitTeamMessage('A different message', 'client-1')).toThrow(
+      /reused with a different body/,
+    );
+    await runtime.close();
+  });
+
+  it('posts a Team message and steers a busy leader', async () => {
+    const fixture = createSessionFixture();
+    const runtime = createRuntime(fixture);
+    await runtime.initialize();
+    fixture.emitEvent({ type: 'turn.started', sessionId: 's1', agentId: 'main', turnId: 1 } as Event);
+
+    await expect(runtime.submitTeamMessage('New priority', 'client-2')).resolves.toMatchObject({
+      wake: 'steer',
+    });
+    expect(fixture.steer).toHaveBeenCalledWith([
+      { type: 'text', text: teamWakePrompt(1, 'New priority') },
+    ]);
+    expect(fixture.swarm).not.toHaveBeenCalled();
+    await runtime.close();
+  });
 });
 
 interface SessionFixtureOptions {
@@ -284,6 +349,10 @@ function createSessionFixture(options: SessionFixtureOptions = {}): {
   readonly close: ReturnType<typeof vi.fn>;
   readonly setPlanMode: ReturnType<typeof vi.fn>;
   readonly setTodos: ReturnType<typeof vi.fn>;
+  readonly ensureTeam: ReturnType<typeof vi.fn>;
+  readonly sendTeamMessage: ReturnType<typeof vi.fn>;
+  readonly swarm: ReturnType<typeof vi.fn>;
+  readonly steer: ReturnType<typeof vi.fn>;
   readonly emitEvent: (event: Event) => void;
   readonly emitTeamOperation: (operation: TeamOperation) => void;
   readonly approvalHandler?: ApprovalHandler;
@@ -308,6 +377,32 @@ function createSessionFixture(options: SessionFixtureOptions = {}): {
     todos = next.map((todo) => ({ ...todo }));
     todoHandler?.(todos);
   });
+  const ensuredTeam: TeamSnapshot = options.initialTeam ?? {
+    state: 'ready',
+    team: { id: 'team-1', sessionId: 's1', channelId: 'general', leaderAgentId: 'main', createdAt: 1 },
+    members: [{ agentId: 'main', role: 'leader', joinedAt: 1, joinedSeq: 1 }],
+    batches: [],
+    assignments: [],
+    latestSeq: 1,
+    latestChannelSeq: 0,
+  };
+  const ensureTeam = vi.fn(async () => ensuredTeam);
+  const sendTeamMessage = vi.fn(async ({ body, clientMessageId }: {
+    readonly body: string;
+    readonly clientMessageId: string;
+  }) => ({
+    id: `message-${clientMessageId}`,
+    teamId: ensuredTeam.team?.id ?? 'team-1',
+    channelId: ensuredTeam.team?.channelId ?? 'general',
+    seq: ensuredTeam.latestSeq + 1,
+    channelSeq: 1,
+    sender: { actorKind: 'user' as const, actorId: 'desktop-user', role: 'user' as const },
+    body,
+    clientMessageId,
+    createdAt: 2,
+  }));
+  const swarm = vi.fn(async () => undefined);
+  const steer = vi.fn(async () => undefined);
   const session = {
     id: 's1',
     summary: { id: 's1', workDir: 'D:\\workspace', additionalDirs: [] },
@@ -323,6 +418,7 @@ function createSessionFixture(options: SessionFixtureOptions = {}): {
       teamHandler = handler;
       return () => { teamHandler = undefined; };
     },
+    ensureTeam,
     getTeamSnapshot: async () => options.initialTeam ?? ({
       state: 'ready',
       members: [],
@@ -333,6 +429,7 @@ function createSessionFixture(options: SessionFixtureOptions = {}): {
     }),
     getTeamHistory: async () => [],
     getTeamOperations: async ({ afterSeq }: { readonly afterSeq: number }) => [],
+    sendTeamMessage,
     getTodos: async () => todos,
     setTodos,
     setApprovalHandler: (handler?: ApprovalHandler) => { approvalHandler = handler; },
@@ -345,6 +442,8 @@ function createSessionFixture(options: SessionFixtureOptions = {}): {
     getGoal: async () => null,
     getCronTasks: async () => ({ tasks: [] }),
     getContext: async () => ({ tokenCount: 0, history: [] }),
+    swarm,
+    steer,
     listSkills: async () => [],
     listPluginCommands: async () => [],
     listCommands: async () => [],
@@ -357,6 +456,10 @@ function createSessionFixture(options: SessionFixtureOptions = {}): {
     close,
     setPlanMode,
     setTodos,
+    ensureTeam,
+    sendTeamMessage,
+    swarm,
+    steer,
     emitEvent: (event) => eventHandler?.(event),
     emitTeamOperation: (operation) => teamHandler?.(operation),
     get approvalHandler() { return approvalHandler; },

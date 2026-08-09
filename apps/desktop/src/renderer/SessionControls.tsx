@@ -1,4 +1,4 @@
-import { Bot, ChevronDown, Pencil, Shield, Sparkles, Users } from 'lucide-react';
+import { Bot, ChevronDown, Pencil, Shield, Sparkles } from 'lucide-react';
 
 import type { SessionStatusSnapshot } from '../shared/desktop-api';
 import { classNames } from './ui-utils';
@@ -13,8 +13,6 @@ interface SessionControlsProps {
   readonly status?: SessionStatusSnapshot;
   readonly models: readonly SessionModelOption[];
   readonly placement: 'topbar' | 'composer';
-  readonly swarmPermissionPending: boolean;
-  readonly onEnterSwarm: (activate: () => Promise<void> | void) => Promise<boolean>;
   readonly planModePending: boolean;
   readonly onSetPlanMode: (enabled: boolean) => Promise<void>;
 }
@@ -24,19 +22,10 @@ export function SessionControls({
   status,
   models,
   placement,
-  swarmPermissionPending,
-  onEnterSwarm,
   planModePending,
   onSetPlanMode,
 }: SessionControlsProps) {
   const disabled = sessionId === undefined;
-  const toggleSwarm = async () => {
-    if (status?.swarmMode === true) {
-      await window.kimiDesktop.turn.setSwarmMode(false, sessionId);
-      return;
-    }
-    await onEnterSwarm(() => window.kimiDesktop.turn.setSwarmMode(true, sessionId));
-  };
   return (
     <div className={classNames('session-controls', placement === 'composer' && 'composer-session-controls')} data-placement={placement}>
       <label className="select-control model-control" title="模型">
@@ -86,13 +75,6 @@ export function SessionControls({
         title="Plan 模式"
         onClick={() => void onSetPlanMode(status?.planMode !== true)}
       ><Pencil size={13} /><span>Plan</span></button>
-      <button
-        className={classNames('mode-toggle', status?.swarmMode && 'active')}
-        disabled={disabled || swarmPermissionPending}
-        aria-pressed={status?.swarmMode === true}
-        title="Session Swarm 模式"
-        onClick={() => void toggleSwarm()}
-      ><Users size={13} /><span>Swarm</span></button>
     </div>
   );
 }

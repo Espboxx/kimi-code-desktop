@@ -75,8 +75,6 @@ interface ComposerProps {
   readonly commands: readonly unknown[];
   readonly onSubmit: (input: { mode: ComposerMode; text: string; media: readonly ComposerMedia[] }) => Promise<void>;
   readonly onCancel: () => Promise<void>;
-  readonly swarmPermissionPending: boolean;
-  readonly onEnterSwarm: (activate: () => Promise<void> | void) => Promise<boolean>;
   readonly planModePending: boolean;
   readonly onSetPlanMode: (enabled: boolean) => Promise<void>;
 }
@@ -340,8 +338,6 @@ export function Composer(props: ComposerProps) {
             status={props.status}
             models={props.models}
             placement="composer"
-            swarmPermissionPending={props.swarmPermissionPending}
-            onEnterSwarm={props.onEnterSwarm}
             planModePending={props.planModePending}
             onSetPlanMode={props.onSetPlanMode}
           />

@@ -17,17 +17,27 @@ import {
 } from 'lucide-react';
 
 import type { GitDiffArea, SessionListItem } from '../shared/desktop-api';
+import type { DesktopSurface } from '../shared/team-session';
 import { buildAgentActivityForest } from './agent-activity';
 import { Composer } from './Composer';
+import { CreateTeamDialog } from './CreateTeamDialog';
+import {
+  assignWorkbenchTabSurface,
+  desktopSurfaceStorageKey,
+  pruneWorkbenchTabSurfaces,
+  restoreDesktopSurfaceState,
+  serializeDesktopSurfaceState,
+  workbenchForSurface,
+  type WorkbenchTabSurfaces,
+} from './desktop-surfaces';
 import { useDesktopState } from './desktop-state';
 import { DirtyFilesDialog } from './DirtyFilesDialog';
 import { Inspector } from './Inspector';
 import { PendingInteractionDock } from './PendingInteractionDock';
 import { SettingsDialog } from './SettingsDialog';
 import { Sidebar, type SessionAction } from './Sidebar';
-import { SwarmEntryController, type SwarmPermissionPrompt } from './swarm-ui';
-import { SwarmPermissionDialog } from './SwarmPermissionDialog';
 import { TeamPage } from './TeamPage';
+import { TeamSidebar } from './TeamSidebar';
 import { persistTheme, readTheme, toggleTheme } from './theme';
 import { Timeline } from './Timeline';
 import type { FileOperationTarget } from './tool-display';
@@ -41,6 +51,7 @@ import {
 import { WorkbenchTabs } from './WorkbenchTabs';
 import {
   activateWorkbenchTab,
+  agentTab,
   closeWorkbenchTab,
   closeSessionWorkbenchTabs,
   cycleWorkbenchTab,
@@ -84,11 +95,16 @@ interface MemoryDiffState {
   readonly languageId: string;
 }
 
+interface TeamCreationState {
+  readonly clientMessageId: string;
+  readonly sessionId?: string;
+}
+
 export function App() {
   const state = useDesktopState();
   const snapshot = state.snapshot;
   const activeSessionId = snapshot?.activeSessionId;
-  const sessionIndexKey = snapshot?.sessions.map((session) => session.id).join('\0') ?? '';
+  const sessionIndexKey = snapshot?.sessions.map((session) => `${session.id}:${session.surface}`).join('\0') ?? '';
   const [selectedAgents, setSelectedAgents] = useState<Record<string, string>>({});
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [workspaceChoosing, setWorkspaceChoosing] = useState(false);
@@ -98,9 +114,11 @@ export function App() {
   ));
   const [sessionDialog, setSessionDialog] = useState<SessionDialogState>();
   const [taskOutput, setTaskOutput] = useState<{ taskId: string; output?: string }>();
-  const [swarmPermission, setSwarmPermission] = useState<SwarmPermissionPrompt>();
-  const [swarmActionError, setSwarmActionError] = useState<RendererError>();
+  const [actionError, setActionError] = useState<RendererError>();
   const [workbench, setWorkbench] = useState<WorkbenchTabState>(EMPTY_WORKBENCH);
+  const [surface, setSurface] = useState<DesktopSurface>('chat');
+  const [tabSurfaces, setTabSurfaces] = useState<WorkbenchTabSurfaces>({});
+  const [teamCreation, setTeamCreation] = useState<TeamCreationState>();
   const [hydratedRoot, setHydratedRoot] = useState<string>();
   const [dirtyPrompt, setDirtyPrompt] = useState<DirtyPrompt>();
   const [dirtyPromptBusy, setDirtyPromptBusy] = useState(false);
@@ -110,6 +128,7 @@ export function App() {
   const [timelineFollowRequest, setTimelineFollowRequest] = useState(0);
   const [seenTeamSeqs, setSeenTeamSeqs] = useState<Record<string, number>>({});
   const workbenchRef = useRef(workbench);
+  const tabSurfacesRef = useRef(tabSurfaces);
   const loadingTabs = useRef(new Set<string>());
   const savingPaths = useRef(new Set<string>());
   const sessionActivation = useRef<{ desired?: string; running: boolean; target?: string }>({ running: false });
@@ -121,21 +140,25 @@ export function App() {
   const knownTeamSessions = useRef(new Set<string>());
   const closedTeamTabs = useRef(new Set<string>());
   workbenchRef.current = workbench;
+  tabSurfacesRef.current = tabSurfaces;
   validSessionIds.current = new Set(snapshot?.sessions.map((session) => session.id) ?? []);
   activeSessionIdRef.current = activeSessionId;
 
-  const [swarmEntryController] = useState(() => new SwarmEntryController(
-    (sessionId) => window.kimiDesktop.turn.setPermission('yolo', sessionId),
-    (prompt) => { setSwarmPermission(prompt); },
-  ));
-  const activePermission = snapshot?.session.status?.permission;
-  const selectedAgentId = activeSessionId === undefined ? 'main' : selectedAgents[activeSessionId] ?? 'main';
+  const visibleWorkbench = workbenchForSurface(workbench, surface, tabSurfaces);
+  const activeTab = visibleWorkbench.tabs.find((tab) => tab.id === visibleWorkbench.activeId);
+  const activeWorkbenchSessionId = activeTab?.kind === 'session' || activeTab?.kind === 'team' || activeTab?.kind === 'agent'
+    ? activeTab.sessionId
+    : undefined;
+  const selectedAgentSessionId = activeWorkbenchSessionId ?? activeSessionId;
+  const selectedAgentId = activeTab?.kind === 'agent'
+    ? activeTab.agentId
+    : selectedAgentSessionId === undefined ? 'main' : selectedAgents[selectedAgentSessionId] ?? 'main';
   const setSelectedAgentId = useCallback((agentId: string) => {
-    if (activeSessionId === undefined) return;
-    setSelectedAgents((current) => current[activeSessionId] === agentId
+    if (selectedAgentSessionId === undefined) return;
+    setSelectedAgents((current) => current[selectedAgentSessionId] === agentId
       ? current
-      : { ...current, [activeSessionId]: agentId });
-  }, [activeSessionId]);
+      : { ...current, [selectedAgentSessionId]: agentId });
+  }, [selectedAgentSessionId]);
   const agentActivity = useMemo(
     () => buildAgentActivityForest(state.transcript),
     [state.transcript, state.transcriptVersion],
@@ -175,7 +198,7 @@ export function App() {
               validSessionIds.current.has(target) &&
               !deletingSessionIds.current.has(target)
             ) {
-              setSwarmActionError(rendererError(error, 'session.resume_failed'));
+              setActionError(rendererError(error, 'session.resume_failed'));
             }
           } finally {
             activation.target = undefined;
@@ -263,10 +286,6 @@ export function App() {
   }, []);
 
   const dirtyTabs = useMemo(() => workbench.tabs.filter((tab): tab is FileWorkbenchTab => tab.kind === 'file' && tab.dirty), [workbench.tabs]);
-  const activeTab = workbench.tabs.find((tab) => tab.id === workbench.activeId);
-  const activeWorkbenchSessionId = activeTab?.kind === 'session' || activeTab?.kind === 'team'
-    ? activeTab.sessionId
-    : undefined;
   const monacoTheme = theme === 'dark' ? 'vs-dark' : 'vs';
 
   useEffect(() => {
@@ -278,10 +297,15 @@ export function App() {
       new Set(snapshot.sessions.map((session) => session.id)),
       new Set(snapshot.sessions.map((session) => session.id)),
     );
+    const restoredSurfaces = restoreDesktopSurfaceState(
+      localStorage.getItem(desktopSurfaceStorageKey(workbenchStorageKey(root))),
+    );
     const initial = restored.tabs.length === 0 && snapshot.activeSessionId !== undefined
       ? openWorkbenchTab(restored, sessionTab(snapshot.activeSessionId))
       : restored;
     setWorkbench(initial);
+    setSurface(restoredSurfaces.active);
+    setTabSurfaces(restoredSurfaces.tabSurfaces);
     suppressEmptyWorkbenchAutoOpen.current = false;
     knownTeamSessions.current = new Set(Object.keys(state.teams));
     closedTeamTabs.current.clear();
@@ -293,7 +317,15 @@ export function App() {
   useEffect(() => {
     if (snapshot === undefined || hydratedRoot !== snapshot.workspace.root) return;
     localStorage.setItem(workbenchStorageKey(snapshot.workspace.root), serializeWorkbenchState(workbench));
-  }, [hydratedRoot, snapshot, workbench]);
+    localStorage.setItem(
+      desktopSurfaceStorageKey(workbenchStorageKey(snapshot.workspace.root)),
+      serializeDesktopSurfaceState({ active: surface, tabSurfaces }),
+    );
+  }, [hydratedRoot, snapshot, surface, tabSurfaces, workbench]);
+
+  useEffect(() => {
+    setTabSurfaces((current) => pruneWorkbenchTabSurfaces(current, workbench.tabs));
+  }, [workbench.tabs]);
 
   useEffect(() => {
     if (snapshot === undefined || hydratedRoot !== snapshot.workspace.root) return;
@@ -343,13 +375,13 @@ export function App() {
     if (
       hydratedRoot !== snapshot?.workspace.root ||
       sessionId === undefined ||
-      workbench.tabs.length > 0 ||
+      workbenchForSurface(workbench, 'chat', tabSurfaces).tabs.length > 0 ||
       suppressEmptyWorkbenchAutoOpen.current
     ) return;
-    setWorkbench((current) => current.tabs.length === 0
+    setWorkbench((current) => workbenchForSurface(current, 'chat', tabSurfacesRef.current).tabs.length === 0
       ? openWorkbenchTab(current, sessionTab(sessionId))
       : current);
-  }, [hydratedRoot, snapshot?.activeSessionId, snapshot?.workspace.root, workbench.tabs.length]);
+  }, [hydratedRoot, snapshot?.activeSessionId, snapshot?.workspace.root, tabSurfaces, workbench]);
 
   useEffect(() => {
     if (hydratedRoot === undefined) return;
@@ -403,7 +435,7 @@ export function App() {
   }, [dirtyTabs.length, state.closeRequest]);
 
   useEffect(() => {
-    setSwarmActionError(undefined);
+    setActionError(undefined);
   }, [snapshot?.activeSessionId]);
 
   useEffect(() => {
@@ -415,12 +447,6 @@ export function App() {
       setSelectedAgents((current) => ({ ...current, [activeSessionId]: 'main' }));
     }
   }, [activeSessionId, selectedAgentId, state.transcript, state.transcriptVersion]);
-
-  useEffect(() => {
-    swarmEntryController.cancelOutside(activeSessionId);
-  }, [activeSessionId, swarmEntryController]);
-
-  useEffect(() => () => swarmEntryController.dispose(), [swarmEntryController]);
 
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -437,10 +463,12 @@ export function App() {
     if (tab.kind === 'team') closedTeamTabs.current.add(tab.sessionId);
     setWorkbench((current) => {
       const next = closeWorkbenchTab(current, tab.id);
-      if (current.tabs.length > 0 && next.tabs.length === 0) suppressEmptyWorkbenchAutoOpen.current = true;
+      const currentVisible = workbenchForSurface(current, surface, tabSurfacesRef.current);
+      const nextVisible = workbenchForSurface(next, surface, tabSurfacesRef.current);
+      if (currentVisible.tabs.length > 0 && nextVisible.tabs.length === 0) suppressEmptyWorkbenchAutoOpen.current = true;
       return next;
     });
-  }, []);
+  }, [surface]);
 
   const activateTab = useCallback((tab: WorkbenchTab) => {
     setWorkbench((current) => activateWorkbenchTab(current, tab.id));
@@ -450,43 +478,38 @@ export function App() {
     const listener = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey)) return;
       const current = workbenchRef.current;
-      const selected = current.tabs.find((tab) => tab.id === current.activeId);
+      const visible = workbenchForSurface(current, surface, tabSurfacesRef.current);
+      const selected = visible.tabs.find((tab) => tab.id === visible.activeId);
       if (event.key.toLowerCase() === 's' && selected?.kind === 'file') {
         event.preventDefault();
-        void saveFile(selected.id, selected.conflict).catch((error) => setSwarmActionError(rendererError(error, 'workspace.save_failed')));
+        void saveFile(selected.id, selected.conflict).catch((error) => setActionError(rendererError(error, 'workspace.save_failed')));
       } else if (event.key.toLowerCase() === 'w' && selected !== undefined) {
         event.preventDefault();
         requestCloseTab(selected);
       } else if (event.key === 'Tab') {
         event.preventDefault();
-        setWorkbench((state) => cycleWorkbenchTab(state, event.shiftKey));
+        setWorkbench((state) => {
+          const next = cycleWorkbenchTab(
+            workbenchForSurface(state, surface, tabSurfacesRef.current),
+            event.shiftKey,
+          );
+          return next.activeId === undefined ? state : activateWorkbenchTab(state, next.activeId);
+        });
       }
     };
     window.addEventListener('keydown', listener, { capture: true });
     return () => window.removeEventListener('keydown', listener, { capture: true });
-  }, [requestCloseTab, saveFile]);
+  }, [requestCloseTab, saveFile, surface]);
 
-  const cancelSwarmPermission = useCallback(() => swarmEntryController.cancel(), [swarmEntryController]);
-  const enterSwarm = useCallback(async (activate: () => Promise<void> | void): Promise<boolean> => {
-    if (activeSessionId === undefined) return false;
-    setSwarmActionError(undefined);
-    try {
-      return await swarmEntryController.enter(activeSessionId, activePermission ?? 'manual', activate);
-    } catch (error) {
-      setSwarmActionError(rendererError(error, 'swarm.entry_failed'));
-      return false;
-    }
-  }, [activePermission, activeSessionId, swarmEntryController]);
-  const chooseSwarmPermission = useCallback(async (choice: 'yolo' | 'current') => swarmEntryController.choose(choice), [swarmEntryController]);
   const setPlanMode = useCallback(async (enabled: boolean): Promise<void> => {
     if (activeSessionId === undefined || planPendingRef.current.has(activeSessionId)) return;
     planPendingRef.current.add(activeSessionId);
     setPlanPendingSessions(new Set(planPendingRef.current));
-    setSwarmActionError(undefined);
+    setActionError(undefined);
     try {
       await window.kimiDesktop.turn.setPlanMode(enabled, activeSessionId);
     } catch (error) {
-      setSwarmActionError(rendererError(error, 'session.plan_mode_failed'));
+      setActionError(rendererError(error, 'session.plan_mode_failed'));
     } finally {
       planPendingRef.current.delete(activeSessionId);
       setPlanPendingSessions(new Set(planPendingRef.current));
@@ -498,7 +521,7 @@ export function App() {
     suppressEmptyWorkbenchAutoOpen.current = true;
     deletingSessionIds.current.add(sessionId);
     if (sessionActivation.current.desired === sessionId) sessionActivation.current.desired = undefined;
-    setSwarmActionError(undefined);
+    setActionError(undefined);
     try {
       await window.kimiDesktop.session.delete(sessionId);
       setWorkbench((current) => closeSessionWorkbenchTabs(current, sessionId));
@@ -522,7 +545,7 @@ export function App() {
   }
 
   const status = snapshot.session.status;
-  const selectedSession = activeTab?.kind === 'session' || activeTab?.kind === 'team'
+  const selectedSession = activeTab?.kind === 'session' || activeTab?.kind === 'team' || activeTab?.kind === 'agent'
     ? snapshot.sessions.find((session) => session.id === activeTab.sessionId)
     : snapshot.sessions.find((session) => session.id === snapshot.activeSessionId);
   const transcript = state.transcript?.getAgent(selectedAgentId) ?? state.transcript?.getAgent('main');
@@ -531,48 +554,67 @@ export function App() {
     id,
     label: text(record(raw)['displayName'], id),
   }));
-  const openSessionIds = new Set(workbench.tabs.filter((tab) => tab.kind === 'session').map((tab) => tab.sessionId));
+  const legacyTeamSessionIds = new Set(workbench.tabs.flatMap((tab) => (
+    tab.kind === 'team' || tab.kind === 'agent' ? [tab.sessionId] : []
+  )));
+  const teamSessionIds = new Set([
+    ...snapshot.sessions.filter((session) => session.surface === 'team').map((session) => session.id),
+    ...Object.keys(state.teams),
+    ...legacyTeamSessionIds,
+  ]);
+  const teamSessions = snapshot.sessions.filter((session) => teamSessionIds.has(session.id));
+  const chatSessions = snapshot.sessions.filter((session) => !teamSessionIds.has(session.id));
+  const openSessionIds = new Set(visibleWorkbench.tabs.filter((tab) => tab.kind === 'session').map((tab) => tab.sessionId));
   const activeFilePath = activeTab?.kind === 'file' || activeTab?.kind === 'diff' || activeTab?.kind === 'operation-diff'
     ? activeTab.path
     : undefined;
 
   const openFile = (path: string) => {
     suppressEmptyWorkbenchAutoOpen.current = false;
-    setWorkbench((current) => openWorkbenchTab(current, fileTab(path)));
+    const tab = fileTab(path);
+    setTabSurfaces((current) => assignWorkbenchTabSurface(current, tab, surface));
+    setWorkbench((current) => openWorkbenchTab(current, tab));
   };
   const openGitDiff = (path: string) => {
     suppressEmptyWorkbenchAutoOpen.current = false;
-    setWorkbench((current) => openWorkbenchTab(current, diffTab(path, 'working')));
+    const tab = diffTab(path, 'working');
+    setTabSurfaces((current) => assignWorkbenchTabSurface(current, tab, surface));
+    setWorkbench((current) => openWorkbenchTab(current, tab));
   };
   const openFileOperation = (target: FileOperationTarget) => {
     suppressEmptyWorkbenchAutoOpen.current = false;
     const before = target.before;
     const after = target.after;
     if (target.operation === 'edit' && before !== undefined && after !== undefined) {
-      setWorkbench((current) => openWorkbenchTab(current, operationDiffTab(
+      const tab = operationDiffTab(
         target.toolCallId,
         target.path,
         before,
         after,
-      )));
+      );
+      setTabSurfaces((current) => assignWorkbenchTabSurface(current, tab, surface));
+      setWorkbench((current) => openWorkbenchTab(current, tab));
       return;
     }
     openFile(target.path);
   };
   const openSession = (sessionId: string) => {
     suppressEmptyWorkbenchAutoOpen.current = false;
+    setSurface('chat');
     const tab = sessionTab(sessionId);
     setWorkbench((current) => openWorkbenchTab(current, tab));
   };
   const openTeam = (sessionId: string) => {
     suppressEmptyWorkbenchAutoOpen.current = false;
+    setSurface('team');
     closedTeamTabs.current.delete(sessionId);
     setWorkbench((current) => openWorkbenchTab(current, teamTab(sessionId)));
   };
   const selectTeamAgent = (sessionId: string, agentId: string) => {
     suppressEmptyWorkbenchAutoOpen.current = false;
+    setSurface('team');
     setSelectedAgents((current) => ({ ...current, [sessionId]: agentId }));
-    setWorkbench((current) => openWorkbenchTab(current, sessionTab(sessionId)));
+    setWorkbench((current) => openWorkbenchTab(current, agentTab(sessionId, agentId)));
   };
   const markTeamSeen = (sessionId: string, channelSeq: number) => {
     setSeenTeamSeqs((current) => (current[sessionId] ?? 0) >= channelSeq
@@ -585,13 +627,41 @@ export function App() {
     failed: teamState.snapshot.assignments.filter((assignment) => assignment.status === 'failed').length,
   }]));
   const createSession = async () => openSession(await window.kimiDesktop.session.create());
+  const selectSurface = (next: DesktopSurface) => {
+    if (next === surface) return;
+    setSurface(next);
+    setWorkbench((current) => {
+      const target = workbenchForSurface(current, next, tabSurfacesRef.current);
+      const id = target.recentIds[0] ?? target.tabs[0]?.id;
+      return id === undefined ? current : activateWorkbenchTab(current, id);
+    });
+  };
+  const beginTeamCreation = () => {
+    setSurface('team');
+    setTeamCreation({ clientMessageId: crypto.randomUUID() });
+  };
+  const createTeamTask = async (objective: string, permission: 'current' | 'yolo') => {
+    if (teamCreation === undefined) return;
+    let sessionId = teamCreation.sessionId;
+    if (sessionId === undefined) {
+      sessionId = await window.kimiDesktop.session.create({
+        surface: 'team',
+        permission: permission === 'yolo' ? 'yolo' : undefined,
+      });
+      setTeamCreation((current) => current === undefined ? current : { ...current, sessionId });
+      openTeam(sessionId);
+    }
+    await window.kimiDesktop.session.rename(sessionId, teamTaskTitle(objective));
+    await window.kimiDesktop.team.submit(sessionId, objective, teamCreation.clientMessageId);
+    setTeamCreation(undefined);
+  };
   const selectWorkspace = async () => {
     setWorkspaceChoosing(true);
-    setSwarmActionError(undefined);
+    setActionError(undefined);
     try {
       await window.kimiDesktop.workspace.choose();
     } catch (error) {
-      setSwarmActionError(rendererError(error, 'workspace.open_failed'));
+      setActionError(rendererError(error, 'workspace.open_failed'));
     } finally {
       setWorkspaceChoosing(false);
     }
@@ -608,7 +678,7 @@ export function App() {
   const compareConflict = async (tab: FileWorkbenchTab) => {
     const disk = await window.kimiDesktop.workspace.readFile(tab.path);
     if (disk.kind !== 'text' || disk.content === undefined) {
-      setSwarmActionError({ code: 'workspace.compare_unsupported', message: disk.readOnlyReason ?? '磁盘内容无法比较' });
+      setActionError({ code: 'workspace.compare_unsupported', message: disk.readOnlyReason ?? '磁盘内容无法比较' });
       return;
     }
     setMemoryDiff({ path: tab.path, disk: disk.content, editor: tab.content, languageId: disk.languageId });
@@ -666,6 +736,10 @@ export function App() {
           <strong>Kimi Code Desktop</strong>
           <span className={classNames('runtime-state', status?.busy && 'busy')}><span />{status?.busy ? 'Working' : !workspaceSelected ? '未选择工作区' : snapshot.activeSessionId === undefined ? 'No session' : 'Ready'}</span>
         </div>
+        <nav className="surface-switcher" aria-label="工作台模式">
+          <button className={classNames(surface === 'chat' && 'active')} aria-pressed={surface === 'chat'} onClick={() => selectSurface('chat')}><Bot size={13} />会话</button>
+          <button className={classNames(surface === 'team' && 'active')} aria-pressed={surface === 'team'} onClick={() => selectSurface('team')}><Users size={13} />团队</button>
+        </nav>
         <div className="top-actions">
           <button
             className="icon-button"
@@ -679,36 +753,33 @@ export function App() {
         </div>
       </header>
 
-      {workspaceSelected ? <div className="workbench">
+      {workspaceSelected && surface === 'chat' ? <div className="workbench">
         <Sidebar
           workspace={snapshot.workspace}
           tree={snapshot.tree}
           gitFiles={snapshot.gitFiles}
           workspaceRevision={state.workspaceChange.version}
-          sessions={snapshot.sessions}
+          sessions={chatSessions}
           activeSessionId={snapshot.activeSessionId}
           activeWorkbenchSessionId={activeWorkbenchSessionId}
           activeFilePath={activeFilePath}
           openSessionIds={openSessionIds}
           sessionStatuses={state.sessionStatuses}
           pendingInteractionCounts={state.pendingInteractionCounts}
-          teamBadges={teamBadges}
           onChooseWorkspace={chooseWorkspace}
           onRefreshWorkspace={() => void window.kimiDesktop.workspace.refresh()}
           onOpenFile={openFile}
           onNewSession={() => void createSession()}
           onSelectSession={openSession}
-          onOpenTeam={openTeam}
           onReloadSession={(sessionId) => void window.kimiDesktop.session.reload(sessionId)}
           onSessionAction={(session, action) => setSessionDialog({ session, action })}
         />
         <main className="conversation-pane editor-group">
           <WorkbenchTabs
-            state={workbench}
-            sessions={snapshot.sessions}
+            state={visibleWorkbench}
+            sessions={chatSessions}
             statuses={state.sessionStatuses}
             pendingCounts={state.pendingInteractionCounts}
-            teamBadges={teamBadges}
             onActivate={activateTab}
             onClose={requestCloseTab}
           />
@@ -759,23 +830,10 @@ export function App() {
                   return window.kimiDesktop.turn.submit({ sessionId: snapshot.activeSessionId, ...input });
                 }}
                 onCancel={() => window.kimiDesktop.turn.cancel(snapshot.activeSessionId)}
-                swarmPermissionPending={swarmPermission !== undefined}
-                onEnterSwarm={enterSwarm}
                 planModePending={planModePending}
                 onSetPlanMode={setPlanMode}
               />
             </div>
-          )}
-          {activeTab?.kind === 'team' && state.teams[activeTab.sessionId] === undefined && (
-            <div className="editor-state"><CircleDashed className="spin" size={17} /><span>正在恢复团队频道</span></div>
-          )}
-          {activeTab?.kind === 'team' && state.teams[activeTab.sessionId] !== undefined && (
-            <TeamPage
-              sessionId={activeTab.sessionId}
-              state={state.teams[activeTab.sessionId]!}
-              onSeen={(channelSeq) => markTeamSeen(activeTab.sessionId, channelSeq)}
-              onSelectAgent={(agentId) => selectTeamAgent(activeTab.sessionId, agentId)}
-            />
           )}
           {activeTab?.kind === 'file' && (
             <FileEditorView
@@ -786,7 +844,7 @@ export function App() {
                 content,
                 dirty: content !== tab.savedContent,
               } : tab))}
-              onSave={(force) => void saveFile(activeTab.id, force).catch((error) => setSwarmActionError(rendererError(error, 'workspace.save_failed')))}
+              onSave={(force) => void saveFile(activeTab.id, force).catch((error) => setActionError(rendererError(error, 'workspace.save_failed')))}
               onReload={() => reloadFile(activeTab)}
               onCompareConflict={() => void compareConflict(activeTab)}
             />
@@ -809,12 +867,97 @@ export function App() {
             void window.kimiDesktop.task.output(taskId, 200_000, snapshot.activeSessionId).then((output) => setTaskOutput({ taskId, output }));
           }}
         />
-      </div> : (
+      </div> : workspaceSelected ? (
+        <div className="team-workbench">
+          <TeamSidebar
+            workspace={snapshot.workspace}
+            sessions={teamSessions}
+            activeSessionId={snapshot.activeSessionId}
+            activeWorkbenchSessionId={activeWorkbenchSessionId}
+            statuses={state.sessionStatuses}
+            badges={teamBadges}
+            onCreate={beginTeamCreation}
+            onSelect={openTeam}
+          />
+          <main className="team-detail-pane editor-group">
+            <WorkbenchTabs
+              state={visibleWorkbench}
+              sessions={teamSessions}
+              statuses={state.sessionStatuses}
+              pendingCounts={state.pendingInteractionCounts}
+              teamBadges={teamBadges}
+              onActivate={activateTab}
+              onClose={requestCloseTab}
+            />
+            {activeTab === undefined && (
+              <div className="workbench-empty team-workbench-empty"><Users size={24} /><strong>选择或创建团队任务</strong><div><button onClick={beginTeamCreation}>新建团队任务</button></div></div>
+            )}
+            {activeTab?.kind === 'team' && state.teams[activeTab.sessionId] === undefined && (
+              <div className="editor-state"><CircleDashed className="spin" size={17} /><span>正在恢复团队频道</span></div>
+            )}
+            {activeTab?.kind === 'team' && state.teams[activeTab.sessionId] !== undefined && (
+              <TeamPage
+                sessionId={activeTab.sessionId}
+                state={state.teams[activeTab.sessionId]!}
+                onSeen={(channelSeq) => markTeamSeen(activeTab.sessionId, channelSeq)}
+                onSelectAgent={(agentId) => selectTeamAgent(activeTab.sessionId, agentId)}
+              />
+            )}
+            {activeTab?.kind === 'agent' && activeTab.sessionId !== snapshot.activeSessionId && (
+              <div className="editor-state"><CircleDashed className="spin" size={17} /><span>正在恢复 Agent 详情</span></div>
+            )}
+            {activeTab?.kind === 'agent' && activeTab.sessionId === snapshot.activeSessionId && (
+              <div className="team-agent-surface">
+                <div className="conversation-header">
+                  <div><strong>{activeTab.agentId === 'main' ? '组长详情' : 'Agent 详情'}</strong><span>{activeTab.agentId}</span></div>
+                  <button className="team-channel-back" onClick={() => openTeam(activeTab.sessionId)}><Users size={13} />返回团队频道</button>
+                </div>
+                <Timeline
+                  transcript={transcript}
+                  store={state.transcript}
+                  activity={agentActivity}
+                  selectedAgentId={activeTab.agentId}
+                  onSelectAgent={(agentId) => selectTeamAgent(activeTab.sessionId, agentId)}
+                  sessionId={activeTab.sessionId}
+                  version={state.transcriptVersion}
+                  followRequest={timelineFollowRequest}
+                  workspaceRoot={snapshot.workspace.root}
+                  onOpenFileOperation={openFileOperation}
+                  onOpenGitDiff={openGitDiff}
+                />
+                <PendingInteractionDock store={state.transcript} sessionId={activeTab.sessionId} selectedAgentId={activeTab.agentId} version={state.transcriptVersion} onSelectAgent={(agentId) => selectTeamAgent(activeTab.sessionId, agentId)} />
+              </div>
+            )}
+            {activeTab?.kind === 'file' && (
+              <FileEditorView
+                tab={activeTab}
+                theme={monacoTheme}
+                onChange={(content) => setWorkbench((current) => patchWorkbenchTab(current, activeTab.id, (tab) => tab.kind === 'file' ? {
+                  ...tab,
+                  content,
+                  dirty: content !== tab.savedContent,
+                } : tab))}
+                onSave={(force) => void saveFile(activeTab.id, force).catch((error) => setActionError(rendererError(error, 'workspace.save_failed')))}
+                onReload={() => reloadFile(activeTab)}
+                onCompareConflict={() => void compareConflict(activeTab)}
+              />
+            )}
+            {activeTab?.kind === 'diff' && <GitDiffEditorView tab={activeTab} theme={monacoTheme} onReload={() => void loadDiff(activeTab.id, activeTab.path, activeTab.area)} />}
+            {activeTab?.kind === 'operation-diff' && <OperationDiffEditorView tab={activeTab} theme={monacoTheme} onOpenGitDiff={() => openGitDiff(activeTab.path)} />}
+          </main>
+        </div>
+      ) : (
         <WorkspaceWelcome busy={workspaceChoosing} onChoose={chooseWorkspace} />
       )}
 
       {settingsOpen && <SettingsDialog snapshot={snapshot} onClose={() => setSettingsOpen(false)} />}
-      {swarmPermission !== undefined && <SwarmPermissionDialog permission={swarmPermission.permission} onChoose={chooseSwarmPermission} onCancel={cancelSwarmPermission} />}
+      {teamCreation !== undefined && (
+        <CreateTeamDialog
+          currentPermission={defaultPermission(snapshot.config.value)}
+          onCreate={createTeamTask}
+          onCancel={() => setTeamCreation(undefined)}
+        />
+      )}
       {sessionDialog !== undefined && <SessionActionDialog state={sessionDialog} onDelete={deleteSession} onClose={() => setSessionDialog(undefined)} />}
       {taskOutput !== undefined && <OutputDialog title={`Task · ${taskOutput.taskId}`} output={taskOutput.output} onClose={() => setTaskOutput(undefined)} />}
       {dirtyPrompt !== undefined && dirtyPromptPaths.length > 0 && (
@@ -829,10 +972,10 @@ export function App() {
         />
       )}
       {memoryDiff !== undefined && <MemoryDiffDialog {...memoryDiff} theme={monacoTheme} onClose={() => setMemoryDiff(undefined)} />}
-      {(swarmActionError ?? state.error) !== undefined && (
+      {(actionError ?? state.error) !== undefined && (
         <div className="error-toast" role="alert">
-          <span><strong>{(swarmActionError ?? state.error)?.code}</strong>{(swarmActionError ?? state.error)?.message}</span>
-          <button className="icon-button" onClick={() => { if (swarmActionError !== undefined) setSwarmActionError(undefined); else state.clearError(); }} title="关闭"><X size={14} /></button>
+          <span><strong>{(actionError ?? state.error)?.code}</strong>{(actionError ?? state.error)?.message}</span>
+          <button className="icon-button" onClick={() => { if (actionError !== undefined) setActionError(undefined); else state.clearError(); }} title="关闭"><X size={14} /></button>
         </div>
       )}
     </div>
@@ -896,6 +1039,16 @@ function rendererError(error: unknown, fallbackCode: string): RendererError {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : text(record(error)['message'], String(error));
+}
+
+function defaultPermission(config: Readonly<Record<string, unknown>>): 'manual' | 'auto' | 'yolo' {
+  const value = config['defaultPermissionMode'];
+  return value === 'auto' || value === 'yolo' ? value : 'manual';
+}
+
+function teamTaskTitle(objective: string): string {
+  const firstLine = objective.split(/\r?\n/, 1)[0]?.trim() ?? objective.trim();
+  return firstLine.length <= 60 ? firstLine : `${firstLine.slice(0, 57)}…`;
 }
 
 function SessionActionDialog({

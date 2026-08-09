@@ -15,6 +15,7 @@ import {
   serializeError,
 } from './runtime';
 import { materializeReplayMedia, prepareDesktopMedia } from './media-service';
+import { desktopSessionSurface, TEAM_SESSION_METADATA } from '../shared/team-session';
 import {
   isWorkspaceDirectory,
   readWorkspacePreferences,
@@ -24,6 +25,13 @@ import {
 } from './workspace-preferences';
 
 describe('desktop runtime boundary', () => {
+  it('classifies explicit and live Team sessions without guessing from unrelated metadata', () => {
+    expect(desktopSessionSurface(TEAM_SESSION_METADATA)).toBe('team');
+    expect(desktopSessionSurface(undefined, true)).toBe('team');
+    expect(desktopSessionSurface({ kimiDesktop: { surface: 'chat' } })).toBe('chat');
+    expect(desktopSessionSurface({ surface: 'team' })).toBe('chat');
+  });
+
   it('applies global defaults to new sessions without overriding explicit choices', () => {
     const config = {
       defaultModel: 'kimi-default',

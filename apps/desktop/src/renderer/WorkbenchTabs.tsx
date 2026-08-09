@@ -1,4 +1,4 @@
-import { Bot, CircleAlert, FileCode2, GitCompare, Users, X } from 'lucide-react';
+import { Bot, CircleAlert, FileCode2, GitCompare, UserRoundCog, Users, X } from 'lucide-react';
 
 import type { SessionListItem, SessionStatusSnapshot } from '../shared/desktop-api';
 import { classNames } from './ui-utils';
@@ -17,7 +17,7 @@ export function WorkbenchTabs({ state, sessions, statuses, pendingCounts, teamBa
     <div className="workbench-tabbar" role="tablist" aria-label="编辑器标签">
       <div className="workbench-tab-scroll">
         {state.tabs.map((tab) => {
-          const session = tab.kind === 'session' || tab.kind === 'team'
+          const session = tab.kind === 'session' || tab.kind === 'team' || tab.kind === 'agent'
             ? sessions.find((item) => item.id === tab.sessionId)
             : undefined;
           const busy = tab.kind === 'session' && statuses[tab.sessionId]?.busy === true;
@@ -32,7 +32,7 @@ export function WorkbenchTabs({ state, sessions, statuses, pendingCounts, teamBa
               key={tab.id}
             >
               <button className="workbench-tab-main" onClick={() => onActivate(tab)} title={tabTitle(tab, session)}>
-                {tab.kind === 'session' ? <Bot size={13} /> : tab.kind === 'team' ? <Users size={13} /> : tab.kind === 'file' ? <FileCode2 size={13} /> : <GitCompare size={13} />}
+                {tab.kind === 'session' ? <Bot size={13} /> : tab.kind === 'team' ? <Users size={13} /> : tab.kind === 'agent' ? <UserRoundCog size={13} /> : tab.kind === 'file' ? <FileCode2 size={13} /> : <GitCompare size={13} />}
                 <span>{tabLabel(tab, session)}</span>
                 {busy && <i className="tab-working" title="Working" />}
                 {pending > 0 && <em title={`${pending} 个待处理交互`}>{pending}</em>}
@@ -53,6 +53,7 @@ export function WorkbenchTabs({ state, sessions, statuses, pendingCounts, teamBa
 function tabLabel(tab: WorkbenchTab, session?: SessionListItem): string {
   if (tab.kind === 'session') return session?.title || session?.lastPrompt || 'Kimi 会话';
   if (tab.kind === 'team') return `${session?.title || session?.lastPrompt || 'Kimi 会话'} · 团队`;
+  if (tab.kind === 'agent') return tab.agentId === 'main' ? '组长详情' : `${tab.agentId} · Agent`;
   const name = tab.path.split('/').at(-1) ?? tab.path;
   if (tab.kind === 'diff') return `${name} (${areaLabel(tab.area)})`;
   return tab.kind === 'operation-diff' ? `${name} (操作差异)` : name;
@@ -61,6 +62,7 @@ function tabLabel(tab: WorkbenchTab, session?: SessionListItem): string {
 function tabTitle(tab: WorkbenchTab, session?: SessionListItem): string {
   if (tab.kind === 'session') return `${session?.title || session?.lastPrompt || 'Kimi 会话'} · ${tab.sessionId}`;
   if (tab.kind === 'team') return `团队频道 · ${session?.title || session?.lastPrompt || tab.sessionId}`;
+  if (tab.kind === 'agent') return `${tab.agentId} · ${session?.title || session?.lastPrompt || tab.sessionId}`;
   if (tab.kind === 'diff') return `${tab.path} · ${areaLabel(tab.area)} Diff`;
   return tab.kind === 'operation-diff' ? `${tab.path} · 本次操作差异` : tab.path;
 }

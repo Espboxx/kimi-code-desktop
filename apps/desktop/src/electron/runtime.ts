@@ -19,6 +19,7 @@ import {
 
 import type {
   ConfigSnapshot,
+  DesktopSessionCreateOptions,
   DesktopCommand,
   DesktopSnapshot,
   ExtensionSnapshot,
@@ -30,6 +31,7 @@ import type {
   WorkspaceSnapshot,
 } from '../shared/desktop-api';
 import type { DesktopCommandName } from '../shared/desktop-command-schema';
+import { desktopSessionSurface, TEAM_SESSION_METADATA } from '../shared/team-session';
 import { prepareDesktopMedia, resolveAllowedPath } from './media-service';
 import {
   isIgnoredWorkspacePath,
@@ -318,18 +320,16 @@ export class KimiDesktopRuntime {
         this.scheduleSnapshot();
         return this.sessions.map((summary) => this.sessionItem(summary));
       case 'session.create': {
-        const input = payload<{
-          model?: string;
-          thinking?: string;
-          permission?: PermissionMode;
-          planMode?: boolean;
-          additionalDirs?: string[];
-        }>(command);
+        const input = payload<DesktopSessionCreateOptions>(command);
+        const { surface = 'chat', ...sessionInput } = input;
+        if (surface === 'team') await this.ensureDesktopTeamCollaboration();
         const session = await this.harness.createSession({
           workDir: this.requireWorkspaceRoot(),
-          ...applySessionCreationDefaults(this.config.value, input),
+          ...applySessionCreationDefaults(this.config.value, sessionInput),
+          metadata: surface === 'team' ? TEAM_SESSION_METADATA : undefined,
         });
-        await this.attachSession(session);
+        const runtime = await this.attachSession(session);
+        if (surface === 'team') await runtime.ensureTeam();
         await this.refreshSessions();
         this.publishSnapshot();
         return session.id;
@@ -636,6 +636,11 @@ export class KimiDesktopRuntime {
         const input = payload<{ sessionId: string }>(command);
         return this.runtimeFor(input.sessionId).getTeamSnapshot();
       }
+      case 'team.ensure': {
+        const input = payload<{ sessionId: string }>(command);
+        await this.ensureDesktopTeamCollaboration();
+        return this.runtimeFor(input.sessionId).ensureTeam();
+      }
       case 'team.operations': {
         const input = payload<{ sessionId: string; afterSeq: number; limit?: number }>(command);
         return this.runtimeFor(input.sessionId).getTeamOperations(input.afterSeq, input.limit);
@@ -647,6 +652,11 @@ export class KimiDesktopRuntime {
       case 'team.send': {
         const input = payload<{ sessionId: string; body: string; clientMessageId: string }>(command);
         return this.runtimeFor(input.sessionId).sendTeamMessage(input.body, input.clientMessageId);
+      }
+      case 'team.submit': {
+        const input = payload<{ sessionId: string; body: string; clientMessageId: string }>(command);
+        await this.ensureDesktopTeamCollaboration();
+        return this.runtimeFor(input.sessionId).submitTeamMessage(input.body, input.clientMessageId);
       }
 
       case 'goal.get':
@@ -748,6 +758,18 @@ export class KimiDesktopRuntime {
       diagnostics: redactSecrets(diagnostics),
       experimentalFeatures: redactSecrets(experimentalFeatures) as readonly unknown[],
     };
+  }
+
+  private async ensureDesktopTeamCollaboration(): Promise<void> {
+    const feature = this.config.experimentalFeatures.find((candidate) => {
+      const value = objectValue(candidate);
+      return value?.['id'] === 'team_collaboration';
+    });
+    if (objectValue(feature)?.['enabled'] === true) return;
+    await this.harness.setConfig({
+      experimental: { team_collaboration: true },
+    } as KimiConfigPatch);
+    await this.refreshConfig();
   }
 
   private async refreshAuth(): Promise<void> {
@@ -941,6 +963,9 @@ export class KimiDesktopRuntime {
       onSessionMetadataChanged: (sessionId, patch) => {
         this.handleSessionMetadataChanged(sessionId, patch);
       },
+      onTeamDetected: (sessionId) => {
+        void this.markSessionAsTeam(sessionId);
+      },
     });
     this.sessionRuntimes.set(session.id, runtime);
     try {
@@ -1010,6 +1035,7 @@ export class KimiDesktopRuntime {
   }
 
   private sessionItem(summary: SessionSummary): SessionListItem {
+    const runtime = this.sessionRuntimes.get(summary.id);
     return {
       id: summary.id,
       title: summary.title,
@@ -1021,6 +1047,10 @@ export class KimiDesktopRuntime {
       active: this.sessionRuntimes.has(summary.id),
       selected: summary.id === this.activeSessionId,
       lastTurnReason: summary.lastTurnReason,
+      surface: desktopSessionSurface(
+        summary.metadata,
+        runtime?.teamState?.snapshot.team !== undefined,
+      ),
     };
   }
 
@@ -1052,6 +1082,30 @@ export class KimiDesktopRuntime {
     this.sessions = this.sessions.toSorted((left, right) => right.updatedAt - left.updatedAt);
     this.scheduleSnapshot();
     this.scheduleSessionIndexRefresh();
+  }
+
+  private async markSessionAsTeam(sessionId: string): Promise<void> {
+    const session = this.sessionRuntimes.get(sessionId)?.sdkSession;
+    if (session?.summary === undefined || desktopSessionSurface(session.summary.metadata) === 'team') return;
+    const metadata = objectValue(session.summary.metadata);
+    const desktop = objectValue(metadata?.['kimiDesktop']);
+    try {
+      await session.updateMetadata({
+        kimiDesktop: {
+          ...desktop,
+          version: 1,
+          surface: 'team',
+        },
+      });
+      await this.refreshSessions();
+      this.scheduleSnapshot();
+    } catch (error) {
+      this.host.notify({
+        type: 'error',
+        command: 'session.markTeam',
+        error: serializeError(error),
+      });
+    }
   }
 
   private scheduleSessionIndexRefresh(): void {
@@ -1177,7 +1231,7 @@ export function applySessionCreationDefaults(
     readonly thinking?: string;
     readonly permission?: PermissionMode;
     readonly planMode?: boolean;
-    readonly additionalDirs?: string[];
+    readonly additionalDirs?: readonly string[];
   },
 ): typeof input {
   const thinking = objectValue(config['thinking']);

@@ -1,6 +1,6 @@
 /**
- * Scenario: renderer Swarm coordination helpers.
- * Responsibilities: permission prompting and pending child interaction selection.
+ * Scenario: renderer multi-agent coordination helpers.
+ * Responsibilities: pending child interaction selection and agent activity projection.
  * Wiring: real TranscriptStore and transcript operations; no external stubs.
  * Run: pnpm --filter @moonshot-ai/kimi-code-desktop test
  */
@@ -9,7 +9,7 @@ import {
   type TranscriptInteraction,
   type TranscriptOperation,
 } from '@moonshot-ai/transcript';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   agentActivityLabel,
@@ -18,50 +18,9 @@ import {
 import {
   collectPendingAgentInteractions,
   interactionSummary,
-  requiresSwarmPermissionChoice,
-  SwarmEntryController,
 } from './swarm-ui';
 
-describe('Swarm UI coordination', () => {
-  it('requires a choice when permission can still prompt', () => {
-    expect(requiresSwarmPermissionChoice('manual')).toBe(true);
-    expect(requiresSwarmPermissionChoice('auto')).toBe(true);
-    expect(requiresSwarmPermissionChoice(undefined)).toBe(true);
-  });
-
-  it('skips the choice when permission is YOLO', () => {
-    expect(requiresSwarmPermissionChoice('yolo')).toBe(false);
-  });
-
-  it('cancels a pending entry when the active session changes', async () => {
-    const prompts: unknown[] = [];
-    const activate = vi.fn();
-    const controller = new SwarmEntryController(vi.fn(), (prompt) => { prompts.push(prompt); });
-
-    const result = controller.enter('s1', 'manual', activate);
-    controller.cancelOutside('s2');
-
-    await expect(result).resolves.toBe(false);
-    expect(activate).not.toHaveBeenCalled();
-    expect(controller.hasPending).toBe(false);
-    expect(prompts).toEqual([{ sessionId: 's1', permission: 'manual' }, undefined]);
-  });
-
-  it('keeps a failed entry pending after YOLO was applied', async () => {
-    const prompts: unknown[] = [];
-    const applyYolo = vi.fn(async () => undefined);
-    const controller = new SwarmEntryController(applyYolo, (prompt) => { prompts.push(prompt); });
-    const result = controller.enter('s1', 'manual', async () => { throw new Error('enable failed'); });
-
-    await expect(controller.choose('yolo')).rejects.toThrow('enable failed');
-
-    expect(applyYolo).toHaveBeenCalledWith('s1');
-    expect(controller.hasPending).toBe(true);
-    expect(prompts.at(-1)).toEqual({ sessionId: 's1', permission: 'yolo' });
-    controller.cancel();
-    await expect(result).resolves.toBe(false);
-  });
-
+describe('multi-agent UI coordination', () => {
   it('returns pending interactions from the selected agent before main and other agents', () => {
     const store = transcriptFixture();
 

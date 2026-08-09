@@ -58,7 +58,7 @@ export function TeamPage({ sessionId, state, onSeen, onSelectAgent }: {
     setSending(true);
     setError(undefined);
     try {
-      await window.kimiDesktop.team.send(sessionId, message, id);
+      await window.kimiDesktop.team.submit(sessionId, message, id);
       setBody('');
       setClientMessageId(undefined);
       nearBottomRef.current = true;
@@ -70,7 +70,7 @@ export function TeamPage({ sessionId, state, onSeen, onSelectAgent }: {
   };
 
   if (team === undefined) {
-    return <div className="team-empty"><Users size={24} /><strong>尚未创建团队</strong><span>启用 Team Mode 后，首次 Swarm 会创建团队频道。</span></div>;
+    return <div className="team-empty"><Users size={24} /><strong>正在初始化团队</strong><span>团队频道准备完成后会自动显示。</span></div>;
   }
 
   return (

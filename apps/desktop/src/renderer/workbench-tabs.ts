@@ -12,6 +12,13 @@ export interface TeamWorkbenchTab {
   readonly sessionId: string;
 }
 
+export interface AgentWorkbenchTab {
+  readonly id: string;
+  readonly kind: 'agent';
+  readonly sessionId: string;
+  readonly agentId: string;
+}
+
 export interface FileWorkbenchTab {
   readonly id: string;
   readonly kind: 'file';
@@ -47,6 +54,7 @@ export interface OperationDiffWorkbenchTab {
 export type WorkbenchTab =
   | SessionWorkbenchTab
   | TeamWorkbenchTab
+  | AgentWorkbenchTab
   | FileWorkbenchTab
   | DiffWorkbenchTab
   | OperationDiffWorkbenchTab;
@@ -58,7 +66,7 @@ export interface WorkbenchTabState {
 }
 
 interface PersistedWorkbenchState {
-  readonly version: 1 | 2;
+  readonly version: 1 | 2 | 3;
   readonly tabs: readonly PersistedWorkbenchTab[];
   readonly activeId?: string;
 }
@@ -66,6 +74,7 @@ interface PersistedWorkbenchState {
 type PersistedWorkbenchTab =
   | { readonly kind: 'session'; readonly sessionId: string }
   | { readonly kind: 'team'; readonly sessionId: string }
+  | { readonly kind: 'agent'; readonly sessionId: string; readonly agentId: string }
   | { readonly kind: 'file'; readonly path: string }
   | { readonly kind: 'diff'; readonly path: string; readonly area: GitDiffArea };
 
@@ -77,6 +86,10 @@ export function sessionTab(sessionId: string): SessionWorkbenchTab {
 
 export function teamTab(sessionId: string): TeamWorkbenchTab {
   return { id: `team:${sessionId}`, kind: 'team', sessionId };
+}
+
+export function agentTab(sessionId: string, agentId: string): AgentWorkbenchTab {
+  return { id: `agent:${sessionId}:${agentId}`, kind: 'agent', sessionId, agentId };
 }
 
 export function fileTab(path: string): FileWorkbenchTab {
@@ -157,7 +170,7 @@ export function closeWorkbenchTab(state: WorkbenchTabState, id: string): Workben
 export function closeSessionWorkbenchTabs(state: WorkbenchTabState, sessionId: string): WorkbenchTabState {
   return removeWorkbenchTabs(state, new Set(
     state.tabs
-      .filter((tab) => (tab.kind === 'session' || tab.kind === 'team') && tab.sessionId === sessionId)
+      .filter((tab) => (tab.kind === 'session' || tab.kind === 'team' || tab.kind === 'agent') && tab.sessionId === sessionId)
       .map((tab) => tab.id),
   ));
 }
@@ -168,7 +181,7 @@ export function pruneInvalidSessionWorkbenchTabs(
 ): WorkbenchTabState {
   return removeWorkbenchTabs(state, new Set(
     state.tabs
-      .filter((tab) => (tab.kind === 'session' || tab.kind === 'team') && !validSessionIds.has(tab.sessionId))
+      .filter((tab) => (tab.kind === 'session' || tab.kind === 'team' || tab.kind === 'agent') && !validSessionIds.has(tab.sessionId))
       .map((tab) => tab.id),
   ));
 }
@@ -185,12 +198,13 @@ export function serializeWorkbenchState(state: WorkbenchTabState): string {
   const tabs = state.tabs.flatMap<PersistedWorkbenchTab>((tab) => {
     if (tab.kind === 'session') return [{ kind: 'session', sessionId: tab.sessionId }];
     if (tab.kind === 'team') return [{ kind: 'team', sessionId: tab.sessionId }];
+    if (tab.kind === 'agent') return [{ kind: 'agent', sessionId: tab.sessionId, agentId: tab.agentId }];
     if (tab.kind === 'file') return [{ kind: 'file', path: tab.path }];
     if (tab.kind === 'diff') return [{ kind: 'diff', path: tab.path, area: tab.area }];
     return [];
   });
   const persisted: PersistedWorkbenchState = {
-    version: 2,
+    version: 3,
     tabs,
     activeId: state.tabs.some((tab) => tab.id === state.activeId && tab.kind !== 'operation-diff')
       ? state.activeId
@@ -207,7 +221,7 @@ export function restoreWorkbenchState(
   if (value === null) return EMPTY_WORKBENCH;
   try {
     const parsed = JSON.parse(value) as Partial<PersistedWorkbenchState>;
-    if ((parsed.version !== 1 && parsed.version !== 2) || !Array.isArray(parsed.tabs)) return EMPTY_WORKBENCH;
+    if ((parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3) || !Array.isArray(parsed.tabs)) return EMPTY_WORKBENCH;
     const tabs: WorkbenchTab[] = [];
     for (const raw of parsed.tabs) {
       if (raw === null || typeof raw !== 'object') continue;
@@ -215,6 +229,14 @@ export function restoreWorkbenchState(
         tabs.push(sessionTab(raw.sessionId));
       } else if (raw.kind === 'team' && typeof raw.sessionId === 'string' && validTeamSessionIds.has(raw.sessionId)) {
         tabs.push(teamTab(raw.sessionId));
+      } else if (
+        raw.kind === 'agent'
+        && typeof raw.sessionId === 'string'
+        && typeof raw.agentId === 'string'
+        && raw.agentId.length > 0
+        && validTeamSessionIds.has(raw.sessionId)
+      ) {
+        tabs.push(agentTab(raw.sessionId, raw.agentId));
       } else if (raw.kind === 'file' && typeof raw.path === 'string' && raw.path.length > 0) {
         tabs.push(fileTab(raw.path));
       } else if (

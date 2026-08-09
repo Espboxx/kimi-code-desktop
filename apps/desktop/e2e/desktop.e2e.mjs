@@ -131,7 +131,7 @@ try {
   await composerControls.waitFor({ state: 'visible' });
   assert.deepEqual(await page.locator('.composer-modes button').allTextContents(), ['Prompt', 'Steer']);
   assert.equal(await page.locator('.composer-modes').getByTitle('Agent Swarm').count(), 0, 'one-shot Swarm should not be exposed');
-  assert.equal(await composerControls.getByTitle('Session Swarm 模式').count(), 1, 'exactly one session-level Swarm control should be exposed');
+  assert.equal(await composerControls.getByTitle('Session Swarm 模式').count(), 0, 'normal Chat must not expose Team/Swarm controls');
   const automaticTitle = 'Live title sync E2E';
   await submitPrompt(page, automaticTitle);
   await waitForAssistant(page, 'Desktop fixture response.');
@@ -217,21 +217,10 @@ try {
   await composerControls.getByLabel('权限').selectOption('manual');
   await page.waitForFunction(async () => (await window.kimiDesktop.host.snapshot()).session.status?.permission === 'manual');
 
-  const sessionSwarmButton = composerControls.getByTitle('Session Swarm 模式');
-  await sessionSwarmButton.click();
-  const swarmPermissionDialog = page.locator('.swarm-permission-dialog');
-  await swarmPermissionDialog.waitFor({ state: 'visible' });
-  await auditAndScreenshot(firstApp, page, 1_620, 1_040, join(artifactDir, 'swarm-permission-1620x1040.png'));
-  await auditAndScreenshot(firstApp, page, 1_180, 760, join(artifactDir, 'swarm-permission-1180x760.png'));
-  await swarmPermissionDialog.locator('.dialog-footer').getByRole('button', { name: '取消', exact: true }).click();
-  await swarmPermissionDialog.waitFor({ state: 'hidden' });
-  const permissionSnapshot = await page.evaluate(() => window.kimiDesktop.host.snapshot());
-  assert.equal(permissionSnapshot.session.status?.permission, 'manual');
-  assert.notEqual(permissionSnapshot.session.status?.swarmMode, true);
-
-  await sessionSwarmButton.click();
-  await swarmPermissionDialog.waitFor({ state: 'visible' });
-  await swarmPermissionDialog.getByRole('button', { name: '使用 YOLO', exact: true }).click();
+  await page.evaluate(async (id) => {
+    await window.kimiDesktop.turn.setPermission('yolo', id);
+    await window.kimiDesktop.turn.setSwarmMode(true, id);
+  }, sessionId);
   await assertActiveSessionSettings(page, {
     sessionId,
     model: 'desktop-test',
@@ -240,10 +229,14 @@ try {
     planMode: false,
     swarmMode: true,
   });
-  await sessionSwarmButton.click();
-  await page.waitForFunction(async () => (await window.kimiDesktop.host.snapshot()).session.status?.swarmMode !== true);
-  await composerControls.getByLabel('权限').selectOption('manual');
-  await page.waitForFunction(async () => (await window.kimiDesktop.host.snapshot()).session.status?.permission === 'manual');
+  await page.evaluate(async (id) => {
+    await window.kimiDesktop.turn.setSwarmMode(false, id);
+    await window.kimiDesktop.turn.setPermission('manual', id);
+  }, sessionId);
+  await page.waitForFunction(async () => {
+    const status = (await window.kimiDesktop.host.snapshot()).session.status;
+    return status?.swarmMode !== true && status?.permission === 'manual';
+  });
 
   const resizeHandle = page.locator('.composer-resize-handle');
   const editorBeforeResize = await page.locator('.composer textarea').boundingBox();
@@ -377,9 +370,7 @@ try {
     planMode: false,
     swarmMode: false,
   });
-  await sessionSwarmButton.click();
-  await swarmPermissionDialog.waitFor({ state: 'visible' });
-  await swarmPermissionDialog.getByRole('button', { name: '保持 Manual', exact: true }).click();
+  await page.evaluate((id) => window.kimiDesktop.turn.setSwarmMode(true, id), sessionId);
   await assertActiveSessionSettings(page, {
     sessionId,
     model: 'desktop-test-alt',
@@ -494,28 +485,29 @@ try {
   await auditAndScreenshot(firstApp, page, 1_180, 760, join(artifactDir, 'swarm-completed-1180x760.png'));
   assert.equal(await readFile(swarmOutputPath, 'utf8'), 'swarm-approved\n');
 
-  await page.evaluate(() => window.kimiDesktop.config.set({
-    experimental: { team_collaboration: true },
-  }));
-  await page.waitForFunction(async () =>
-    (await window.kimiDesktop.config.get()).experimentalFeatures.some((feature) => {
-      const value = /** @type {{ id?: string; enabled?: boolean }} */ (feature);
-      return value.id === 'team_collaboration' && value.enabled === true;
-    }));
-  teamSessionId = await page.evaluate(() => window.kimiDesktop.session.create({
-    model: 'desktop-test',
-    thinking: 'off',
-    permission: 'manual',
-  }));
-  await page.evaluate(async (id) => {
-    await window.kimiDesktop.session.rename(id, 'Desktop Team E2E');
-    await window.kimiDesktop.turn.setSwarmMode(true, id);
-  }, teamSessionId);
-  await selectSessionByTitle(page, 'Desktop Team E2E');
-  await submitPrompt(page, 'Launch a Team Mode batch and wait for live updates.');
+  await page.locator('.surface-switcher').getByRole('button', { name: '团队', exact: true }).click();
+  await page.locator('.team-workbench').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('.sidebar').count(), 0, 'Chat sidebar must stay outside the Team workbench');
+  assert.equal(await page.locator('.inspector').count(), 0, 'Chat inspector must stay outside the Team workbench');
+  await page.locator('.team-create-button').click();
+  const createTeamDialog = page.locator('.create-team-dialog');
+  await createTeamDialog.waitFor({ state: 'visible' });
+  await createTeamDialog.locator('.team-objective-field textarea').fill(
+    'Desktop Team E2E\nLaunch a Team Mode batch and wait for live updates.',
+  );
+  await createTeamDialog.getByRole('button', { name: '创建并开始', exact: true }).click();
+  await createTeamDialog.waitFor({ state: 'hidden', timeout: 30_000 });
+  teamSessionId = await page.evaluate(async () => (
+    await window.kimiDesktop.session.list()
+  ).find((session) => session.title === 'Desktop Team E2E' && session.surface === 'team')?.id);
+  assert.equal(typeof teamSessionId, 'string');
   const teamTab = page.locator('.workbench-tab').filter({ hasText: 'Desktop Team E2E · 团队' });
   await teamTab.waitFor({ state: 'visible', timeout: 30_000 });
-  assert.equal(await teamTab.getAttribute('aria-selected'), 'false', 'Team creation should not steal focus');
+  assert.equal(await teamTab.getAttribute('aria-selected'), 'true', 'new Team task should open its channel');
+  const teamPage = page.locator('.team-page');
+  await teamPage.waitFor({ state: 'visible' });
+  await teamPage.locator('.team-member-list button').filter({ hasText: 'main' }).click();
+  await page.locator('.team-agent-surface').waitFor({ state: 'visible' });
   try {
     await waitForAssistant(page, 'Team coordination resumed after a live message.', 45_000);
   } catch (error) {
@@ -529,6 +521,8 @@ try {
       providerRequests: provider.requests.slice(-12),
     })}`);
   }
+  await page.locator('.team-channel-back').click();
+  await teamPage.waitFor({ state: 'visible' });
   const teamWaitOutput = await page.evaluate(async () => {
     const items = (await window.kimiDesktop.host.snapshot()).transcript?.transcripts.main?.items ?? [];
     let latest;
@@ -548,23 +542,19 @@ try {
   await page.waitForFunction(async (id) =>
     ((await window.kimiDesktop.host.snapshot()).teams[id]?.snapshot.latestChannelSeq ?? 0) >= 2,
   teamSessionId, { timeout: 30_000 });
-  await teamTab.locator('em[title*="未读团队消息"]').waitFor({ state: 'visible', timeout: 30_000 });
-  await teamTab.locator('.workbench-tab-main').click();
-  const teamPage = page.locator('.team-page');
-  await teamPage.waitFor({ state: 'visible' });
   await page.waitForFunction(() => document.querySelectorAll('.team-message').length >= 2);
   assert.ok(await teamPage.locator('.team-assignment-node').count() >= 2, 'Team assignments are missing');
   assert.match(await teamPage.innerText(), /team-alpha|team-beta/);
   const teamComposer = teamPage.locator('.team-composer textarea');
   await teamComposer.fill('User follow-up from the Team channel.');
   await teamPage.locator('.team-composer button').click();
-  await teamPage.getByText('User follow-up from the Team channel.', { exact: true }).waitFor();
+  await teamPage.locator('.team-message p').getByText('User follow-up from the Team channel.', { exact: true }).waitFor();
   assert.equal(await page.locator('.approval-panel').count(), 0, 'Team messaging must not request tool approval');
   const persistedTeamTabs = await page.evaluate(() => Object.values(localStorage)
     .filter((value) => value.includes('"kind":"team"')));
   assert.ok(persistedTeamTabs.length > 0, `Team tab was not persisted: ${JSON.stringify(persistedTeamTabs)}`);
-  await auditAndScreenshot(firstApp, page, 1_620, 1_040, join(artifactDir, 'team-running-1620x1040.png'));
-  await auditAndScreenshot(firstApp, page, 1_180, 760, join(artifactDir, 'team-running-1180x760.png'));
+  await auditTeamAndScreenshot(firstApp, page, 1_620, 1_040, join(artifactDir, 'team-running-1620x1040.png'));
+  await auditTeamAndScreenshot(firstApp, page, 1_180, 760, join(artifactDir, 'team-running-1180x760.png'));
   await selectSessionByTitle(page, 'Desktop E2E Session');
   assert.equal(await page.locator('.agent-select select').inputValue(), 'main');
   await assertActiveSessionSettings(page, {
@@ -867,12 +857,9 @@ try {
     swarmMode: true,
   });
 
-  if (await page.locator('.workbench-tab-main[title^="团队频道"]').count() === 0) {
-    await selectSessionByTitle(page, 'Desktop Team E2E');
-    await page.locator('.session-row.selected .session-actions button[title="打开团队频道"]').click();
-    await page.locator('.workbench-tab-main[title^="团队频道"]').waitFor({ state: 'visible' });
-    await selectSessionByTitle(page, 'Desktop E2E Session');
-  }
+  await selectTeamByTitle(page, 'Desktop Team E2E');
+  await page.locator('.workbench-tab-main[title^="团队频道"]').waitFor({ state: 'visible' });
+  await selectSessionByTitle(page, 'Desktop E2E Session');
 
   await openSettingsAndVerify(page);
   await auditAndScreenshot(firstApp, page, 1_620, 1_040, join(artifactDir, 'kimi-desktop-1620x1040.png'));
@@ -918,6 +905,7 @@ try {
   assert.equal(restored.activeSessionId, sessionId);
   assert.ok((restored.transcript?.agents.length ?? 0) >= 3);
   await restoredPage.locator('.todo-fixed-panel').getByText('Run complete desktop suite', { exact: true }).waitFor();
+  await restoredPage.locator('.surface-switcher').getByRole('button', { name: '团队', exact: true }).click();
   const restoredTeamTab = restoredPage.locator('.workbench-tab-main[title^="团队频道"]');
   try {
     await restoredTeamTab.waitFor({ state: 'visible', timeout: 10_000 });
@@ -1007,8 +995,6 @@ try {
       join(artifactDir, 'kimi-desktop-1180x760.png'),
       join(artifactDir, 'editor-git-1620x1040.png'),
       join(artifactDir, 'editor-git-1180x760.png'),
-      join(artifactDir, 'swarm-permission-1620x1040.png'),
-      join(artifactDir, 'swarm-permission-1180x760.png'),
       join(artifactDir, 'swarm-interactions-1620x1040.png'),
       join(artifactDir, 'swarm-interactions-1180x760.png'),
       join(artifactDir, 'swarm-completed-1620x1040.png'),
@@ -1178,7 +1164,6 @@ async function assertActiveSessionSettings(page, expected) {
     const thinking = controls?.querySelector('select[aria-label="Thinking"]');
     const permission = controls?.querySelector('select[aria-label="权限"]');
     const plan = controls?.querySelector('button[title="Plan 模式"]');
-    const swarm = controls?.querySelector('button[title="Session Swarm 模式"]');
     return snapshot.activeSessionId === target.sessionId
       && status?.model === target.model
       && status.thinkingEffort === target.thinkingEffort
@@ -1189,7 +1174,7 @@ async function assertActiveSessionSettings(page, expected) {
       && thinking?.value === target.thinkingEffort
       && permission?.value === target.permission
       && plan?.getAttribute('aria-pressed') === String(target.planMode)
-      && swarm?.getAttribute('aria-pressed') === String(target.swarmMode);
+      && controls?.querySelector('button[title="Session Swarm 模式"]') === null;
   }, expected, { timeout: 30_000 });
 
   const authoritative = await page.evaluate(() => window.kimiDesktop.host.snapshot());
@@ -1237,11 +1222,22 @@ async function waitForFileText(path, expected) {
 }
 
 async function selectSessionByTitle(page, title) {
+  await page.locator('.surface-switcher').getByRole('button', { name: '会话', exact: true }).click();
   await page.locator('.session-row').filter({ hasText: title }).locator('.session-main').click();
   await page.waitForFunction(async (expectedTitle) => {
     const snapshot = await window.kimiDesktop.host.snapshot();
     const active = snapshot.sessions.find((session) => session.id === snapshot.activeSessionId);
     return active?.title === expectedTitle && document.querySelector('.composer') !== null;
+  }, title, { timeout: 30_000 });
+}
+
+async function selectTeamByTitle(page, title) {
+  await page.locator('.surface-switcher').getByRole('button', { name: '团队', exact: true }).click();
+  await page.locator('.team-task-row').filter({ hasText: title }).click();
+  await page.waitForFunction(async (expectedTitle) => {
+    const snapshot = await window.kimiDesktop.host.snapshot();
+    const active = snapshot.sessions.find((session) => session.id === snapshot.activeSessionId);
+    return active?.title === expectedTitle && document.querySelector('.team-page') !== null;
   }, title, { timeout: 30_000 });
 }
 
@@ -1256,7 +1252,7 @@ async function openSettingsAndVerify(page) {
   await dialog.locator('.settings-nav button').nth(3).click();
   await dialog.getByText('desktop-fixture', { exact: false }).waitFor();
   await dialog.locator('.settings-nav button').last().click();
-  await dialog.getByLabel('禁用团队协作').waitFor();
+  assert.equal(await dialog.getByLabel(/团队协作/).count(), 0, 'Desktop-owned Team capability must not appear as an experimental toggle');
   await dialog.locator('.settings-nav button').first().click();
   await dialog.getByText('未登录', { exact: true }).waitFor();
   await dialog.locator('.dialog-header .icon-button').click();
@@ -1306,6 +1302,42 @@ async function auditAndScreenshot(app, page, width, height, outputPath) {
   assert.ok((await stat(outputPath)).size > 20_000, 'screenshot is unexpectedly small');
 }
 
+async function auditTeamAndScreenshot(app, page, width, height, outputPath) {
+  await app.evaluate(({ BrowserWindow }, size) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    if (window === undefined) throw new Error('Desktop window is missing');
+    window.setSize(size.width, size.height);
+  }, { width, height });
+  await page.waitForTimeout(350);
+  const audit = await page.evaluate(() => {
+    const rect = (selector) => {
+      const element = document.querySelector(selector);
+      if (!(element instanceof HTMLElement)) return null;
+      const value = element.getBoundingClientRect();
+      return { left: value.left, right: value.right, top: value.top, bottom: value.bottom, width: value.width, height: value.height };
+    };
+    return {
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      document: { width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight },
+      tasks: rect('.team-task-sidebar'),
+      detail: rect('.team-detail-pane'),
+      channel: rect('.team-messages-column'),
+      assignments: rect('.team-assignments'),
+      chatSidebarCount: document.querySelectorAll('.sidebar').length,
+      inspectorCount: document.querySelectorAll('.inspector').length,
+    };
+  });
+  assert.ok(audit.tasks !== null && audit.detail !== null && audit.channel !== null && audit.assignments !== null, JSON.stringify(audit));
+  assert.ok(audit.document.width <= audit.viewport.width + 1, JSON.stringify(audit));
+  assert.ok(audit.document.height <= audit.viewport.height + 1, JSON.stringify(audit));
+  assert.ok(audit.tasks.right <= audit.detail.left + 1, JSON.stringify(audit));
+  assert.ok(audit.channel.right <= audit.assignments.left + 1, JSON.stringify(audit));
+  assert.equal(audit.chatSidebarCount, 0, JSON.stringify(audit));
+  assert.equal(audit.inspectorCount, 0, JSON.stringify(audit));
+  await captureSanitizedFixtureScreenshot(page, outputPath);
+  assert.ok((await stat(outputPath)).size > 20_000, 'Team screenshot is unexpectedly small');
+}
+
 async function auditWelcomeAndScreenshot(app, page, width, height, outputPath) {
   await app.evaluate(({ BrowserWindow }, size) => {
     const window = BrowserWindow.getAllWindows()[0];
@@ -1344,6 +1376,7 @@ async function captureSanitizedFixtureScreenshot(page, outputPath) {
     const replacements = [
       { selector: '.workspace-title small', text: 'Fixture workspace' },
       { selector: '.session-copy small', text: 'Fixture session' },
+      { selector: '.team-task-copy small', text: 'Fixture team task' },
       { selector: '.conversation-header > div > span', text: 'fixture-session' },
     ];
     return replacements.map(({ selector, text }) => {

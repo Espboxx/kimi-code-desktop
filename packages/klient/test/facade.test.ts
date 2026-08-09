@@ -278,7 +278,7 @@ describe('session todos routing', () => {
 });
 
 describe('session collaboration routing', () => {
-  it('routes snapshot, history, send, and live operations through the session service', async () => {
+  it('routes initialization, snapshot, history, send, and live operations through the session service', async () => {
     const channel = new FakeChannel();
     const klient = createKlientFromChannel(channel);
     const session = klient.session('s1');
@@ -286,8 +286,12 @@ describe('session collaboration routing', () => {
       state: 'ready' as const, members: [], batches: [], assignments: [], latestSeq: 0, latestChannelSeq: 0,
     };
     channel.result = snapshot;
-    await expect(session.collaboration.snapshot()).resolves.toEqual(snapshot);
+    await expect(session.collaboration.ensureTeam()).resolves.toEqual(snapshot);
     expect(channel.calls[0]).toEqual({
+      scope: { sessionId: 's1' }, service: 'sessionCollaborationService', method: 'ensureTeam', args: [],
+    });
+    await expect(session.collaboration.snapshot()).resolves.toEqual(snapshot);
+    expect(channel.calls[1]).toEqual({
       scope: { sessionId: 's1' }, service: 'sessionCollaborationService', method: 'snapshot', args: [],
     });
 
@@ -299,7 +303,7 @@ describe('session collaboration routing', () => {
     channel.result = message;
     await expect(session.collaboration.sendUserMessage({ body: 'Coordinate', clientMessageId: 'retry-1' }))
       .resolves.toEqual(message);
-    expect(channel.calls[1]).toEqual({
+    expect(channel.calls[2]).toEqual({
       scope: { sessionId: 's1' }, service: 'sessionCollaborationService', method: 'sendUserMessage',
       args: [{ body: 'Coordinate', clientMessageId: 'retry-1' }],
     });

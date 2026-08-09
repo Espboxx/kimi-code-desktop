@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { experimentalFeatureSourceLabel, localizeExperimentalFeature } from './experimental-features';
+import {
+  experimentalFeatureSourceLabel,
+  isVisibleDesktopExperimentalFeature,
+  localizeExperimentalFeature,
+} from './experimental-features';
 
 describe('experimental feature localization', () => {
   it('presents every known Desktop feature in Chinese', () => {
@@ -22,5 +26,10 @@ describe('experimental feature localization', () => {
       description: '由当前运行时提供的实验功能。',
     });
     expect(experimentalFeatureSourceLabel('future-source')).toBe('运行时');
+  });
+
+  it('hides the Desktop-owned Team flag from experimental settings', () => {
+    expect(isVisibleDesktopExperimentalFeature({ id: 'team_collaboration' })).toBe(false);
+    expect(isVisibleDesktopExperimentalFeature({ id: 'tool-select' })).toBe(true);
   });
 });

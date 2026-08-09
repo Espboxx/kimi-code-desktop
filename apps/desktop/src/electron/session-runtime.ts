@@ -21,6 +21,7 @@ import type {
   SessionDetailsSnapshot,
   SessionStatusSnapshot,
   ShellSnapshot,
+  TeamSubmitResult,
   TranscriptSnapshot,
 } from '../shared/desktop-api';
 import { applyTeamOperations, createTeamState, type TeamStateSnapshot } from '../shared/team-state';
@@ -54,6 +55,7 @@ export interface SessionRuntimeOptions {
     sessionId: string,
     patch: { readonly title?: string; readonly lastPrompt?: string },
   ) => void;
+  readonly onTeamDetected?: (sessionId: string) => void;
 }
 
 const approvalResponseSchema = z.object({
@@ -82,6 +84,7 @@ export class SessionRuntime {
   private readonly onRawEvent: SessionRuntimeOptions['onRawEvent'];
   private readonly onStateChanged: SessionRuntimeOptions['onStateChanged'];
   private readonly onSessionMetadataChanged: SessionRuntimeOptions['onSessionMetadataChanged'];
+  private readonly onTeamDetected: NonNullable<SessionRuntimeOptions['onTeamDetected']>;
   private readonly projectors = new Map<string, DesktopTranscriptProjector>();
   private readonly descriptors = new Map<string, AgentDescriptor>();
   private readonly seqByAgent = new Map<string, number>();
@@ -98,6 +101,11 @@ export class SessionRuntime {
   private planModeQueue: Promise<void> = Promise.resolve();
   private teamQueue: Promise<void> = Promise.resolve();
   private team?: TeamStateSnapshot;
+  private teamDetected = false;
+  private readonly teamSubmissions = new Map<
+    string,
+    { readonly body: string; readonly result: Promise<TeamSubmitResult> }
+  >();
 
   constructor(options: SessionRuntimeOptions) {
     this.session = options.session;
@@ -108,6 +116,7 @@ export class SessionRuntime {
     this.onRawEvent = options.onRawEvent;
     this.onStateChanged = options.onStateChanged;
     this.onSessionMetadataChanged = options.onSessionMetadataChanged;
+    this.onTeamDetected = options.onTeamDetected ?? (() => undefined);
   }
 
   get sdkSession(): Session {
@@ -128,6 +137,17 @@ export class SessionRuntime {
 
   get teamState(): TeamStateSnapshot | undefined {
     return this.team;
+  }
+
+  async ensureTeam(): Promise<TeamSnapshot> {
+    this.ensureOpen();
+    const snapshot = await this.session.ensureTeam();
+    const messages = await this.session.getTeamHistory({ limit: 200 });
+    this.team = createTeamState(snapshot, messages);
+    this.notifyTeamDetected(snapshot);
+    this.emit({ type: 'team.reset', sessionId: this.id, state: this.team });
+    this.onStateChanged();
+    return snapshot;
   }
 
   async initialize(): Promise<void> {
@@ -298,6 +318,24 @@ export class SessionRuntime {
   sendTeamMessage(body: string, clientMessageId: string): Promise<TeamMessage> {
     this.ensureOpen();
     return this.session.sendTeamMessage({ body, clientMessageId });
+  }
+
+  submitTeamMessage(body: string, clientMessageId: string): Promise<TeamSubmitResult> {
+    this.ensureOpen();
+    const existing = this.teamSubmissions.get(clientMessageId);
+    if (existing !== undefined) {
+      if (existing.body !== body) throw teamSubmissionConflict(clientMessageId);
+      return existing.result;
+    }
+    const result = this.performTeamSubmission(body, clientMessageId).catch((error) => {
+      this.teamSubmissions.delete(clientMessageId);
+      throw error;
+    });
+    this.teamSubmissions.set(clientMessageId, { body, result });
+    if (this.teamSubmissions.size > 256) {
+      this.teamSubmissions.delete(this.teamSubmissions.keys().next().value as string);
+    }
+    return result;
   }
 
   async runShell(command: string): Promise<ShellSnapshot> {
@@ -591,6 +629,20 @@ export class SessionRuntime {
     this.onStateChanged();
   }
 
+  private async performTeamSubmission(
+    body: string,
+    clientMessageId: string,
+  ): Promise<TeamSubmitResult> {
+    const message = await this.sendTeamMessage(body, clientMessageId);
+    const wake = this.busy ? 'steer' : 'swarm';
+    await this.submit({
+      mode: wake,
+      text: teamWakePrompt(message.channelSeq, message.body),
+      media: [],
+    });
+    return { message, wake };
+  }
+
   private enqueueTeamOperation(operation: TeamOperation): void {
     if (this.disposed) return;
     const next = this.teamQueue.then(
@@ -628,6 +680,7 @@ export class SessionRuntime {
       return;
     }
     this.team = next;
+    this.notifyTeamDetected(next.snapshot);
     if (!hadTeam && next.snapshot.team !== undefined) {
       this.emit({ type: 'team.reset', sessionId: this.id, state: next });
     } else {
@@ -643,6 +696,7 @@ export class SessionRuntime {
         ? []
         : await this.session.getTeamHistory({ limit: 200 });
       this.team = createTeamState(snapshot, messages);
+      this.notifyTeamDetected(snapshot);
       if (publish) this.emit({ type: 'team.reset', sessionId: this.id, state: this.team });
       this.onStateChanged();
     } catch (error) {
@@ -670,6 +724,12 @@ export class SessionRuntime {
     return false;
   }
 
+  private notifyTeamDetected(snapshot: { readonly team?: unknown }): void {
+    if (this.teamDetected || snapshot.team === undefined) return;
+    this.teamDetected = true;
+    this.onTeamDetected(this.id);
+  }
+
   private agentForToolCall(toolCallId: string): string {
     for (const [agentId, projector] of this.projectors) {
       if (projector.hasToolCall(toolCallId)) return agentId;
@@ -680,6 +740,23 @@ export class SessionRuntime {
   private ensureOpen(): void {
     if (this.disposed) throw new Error(`Session runtime is closed: ${this.id}`);
   }
+}
+
+export function teamWakePrompt(channelSeq: number, body: string): string {
+  return [
+    `A user message was posted to the Team general channel at #${String(channelSeq)}.`,
+    '<team_user_message>',
+    body,
+    '</team_user_message>',
+    'Read that channel message, coordinate the team with TeamStatus, TeamSend, and TeamWait, and respond through the appropriate Team workflow.',
+  ].join('\n');
+}
+
+function teamSubmissionConflict(clientMessageId: string): Error {
+  return Object.assign(new Error(`Team message id ${clientMessageId} was reused with a different body`), {
+    code: 'collaboration.idempotency_conflict',
+    details: { clientMessageId },
+  });
 }
 
 function emptyDetails(): SessionDetailsSnapshot {

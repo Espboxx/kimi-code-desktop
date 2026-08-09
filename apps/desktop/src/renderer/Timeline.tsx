@@ -122,7 +122,7 @@ export function Timeline({
       <div className="timeline-empty">
         <div className="empty-glyph"><Brain size={22} /></div>
         <strong>会话已就绪</strong>
-        <span>输入任务，或切换到 Plan / Swarm 模式开始工作。</span>
+        <span>输入任务开始工作；需要多 Agent 协作时，请切换到 Team 工作台。</span>
       </div>
     );
   }

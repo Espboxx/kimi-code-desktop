@@ -1481,6 +1481,11 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     return () => disposable.dispose();
   }
 
+  async ensureTeam(input: SessionIdRpcInput): Promise<TeamSnapshot> {
+    await this.agentFacade(input.sessionId);
+    return this.klient.session(input.sessionId).collaboration.ensureTeam();
+  }
+
   async getTeamSnapshot(input: SessionIdRpcInput): Promise<TeamSnapshot> {
     await this.agentFacade(input.sessionId);
     return this.klient.session(input.sessionId).collaboration.snapshot();

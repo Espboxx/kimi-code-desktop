@@ -39,3 +39,8 @@ export function localizeExperimentalFeature(id: string): ExperimentalFeatureCopy
 export function experimentalFeatureSourceLabel(source: string): string {
   return SOURCE_LABELS[source] ?? '运行时';
 }
+
+export function isVisibleDesktopExperimentalFeature(value: unknown): boolean {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return true;
+  return (value as Record<string, unknown>)['id'] !== 'team_collaboration';
+}

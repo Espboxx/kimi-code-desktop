@@ -87,6 +87,16 @@ describe('desktop IPC schema', () => {
 
   it('validates Team commands and preserves the retry idempotency key', async () => {
     expect(parseDesktopCommand({
+      domain: 'session',
+      action: 'create',
+      payload: { surface: 'team', permission: 'yolo' },
+    })).toMatchObject({ name: 'session.create', payload: { surface: 'team', permission: 'yolo' } });
+    expect(parseDesktopCommand({
+      domain: 'team',
+      action: 'ensure',
+      payload: { sessionId: 's1' },
+    })).toMatchObject({ name: 'team.ensure' });
+    expect(parseDesktopCommand({
       domain: 'team',
       action: 'operations',
       payload: { sessionId: 's1', afterSeq: 12, limit: 200 },
@@ -107,9 +117,15 @@ describe('desktop IPC schema', () => {
       return undefined as T;
     };
     const api = createKimiDesktopApi(invoke, () => () => undefined);
+    await api.team.ensure('s1');
+    expect(calls).toHaveBeenCalledWith('team', 'ensure', { sessionId: 's1' });
     await api.team.send('s1', 'Coordinate', 'retry-1');
     expect(calls).toHaveBeenCalledWith('team', 'send', {
       sessionId: 's1', body: 'Coordinate', clientMessageId: 'retry-1',
+    });
+    await api.team.submit('s1', 'Coordinate', 'retry-2');
+    expect(calls).toHaveBeenCalledWith('team', 'submit', {
+      sessionId: 's1', body: 'Coordinate', clientMessageId: 'retry-2',
     });
   });
 });

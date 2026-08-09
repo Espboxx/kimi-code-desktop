@@ -7,6 +7,7 @@ import type { GitFile } from '../shared/desktop-api';
 import { gitDecoration } from './git-tree';
 import {
   activateWorkbenchTab,
+  agentTab,
   closeWorkbenchTab,
   closeSessionWorkbenchTabs,
   diffTab,
@@ -67,6 +68,18 @@ describe('workbench tab state', () => {
     expect(restoreWorkbenchState(serialized, new Set(['s1']), new Set()).tabs).toHaveLength(1);
     const restored = restoreWorkbenchState(serialized, new Set(['s1']), new Set(['s1']));
     expect(restored.tabs.map((tab) => tab.id)).toEqual(['file:src/main.ts', 'team:s1']);
+  });
+
+  it('persists Team agent details only while their Team session exists', () => {
+    let state = openWorkbenchTab({ tabs: [], recentIds: [] }, teamTab('s1'));
+    state = openWorkbenchTab(state, agentTab('s1', 'reviewer'));
+    const serialized = serializeWorkbenchState(state);
+
+    expect(restoreWorkbenchState(serialized, new Set(['s1']), new Set()).tabs).toEqual([]);
+    expect(restoreWorkbenchState(serialized, new Set(['s1']), new Set(['s1'])).tabs).toEqual([
+      teamTab('s1'),
+      agentTab('s1', 'reviewer'),
+    ]);
   });
 
   it('removes session-owned tabs when a session is deleted, selecting the most recent survivor', () => {

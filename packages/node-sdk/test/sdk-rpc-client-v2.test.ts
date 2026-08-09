@@ -346,8 +346,13 @@ describe('SDKRpcClientV2 (agent-core-v2 wiring MVP)', () => {
       });
       await expect(session.getTeamOperations({ afterSeq: 0 })).resolves.toEqual([]);
       expect(session.onTeamOperation(() => undefined)).toBeTypeOf('function');
+      const team = await session.ensureTeam();
+      expect(team).toMatchObject({
+        state: 'ready', latestSeq: 1, team: { sessionId: session.id, leaderAgentId: 'main' },
+      });
+      await expect(session.ensureTeam()).resolves.toMatchObject({ latestSeq: 1, team: team.team });
       await expect(session.sendTeamMessage({ body: 'hello', clientMessageId: 'client-1' }))
-        .rejects.toMatchObject({ code: 'collaboration.no_team' });
+        .resolves.toMatchObject({ body: 'hello', channelSeq: 1 });
     } finally {
       await harness.close();
     }
@@ -359,6 +364,7 @@ describe('SDKRpcClientV2 (agent-core-v2 wiring MVP)', () => {
       workDir: join(tmpdir(), 'legacy-team-session'),
       rpc: {} as SDKRpcClientBase,
     });
+    await expect(session.ensureTeam()).rejects.toThrow('requires v2');
     await expect(session.getTeamSnapshot()).rejects.toThrow('requires v2');
     await expect(session.sendTeamMessage({ body: 'hello', clientMessageId: 'client-1' })).rejects.toThrow('requires v2');
     expect(() => session.onTeamOperation(() => undefined)).toThrow('requires v2');
