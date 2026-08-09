@@ -34,13 +34,13 @@ Kimi Code Desktop 是一个 Windows 优先的 Electron 桌面工作台，把 Kim
 
 Windows x64 便携版由 `desktop-v*` 标签触发的 GitHub Actions 构建。前往本仓库的 [GitHub Releases](../../releases)，下载：
 
-- `Kimi-Code-Desktop-0.1.0-x64-portable.exe`
-- `Kimi-Code-Desktop-0.1.0-x64-portable.exe.sha256`
+- `Kimi-Code-Desktop-0.1.1-x64-portable.exe`
+- `Kimi-Code-Desktop-0.1.1-x64-portable.exe.sha256`
 
 下载后可在 PowerShell 校验 SHA256：
 
 ```powershell
-$exe = ".\Kimi-Code-Desktop-0.1.0-x64-portable.exe"
+$exe = ".\Kimi-Code-Desktop-0.1.1-x64-portable.exe"
 $expected = (Get-Content "$exe.sha256").Split()[0]
 $actual = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
 $actual -eq $expected
@@ -66,7 +66,7 @@ Team Mode 默认关闭。在启动 Desktop 前设置实验开关：
 
 ```powershell
 $env:KIMI_CODE_EXPERIMENTAL_TEAM_COLLABORATION = "1"
-& ".\Kimi-Code-Desktop-0.1.0-x64-portable.exe"
+& ".\Kimi-Code-Desktop-0.1.1-x64-portable.exe"
 ```
 
 首次进入 Session Swarm 后会创建会话级 Team 和 `general` 频道。Agent 可通过 `TeamSend`、`TeamStatus` 和 `TeamWait` 协作；团队日志与普通对话时间线分开恢复。该功能仍处于实验阶段，数据格式和交互可能调整。

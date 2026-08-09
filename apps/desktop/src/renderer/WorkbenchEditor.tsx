@@ -1,9 +1,9 @@
 import { Editor } from '@monaco-editor/react';
-import { AlertTriangle, FileWarning, RefreshCw, RotateCcw, Save } from 'lucide-react';
+import { AlertTriangle, FileWarning, GitCompare, RefreshCw, RotateCcw, Save } from 'lucide-react';
 import * as monaco from 'monaco-editor';
 import { useEffect, useRef, useState } from 'react';
 
-import type { DiffWorkbenchTab, FileWorkbenchTab } from './workbench-tabs';
+import type { DiffWorkbenchTab, FileWorkbenchTab, OperationDiffWorkbenchTab } from './workbench-tabs';
 
 interface FileEditorProps {
   readonly tab: FileWorkbenchTab;
@@ -92,6 +92,43 @@ export function GitDiffEditorView({ tab, theme, onReload }: {
           originalModelPath={`git-original:///${tab.area}/${tab.path}`}
           modifiedModelPath={`git-modified:///${tab.area}/${tab.path}`}
           language={tab.diff.languageId}
+          theme={theme}
+          renderSideBySide={wide}
+        />
+      </div>
+    </div>
+  );
+}
+
+export function OperationDiffEditorView({ tab, theme, onOpenGitDiff }: {
+  readonly tab: OperationDiffWorkbenchTab;
+  readonly theme: 'vs' | 'vs-dark';
+  readonly onOpenGitDiff: () => void;
+}) {
+  const [wide, setWide] = useState(() => window.innerWidth >= 1_360);
+  useEffect(() => {
+    const listener = () => setWide(window.innerWidth >= 1_360);
+    window.addEventListener('resize', listener);
+    return () => window.removeEventListener('resize', listener);
+  }, []);
+
+  return (
+    <div className="editor-view diff-editor-view operation-diff-editor-view">
+      <div className="editor-toolbar">
+        <span className="diff-side-label">操作前片段</span>
+        <span className="diff-arrow">→</span>
+        <span className="diff-side-label">操作后片段</span>
+        <span className="editor-breadcrumb" title={tab.path}>{tab.path}</span>
+        <span className="editor-toolbar-spacer" />
+        <button onClick={onOpenGitDiff} title="查看当前工作区相对 Git Index 的差异"><GitCompare size={13} />当前 Git 差异</button>
+      </div>
+      <div className="monaco-host">
+        <ManagedDiffEditor
+          original={tab.before}
+          modified={tab.after}
+          originalModelPath={`operation-before:///${encodeURIComponent(tab.toolCallId)}/${tab.path}`}
+          modifiedModelPath={`operation-after:///${encodeURIComponent(tab.toolCallId)}/${tab.path}`}
+          language="plaintext"
           theme={theme}
           renderSideBySide={wide}
         />

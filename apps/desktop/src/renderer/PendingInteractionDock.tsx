@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, Eye, MessageCircleQuestion, ShieldAlert, Users } from 'lucide-react';
+import { ChevronDown, Eye, MessageCircleQuestion, ShieldAlert } from 'lucide-react';
 import type { TranscriptStore } from '@moonshot-ai/transcript';
 
 import { InteractionPanel } from './InteractionPanel';
@@ -30,10 +30,10 @@ export function PendingInteractionDock(props: PendingInteractionDockProps) {
   if (sessionId === undefined || pending.length === 0) return null;
 
   return (
-    <section className="pending-interaction-dock" aria-label="子 Agent 待处理交互">
+    <section className="pending-interaction-dock" aria-label="待处理交互">
       <header className="pending-interaction-header" aria-live="polite">
-        <Users size={14} />
-        <strong>子 Agent 等待处理</strong>
+        <ShieldAlert size={14} />
+        <strong>Kimi 等待处理</strong>
         <span>{pending.length}</span>
       </header>
       <div className="pending-interaction-list">
@@ -55,7 +55,13 @@ export function PendingInteractionDock(props: PendingInteractionDockProps) {
                   <span className="pending-interaction-text">{item.summary}</span>
                   <ChevronDown className="pending-interaction-chevron" size={14} />
                 </button>
-                <button className="icon-button" type="button" onClick={() => { props.onSelectAgent(item.agent.agentId); }} title={`查看 ${item.agent.label ?? item.agent.agentId}`}>
+                <button
+                  className="icon-button"
+                  type="button"
+                  onClick={() => { props.onSelectAgent(item.agent.agentId); }}
+                  title={`查看 ${item.agent.label ?? item.agent.agentId}`}
+                  disabled={item.agent.agentId === props.selectedAgentId}
+                >
                   <Eye size={14} />
                 </button>
               </div>

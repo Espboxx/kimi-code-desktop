@@ -8,6 +8,8 @@ import {
   ChevronRight,
   CircleDashed,
   Clock3,
+  FileCode2,
+  GitCompare,
   Image as ImageIcon,
   TerminalSquare,
   Video,
@@ -31,6 +33,15 @@ import { InlineAgentActivity } from './AgentActivity';
 import type { AgentActivityForest } from './agent-activity';
 import { InteractionPanel } from './InteractionPanel';
 import { decideTimelineAutoFollow } from './timeline-scroll';
+import {
+  fileOperationDisplay,
+  payloadPreview,
+  toolDisplayState,
+  workspaceFilePath,
+  type FileOperationDisplay,
+  type FileOperationTarget,
+  type ToolDisplayState,
+} from './tool-display';
 import { classNames, formatJson, formatTime, record, text } from './ui-utils';
 
 interface TimelineProps {
@@ -42,6 +53,9 @@ interface TimelineProps {
   readonly sessionId?: string;
   readonly version: number;
   readonly followRequest: number;
+  readonly workspaceRoot: string;
+  readonly onOpenFileOperation: (target: FileOperationTarget) => void;
+  readonly onOpenGitDiff: (path: string) => void;
 }
 
 export function Timeline({
@@ -53,6 +67,9 @@ export function Timeline({
   sessionId,
   version,
   followRequest,
+  workspaceRoot,
+  onOpenFileOperation,
+  onOpenGitDiff,
 }: TimelineProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const shouldStick = useRef(true);
@@ -63,11 +80,8 @@ export function Timeline({
   const tasks = transcript?.getTasks() ?? new Map<string, TranscriptTask>();
   const interactions = transcript?.getInteractions() ?? new Map<string, TranscriptInteraction>();
   const attachments = transcript?.getAttachments() ?? new Map<string, TranscriptAttachment>();
-  const floatingInteractions = [...interactions.values()].filter((interaction) =>
-    interaction.state === 'pending' && interaction.toolCallId === undefined,
-  );
   const virtualizer = useVirtualizer({
-    count: items.length + (floatingInteractions.length > 0 ? 1 : 0),
+    count: items.length,
     getScrollElement: () => parentRef.current,
     estimateSize: (index) => items[index]?.kind === 'turn' ? 260 : 56,
     overscan: 5,
@@ -103,7 +117,7 @@ export function Timeline({
     );
   }
 
-  if (items.length === 0 && floatingInteractions.length === 0) {
+  if (items.length === 0) {
     return (
       <div className="timeline-empty">
         <div className="empty-glyph"><Brain size={22} /></div>
@@ -125,33 +139,29 @@ export function Timeline({
       <div className="timeline-virtual" style={{ height: virtualizer.getTotalSize() }}>
         {virtualizer.getVirtualItems().map((virtualItem) => {
           const item = items[virtualItem.index];
+          if (item === undefined) return null;
           return (
             <div
               className="timeline-virtual-row"
               data-index={virtualItem.index}
-              key={item === undefined ? 'floating-interactions' : itemId(item)}
+              key={itemId(item)}
               ref={virtualizer.measureElement}
               style={{ transform: `translateY(${virtualItem.start}px)` }}
             >
-              {item === undefined ? (
-                <div className="floating-interactions">
-                  {floatingInteractions.map((interaction) => (
-                    <InteractionPanel interaction={interaction} sessionId={sessionId} key={interaction.interactionId} />
-                  ))}
-                </div>
-              ) : (
-                <TimelineItem
-                  item={item}
-                  tasks={tasks}
-                  interactions={interactions}
-                  attachments={attachments}
-                  sessionId={sessionId}
-                  store={store}
-                  activity={activity}
-                  selectedAgentId={selectedAgentId}
-                  onSelectAgent={onSelectAgent}
-                />
-              )}
+              <TimelineItem
+                item={item}
+                tasks={tasks}
+                interactions={interactions}
+                attachments={attachments}
+                sessionId={sessionId}
+                store={store}
+                activity={activity}
+                selectedAgentId={selectedAgentId}
+                onSelectAgent={onSelectAgent}
+                workspaceRoot={workspaceRoot}
+                onOpenFileOperation={onOpenFileOperation}
+                onOpenGitDiff={onOpenGitDiff}
+              />
             </div>
           );
         })}
@@ -170,6 +180,9 @@ function TimelineItem({
   activity,
   selectedAgentId,
   onSelectAgent,
+  workspaceRoot,
+  onOpenFileOperation,
+  onOpenGitDiff,
 }: {
   readonly item: TranscriptItem;
   readonly tasks: ReadonlyMap<string, TranscriptTask>;
@@ -180,6 +193,9 @@ function TimelineItem({
   readonly activity: AgentActivityForest;
   readonly selectedAgentId: string;
   readonly onSelectAgent: (agentId: string) => void;
+  readonly workspaceRoot: string;
+  readonly onOpenFileOperation: (target: FileOperationTarget) => void;
+  readonly onOpenGitDiff: (path: string) => void;
 }) {
   if (item.kind === 'marker') {
     const payload = record(item.payload);
@@ -217,6 +233,9 @@ function TimelineItem({
       activity={activity}
       selectedAgentId={selectedAgentId}
       onSelectAgent={onSelectAgent}
+      workspaceRoot={workspaceRoot}
+      onOpenFileOperation={onOpenFileOperation}
+      onOpenGitDiff={onOpenGitDiff}
     />
   );
 }
@@ -230,6 +249,9 @@ function TurnView({
   activity,
   selectedAgentId,
   onSelectAgent,
+  workspaceRoot,
+  onOpenFileOperation,
+  onOpenGitDiff,
 }: {
   readonly turn: TranscriptTurn;
   readonly interactions: ReadonlyMap<string, TranscriptInteraction>;
@@ -239,6 +261,9 @@ function TurnView({
   readonly activity: AgentActivityForest;
   readonly selectedAgentId: string;
   readonly onSelectAgent: (agentId: string) => void;
+  readonly workspaceRoot: string;
+  readonly onOpenFileOperation: (target: FileOperationTarget) => void;
+  readonly onOpenGitDiff: (path: string) => void;
 }) {
   return (
     <article className="conversation-turn">
@@ -270,6 +295,9 @@ function TurnView({
               activity={activity}
               selectedAgentId={selectedAgentId}
               onSelectAgent={onSelectAgent}
+              workspaceRoot={workspaceRoot}
+              onOpenFileOperation={onOpenFileOperation}
+              onOpenGitDiff={onOpenGitDiff}
               key={frame.frameId}
             />
           )))}
@@ -297,6 +325,9 @@ function FrameView({
   activity,
   selectedAgentId,
   onSelectAgent,
+  workspaceRoot,
+  onOpenFileOperation,
+  onOpenGitDiff,
 }: {
   readonly frame: TranscriptFrame;
   readonly interaction?: TranscriptInteraction;
@@ -306,6 +337,9 @@ function FrameView({
   readonly activity: AgentActivityForest;
   readonly selectedAgentId: string;
   readonly onSelectAgent: (agentId: string) => void;
+  readonly workspaceRoot: string;
+  readonly onOpenFileOperation: (target: FileOperationTarget) => void;
+  readonly onOpenGitDiff: (path: string) => void;
 }) {
   switch (frame.kind) {
     case 'text':
@@ -331,15 +365,43 @@ function FrameView({
           <span>{frame.message}</span>
         </div>
       );
-    case 'tool':
+    case 'tool': {
+      const operation = fileOperationDisplay(frame.display);
+      const operationPath = operation === undefined ? undefined : workspaceFilePath(workspaceRoot, operation.path);
+      const operationTarget: FileOperationTarget | undefined = frame.state === 'done' && operation !== undefined && operationPath !== undefined
+        ? {
+            toolCallId: frame.toolCallId,
+            operation: operation.operation,
+            path: operationPath,
+            before: operation.before,
+            after: operation.after,
+          }
+        : undefined;
       return (
         <div className={classNames('tool-frame', `tool-${frame.state}`)}>
           <details open={frame.state === 'running'}>
             <summary>
               <span className="tool-icon"><Wrench size={14} /></span>
               <strong>{frame.name || 'Tool'}</strong>
-              <span className="tool-summary">{toolSummary(frame.input, frame.display)}</span>
-              <ToolState state={frame.state} />
+              <span className="tool-summary">{operationPath ?? toolSummary(frame.input, frame.display, interaction)}</span>
+              <span className="tool-summary-status">
+                {operationTarget !== undefined && (
+                  <button
+                    className="tool-open-action"
+                    type="button"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onOpenFileOperation(operationTarget);
+                    }}
+                    title={operationTarget.operation === 'edit' ? '查看本次修改' : '打开文件'}
+                  >
+                    {operationTarget.operation === 'edit' ? <GitCompare size={12} /> : <FileCode2 size={12} />}
+                    {operationTarget.operation === 'edit' ? '查看修改' : '打开文件'}
+                  </button>
+                )}
+                <ToolState state={toolDisplayState(frame, interaction)} />
+              </span>
               <ChevronRight className="tool-chevron" size={14} />
             </summary>
             <div className="tool-details">
@@ -349,7 +411,15 @@ function FrameView({
                   {frame.progress.text !== undefined && <pre>{frame.progress.text}</pre>}
                 </div>
               )}
-              {frame.input !== undefined && <PayloadBlock title="输入" value={frame.input} />}
+              {operation !== undefined ? (
+                <FileOperationDetails
+                  operation={operation}
+                  path={operationPath}
+                  target={operationTarget}
+                  onOpen={onOpenFileOperation}
+                  onOpenGitDiff={onOpenGitDiff}
+                />
+              ) : frame.input !== undefined && <PayloadBlock title="输入" value={frame.input} />}
               {frame.output !== undefined && <PayloadBlock title={frame.state === 'error' ? '错误' : '结果'} value={frame.output} />}
             </div>
           </details>
@@ -361,12 +431,47 @@ function FrameView({
               onSelectAgent={onSelectAgent}
             />
           )}
-          {interaction !== undefined && (
+          {interaction !== undefined && interaction.state !== 'pending' && (
             <InteractionPanel interaction={interaction} sessionId={sessionId} />
           )}
         </div>
       );
+    }
   }
+}
+
+function FileOperationDetails({ operation, path, target, onOpen, onOpenGitDiff }: {
+  readonly operation: FileOperationDisplay;
+  readonly path?: string;
+  readonly target?: FileOperationTarget;
+  readonly onOpen: (target: FileOperationTarget) => void;
+  readonly onOpenGitDiff: (path: string) => void;
+}) {
+  const detail = operation.operation === 'write'
+    ? `写入 ${operation.content?.length.toLocaleString('zh-CN') ?? '未知'} 个字符`
+    : operation.operation === 'edit'
+      ? `替换 ${operation.before?.length.toLocaleString('zh-CN') ?? '未知'} → ${operation.after?.length.toLocaleString('zh-CN') ?? '未知'} 个字符`
+      : '读取文件';
+  return (
+    <div className="file-operation-details">
+      <div><span>{operationLabel(operation.operation)}</span><code>{path ?? operation.path}</code><small>{detail}</small></div>
+      {target !== undefined ? (
+        <div className="file-operation-actions">
+          <button type="button" onClick={() => onOpen(target)}>
+            {target.operation === 'edit' ? <GitCompare size={12} /> : <FileCode2 size={12} />}
+            {target.operation === 'edit' ? '查看本次修改' : '打开文件'}
+          </button>
+          <button type="button" onClick={() => onOpenGitDiff(target.path)}><GitCompare size={12} />当前 Git 差异</button>
+        </div>
+      ) : (
+        <small className="file-operation-unavailable">操作完成后可打开；工作区外路径不支持在编辑器中查看。</small>
+      )}
+    </div>
+  );
+}
+
+function operationLabel(operation: FileOperationDisplay['operation']): string {
+  return operation === 'read' ? '读取' : operation === 'write' ? '写入' : '编辑';
 }
 
 function AttachmentStrip({
@@ -403,17 +508,24 @@ function AttachmentStrip({
   );
 }
 
-function ToolState({ state }: { readonly state: 'running' | 'done' | 'error' }) {
-  if (state === 'running') return <span className="tool-state running"><CircleDashed className="spin" size={13} />运行中</span>;
+function ToolState({ state }: { readonly state: ToolDisplayState }) {
+  if (state === 'preparing') return <span className="tool-state running"><CircleDashed className="spin" size={13} />生成参数</span>;
+  if (state === 'waiting-approval') return <span className="tool-state waiting"><Clock3 size={13} />等待批准</span>;
+  if (state === 'waiting-answer') return <span className="tool-state waiting"><Clock3 size={13} />等待回答</span>;
+  if (state === 'running') return <span className="tool-state running"><CircleDashed className="spin" size={13} />执行中</span>;
   if (state === 'error') return <span className="tool-state error"><X size={13} />失败</span>;
   return <span className="tool-state done"><Check size={13} />完成</span>;
 }
 
 function PayloadBlock({ title, value }: { readonly title: string; readonly value: unknown }) {
+  const preview = payloadPreview(value);
   return (
     <div className="payload-block">
       <span>{title}</span>
-      <pre>{formatJson(value)}</pre>
+      <pre>
+        {preview.text}
+        {preview.omittedCharacters > 0 && <small>\n… 已省略 {preview.omittedCharacters.toLocaleString('zh-CN')} 个字符</small>}
+      </pre>
     </div>
   );
 }
@@ -447,10 +559,14 @@ function markerTitle(marker: string, payload: unknown): string {
   return marker;
 }
 
-function toolSummary(input: unknown, display: unknown): string {
+function toolSummary(input: unknown, display: unknown, interaction?: TranscriptInteraction): string {
   const source = record(display);
   const inputRecord = record(input);
-  return text(source['summary'], text(source['description'], text(inputRecord['path'], text(inputRecord['command']))));
+  const request = record(interaction?.request);
+  return text(source['summary'], text(
+    source['description'],
+    text(inputRecord['path'], text(inputRecord['command'], text(request['action']))),
+  ));
 }
 
 function turnStateLabel(state: TranscriptTurn['state']): string {

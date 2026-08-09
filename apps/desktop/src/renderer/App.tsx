@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Bot,
   Check,
@@ -28,12 +28,15 @@ import { Sidebar, type SessionAction } from './Sidebar';
 import { SwarmEntryController, type SwarmPermissionPrompt } from './swarm-ui';
 import { SwarmPermissionDialog } from './SwarmPermissionDialog';
 import { TeamPage } from './TeamPage';
+import { persistTheme, readTheme, toggleTheme } from './theme';
 import { Timeline } from './Timeline';
+import type { FileOperationTarget } from './tool-display';
 import { classNames, record, text } from './ui-utils';
 import {
   FileEditorView,
   GitDiffEditorView,
   MemoryDiffDialog,
+  OperationDiffEditorView,
 } from './WorkbenchEditor';
 import { WorkbenchTabs } from './WorkbenchTabs';
 import {
@@ -43,8 +46,10 @@ import {
   cycleWorkbenchTab,
   EMPTY_WORKBENCH,
   ensureWorkbenchTab,
+  diffTab,
   fileTab,
   openWorkbenchTab,
+  operationDiffTab,
   patchWorkbenchTab,
   pruneInvalidSessionWorkbenchTabs,
   restoreWorkbenchState,
@@ -56,8 +61,6 @@ import {
   type WorkbenchTab,
   type WorkbenchTabState,
 } from './workbench-tabs';
-
-type Theme = 'system' | 'light' | 'dark';
 
 interface SessionDialogState {
   readonly session: SessionListItem;
@@ -89,8 +92,10 @@ export function App() {
   const [selectedAgents, setSelectedAgents] = useState<Record<string, string>>({});
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [workspaceChoosing, setWorkspaceChoosing] = useState(false);
-  const [theme, setTheme] = useState<Theme>('system');
-  const [systemDark, setSystemDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const [theme, setTheme] = useState(() => readTheme(
+    window.localStorage,
+    window.matchMedia('(prefers-color-scheme: dark)').matches,
+  ));
   const [sessionDialog, setSessionDialog] = useState<SessionDialogState>();
   const [taskOutput, setTaskOutput] = useState<{ taskId: string; output?: string }>();
   const [swarmPermission, setSwarmPermission] = useState<SwarmPermissionPrompt>();
@@ -262,7 +267,7 @@ export function App() {
   const activeWorkbenchSessionId = activeTab?.kind === 'session' || activeTab?.kind === 'team'
     ? activeTab.sessionId
     : undefined;
-  const monacoTheme = theme === 'dark' || (theme === 'system' && systemDark) ? 'vs-dark' : 'vs';
+  const monacoTheme = theme === 'dark' ? 'vs-dark' : 'vs';
 
   useEffect(() => {
     if (snapshot === undefined || snapshot.loading) return;
@@ -417,18 +422,11 @@ export function App() {
 
   useEffect(() => () => swarmEntryController.dispose(), [swarmEntryController]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const root = document.documentElement;
-    if (theme === 'system') root.removeAttribute('data-theme');
-    else root.dataset['theme'] = theme;
+    root.dataset['theme'] = theme;
+    persistTheme(window.localStorage, theme);
   }, [theme]);
-
-  useEffect(() => {
-    const media = window.matchMedia('(prefers-color-scheme: dark)');
-    const listener = (event: MediaQueryListEvent) => setSystemDark(event.matches);
-    media.addEventListener('change', listener);
-    return () => media.removeEventListener('change', listener);
-  }, []);
 
   const requestCloseTab = useCallback((tab: WorkbenchTab) => {
     if (tab.kind === 'file' && tab.dirty) {
@@ -534,11 +532,32 @@ export function App() {
     label: text(record(raw)['displayName'], id),
   }));
   const openSessionIds = new Set(workbench.tabs.filter((tab) => tab.kind === 'session').map((tab) => tab.sessionId));
-  const activeFilePath = activeTab?.kind === 'file' || activeTab?.kind === 'diff' ? activeTab.path : undefined;
+  const activeFilePath = activeTab?.kind === 'file' || activeTab?.kind === 'diff' || activeTab?.kind === 'operation-diff'
+    ? activeTab.path
+    : undefined;
 
   const openFile = (path: string) => {
     suppressEmptyWorkbenchAutoOpen.current = false;
     setWorkbench((current) => openWorkbenchTab(current, fileTab(path)));
+  };
+  const openGitDiff = (path: string) => {
+    suppressEmptyWorkbenchAutoOpen.current = false;
+    setWorkbench((current) => openWorkbenchTab(current, diffTab(path, 'working')));
+  };
+  const openFileOperation = (target: FileOperationTarget) => {
+    suppressEmptyWorkbenchAutoOpen.current = false;
+    const before = target.before;
+    const after = target.after;
+    if (target.operation === 'edit' && before !== undefined && after !== undefined) {
+      setWorkbench((current) => openWorkbenchTab(current, operationDiffTab(
+        target.toolCallId,
+        target.path,
+        before,
+        after,
+      )));
+      return;
+    }
+    openFile(target.path);
   };
   const openSession = (sessionId: string) => {
     suppressEmptyWorkbenchAutoOpen.current = false;
@@ -594,7 +613,7 @@ export function App() {
     }
     setMemoryDiff({ path: tab.path, disk: disk.content, editor: tab.content, languageId: disk.languageId });
   };
-  const cycleTheme = () => setTheme((current) => current === 'system' ? 'light' : current === 'light' ? 'dark' : 'system');
+  const cycleTheme = () => setTheme(toggleTheme);
 
   const dirtyPromptPaths = dirtyPrompt?.kind === 'tab'
     ? dirtyTabs.filter((tab) => tab.id === dirtyPrompt.tabId).map((tab) => tab.path)
@@ -648,7 +667,14 @@ export function App() {
           <span className={classNames('runtime-state', status?.busy && 'busy')}><span />{status?.busy ? 'Working' : !workspaceSelected ? '未选择工作区' : snapshot.activeSessionId === undefined ? 'No session' : 'Ready'}</span>
         </div>
         <div className="top-actions">
-          <button className="icon-button" onClick={cycleTheme} title={`主题：${theme}`}>{theme === 'light' ? <Sun size={15} /> : theme === 'dark' ? <Moon size={15} /> : <Settings size={15} />}</button>
+          <button
+            className="icon-button"
+            onClick={cycleTheme}
+            title={theme === 'light' ? '切换到深色主题' : '切换到浅色主题'}
+            aria-label={theme === 'light' ? '切换到深色主题' : '切换到浅色主题'}
+          >
+            {theme === 'light' ? <Sun size={15} /> : <Moon size={15} />}
+          </button>
           <button className="icon-button" onClick={() => setSettingsOpen(true)} title="设置"><Settings size={16} /></button>
         </div>
       </header>
@@ -715,6 +741,9 @@ export function App() {
                 sessionId={snapshot.activeSessionId}
                 version={state.transcriptVersion}
                 followRequest={timelineFollowRequest}
+                workspaceRoot={snapshot.workspace.root}
+                onOpenFileOperation={openFileOperation}
+                onOpenGitDiff={openGitDiff}
               />
               <PendingInteractionDock store={state.transcript} sessionId={snapshot.activeSessionId} selectedAgentId={selectedAgentId} version={state.transcriptVersion} onSelectAgent={setSelectedAgentId} />
               <Composer
@@ -763,6 +792,7 @@ export function App() {
             />
           )}
           {activeTab?.kind === 'diff' && <GitDiffEditorView tab={activeTab} theme={monacoTheme} onReload={() => void loadDiff(activeTab.id, activeTab.path, activeTab.area)} />}
+          {activeTab?.kind === 'operation-diff' && <OperationDiffEditorView tab={activeTab} theme={monacoTheme} onOpenGitDiff={() => openGitDiff(activeTab.path)} />}
         </main>
         <Inspector
           sessionId={snapshot.activeSessionId}

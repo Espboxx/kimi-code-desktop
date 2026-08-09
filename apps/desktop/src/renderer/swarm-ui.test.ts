@@ -62,14 +62,17 @@ describe('Swarm UI coordination', () => {
     await expect(result).resolves.toBe(false);
   });
 
-  it('returns only pending interactions from unselected child agents', () => {
+  it('returns pending interactions from the selected agent before main and other agents', () => {
     const store = transcriptFixture();
 
     expect(collectPendingAgentInteractions(store, 'main').map((item) => item.key)).toEqual([
+      'main:approval:main',
       'agent-1:approval:a1',
       'agent-2:question:q1',
     ]);
     expect(collectPendingAgentInteractions(store, 'agent-1').map((item) => item.key)).toEqual([
+      'agent-1:approval:a1',
+      'main:approval:main',
       'agent-2:question:q1',
     ]);
   });

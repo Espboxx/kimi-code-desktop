@@ -628,16 +628,13 @@ export class DesktopTranscriptProjector {
 
   private toolDelta(event: Extract<Event, { type: 'tool.call.delta' }>): TranscriptOperation[] {
     const hit = this.toolFrames.get(event.toolCallId);
-    if (hit !== undefined) {
-      hit.frame = { ...hit.frame, inputText: `${hit.frame.inputText ?? ''}${event.argumentsPart ?? ''}` };
-      return [{ op: 'frame.upsert', turnId: hit.turnId, stepId: hit.stepId, frame: hit.frame }];
-    }
+    if (hit !== undefined) return [];
     const ops: TranscriptOperation[] = [];
     const turnId = `t${event.turnId}`;
     const step = this.ensureLiveStep(turnId, ops);
     const frame = this.attachPendingAgentLinks(event.toolCallId, {
       kind: 'tool', frameId: `${step.stepId}.tool.${event.toolCallId}`, toolCallId: event.toolCallId,
-      name: event.name ?? '', state: 'running', inputText: event.argumentsPart ?? '',
+      name: event.name ?? '', state: 'running',
     });
     this.toolFrames.set(event.toolCallId, { turnId, stepId: step.stepId, frame });
     ops.push({ op: 'frame.upsert', turnId, stepId: step.stepId, frame });
@@ -656,7 +653,7 @@ export class DesktopTranscriptProjector {
     const frame = this.attachPendingAgentLinks(event.toolCallId, {
       kind: 'tool', frameId: prior?.frameId ?? `${step.stepId}.tool.${event.toolCallId}`,
       toolCallId: event.toolCallId, name: event.name, state: 'running', input,
-      inputText: prior?.inputText, display: event.display, approvalId: prior?.approvalId,
+      display: event.display, approvalId: prior?.approvalId,
       taskId: prior?.taskId, agentRefs: prior?.agentRefs, view: prior?.view, todoId,
     });
     this.toolFrames.set(event.toolCallId, { turnId, stepId: step.stepId, frame });

@@ -35,7 +35,21 @@ export interface DiffWorkbenchTab {
   readonly error?: string;
 }
 
-export type WorkbenchTab = SessionWorkbenchTab | TeamWorkbenchTab | FileWorkbenchTab | DiffWorkbenchTab;
+export interface OperationDiffWorkbenchTab {
+  readonly id: string;
+  readonly kind: 'operation-diff';
+  readonly toolCallId: string;
+  readonly path: string;
+  readonly before: string;
+  readonly after: string;
+}
+
+export type WorkbenchTab =
+  | SessionWorkbenchTab
+  | TeamWorkbenchTab
+  | FileWorkbenchTab
+  | DiffWorkbenchTab
+  | OperationDiffWorkbenchTab;
 
 export interface WorkbenchTabState {
   readonly tabs: readonly WorkbenchTab[];
@@ -80,6 +94,15 @@ export function fileTab(path: string): FileWorkbenchTab {
 
 export function diffTab(path: string, area: GitDiffArea): DiffWorkbenchTab {
   return { id: `diff:${area}:${path}`, kind: 'diff', path, area, loading: true };
+}
+
+export function operationDiffTab(
+  toolCallId: string,
+  path: string,
+  before: string,
+  after: string,
+): OperationDiffWorkbenchTab {
+  return { id: `operation-diff:${toolCallId}`, kind: 'operation-diff', toolCallId, path, before, after };
 }
 
 export function openWorkbenchTab(state: WorkbenchTabState, tab: WorkbenchTab): WorkbenchTabState {
@@ -159,15 +182,19 @@ export function cycleWorkbenchTab(state: WorkbenchTabState, backwards = false): 
 }
 
 export function serializeWorkbenchState(state: WorkbenchTabState): string {
+  const tabs = state.tabs.flatMap<PersistedWorkbenchTab>((tab) => {
+    if (tab.kind === 'session') return [{ kind: 'session', sessionId: tab.sessionId }];
+    if (tab.kind === 'team') return [{ kind: 'team', sessionId: tab.sessionId }];
+    if (tab.kind === 'file') return [{ kind: 'file', path: tab.path }];
+    if (tab.kind === 'diff') return [{ kind: 'diff', path: tab.path, area: tab.area }];
+    return [];
+  });
   const persisted: PersistedWorkbenchState = {
     version: 2,
-    tabs: state.tabs.map((tab) => {
-      if (tab.kind === 'session') return { kind: 'session', sessionId: tab.sessionId };
-      if (tab.kind === 'team') return { kind: 'team', sessionId: tab.sessionId };
-      if (tab.kind === 'file') return { kind: 'file', path: tab.path };
-      return { kind: 'diff', path: tab.path, area: tab.area };
-    }),
-    activeId: state.activeId,
+    tabs,
+    activeId: state.tabs.some((tab) => tab.id === state.activeId && tab.kind !== 'operation-diff')
+      ? state.activeId
+      : undefined,
   };
   return JSON.stringify(persisted);
 }

@@ -94,8 +94,14 @@ export function collectPendingAgentInteractions(
 ): readonly PendingAgentInteraction[] {
   if (store === undefined) return [];
   const pending: PendingAgentInteraction[] = [];
-  for (const agent of store.agents()) {
-    if (agent.agentId === 'main' || agent.agentId === selectedAgentId) continue;
+  const agents = store.agents()
+    .map((agent, index) => ({ agent, index }))
+    .sort((left, right) => {
+      const leftRank = agentInteractionRank(left.agent.agentId, selectedAgentId);
+      const rightRank = agentInteractionRank(right.agent.agentId, selectedAgentId);
+      return leftRank - rightRank || left.index - right.index;
+    });
+  for (const { agent } of agents) {
     const transcript = store.getAgent(agent.agentId);
     if (transcript === undefined) continue;
     for (const interaction of transcript.getInteractions().values()) {
@@ -109,6 +115,12 @@ export function collectPendingAgentInteractions(
     }
   }
   return pending;
+}
+
+function agentInteractionRank(agentId: string, selectedAgentId: string): number {
+  if (agentId === selectedAgentId) return 0;
+  if (agentId === 'main') return 1;
+  return 2;
 }
 
 export function interactionSummary(interaction: TranscriptInteraction): string {

@@ -13,6 +13,7 @@ import {
   ensureWorkbenchTab,
   fileTab,
   openWorkbenchTab,
+  operationDiffTab,
   pruneInvalidSessionWorkbenchTabs,
   restoreWorkbenchState,
   serializeWorkbenchState,
@@ -42,6 +43,18 @@ describe('workbench tab state', () => {
     const restored = restoreWorkbenchState(serialized, new Set());
     expect(restored.tabs.map((tab) => tab.kind)).toEqual(['file', 'diff']);
     expect(restored.tabs[0]).toMatchObject({ kind: 'file', loading: true, dirty: false });
+  });
+
+  it('omits an operation diff and its snippets from restored workspace state', () => {
+    let state = openWorkbenchTab({ tabs: [], recentIds: [] }, fileTab('src/main.ts'));
+    state = openWorkbenchTab(state, operationDiffTab('call-1', 'src/main.ts', 'secret-before', 'secret-after'));
+
+    const serialized = serializeWorkbenchState(state);
+    const restored = restoreWorkbenchState(serialized, new Set());
+
+    expect(serialized).not.toContain('secret-before');
+    expect(serialized).not.toContain('call-1');
+    expect(restored.tabs.map((tab) => tab.id)).toEqual(['file:src/main.ts']);
   });
 
   it('opens Team tabs in the background and restores only existing teams', () => {

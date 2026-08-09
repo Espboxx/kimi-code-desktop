@@ -54,13 +54,15 @@ function tabLabel(tab: WorkbenchTab, session?: SessionListItem): string {
   if (tab.kind === 'session') return session?.title || session?.lastPrompt || 'Kimi 会话';
   if (tab.kind === 'team') return `${session?.title || session?.lastPrompt || 'Kimi 会话'} · 团队`;
   const name = tab.path.split('/').at(-1) ?? tab.path;
-  return tab.kind === 'diff' ? `${name} (${areaLabel(tab.area)})` : name;
+  if (tab.kind === 'diff') return `${name} (${areaLabel(tab.area)})`;
+  return tab.kind === 'operation-diff' ? `${name} (操作差异)` : name;
 }
 
 function tabTitle(tab: WorkbenchTab, session?: SessionListItem): string {
   if (tab.kind === 'session') return `${session?.title || session?.lastPrompt || 'Kimi 会话'} · ${tab.sessionId}`;
   if (tab.kind === 'team') return `团队频道 · ${session?.title || session?.lastPrompt || tab.sessionId}`;
-  return tab.kind === 'diff' ? `${tab.path} · ${areaLabel(tab.area)} Diff` : tab.path;
+  if (tab.kind === 'diff') return `${tab.path} · ${areaLabel(tab.area)} Diff`;
+  return tab.kind === 'operation-diff' ? `${tab.path} · 本次操作差异` : tab.path;
 }
 
 function areaLabel(area: Extract<WorkbenchTab, { kind: 'diff' }>['area']): string {

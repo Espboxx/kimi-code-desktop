@@ -24,6 +24,7 @@ const electronProfile = join(fixtureRoot, 'electron-profile');
 const firstLaunchProfile = join(fixtureRoot, 'first-launch-profile');
 const exportPath = join(fixtureRoot, 'session-export.zip');
 const samplePath = join(workspace, 'sample.txt');
+const recordWritePath = join(workspace, 'record-write.txt');
 const dualPath = join(workspace, 'dual.txt');
 const nestedSourcePath = join(workspace, 'src', 'nested', 'source.ts');
 const untrackedPath = join(workspace, 'src', 'new', 'untracked.txt');
@@ -39,6 +40,7 @@ let secondApp;
 let bootstrapApp;
 let provider;
 let persistedComposerHeight;
+let persistedTheme;
 let secondarySessionId;
 let teamSessionId;
 
@@ -108,6 +110,14 @@ try {
   const first = await launchDesktop();
   firstApp = first.app;
   const page = first.page;
+  const initialTheme = await page.locator('html').getAttribute('data-theme');
+  assert.ok(initialTheme === 'light' || initialTheme === 'dark', `unexpected initial theme: ${String(initialTheme)}`);
+  const themeButton = page.locator('.top-actions').getByRole('button', { name: /切换到(?:深色|浅色)主题/ });
+  assert.equal(await page.locator('.top-actions').getByTitle('设置', { exact: true }).count(), 1, 'settings must have exactly one gear button');
+  await themeButton.click();
+  persistedTheme = initialTheme === 'light' ? 'dark' : 'light';
+  await page.waitForFunction((theme) => document.documentElement.dataset.theme === theme, persistedTheme);
+  assert.equal(await page.evaluate(() => localStorage.getItem('kimi-desktop.theme.v1')), persistedTheme);
   await page.evaluate(() => window.kimiDesktop.workspace.trust());
   const sessionId = await page.evaluate(() => window.kimiDesktop.session.create({
     model: 'desktop-test',
@@ -249,12 +259,41 @@ try {
   assert.equal(await page.evaluate(() => Number(localStorage.getItem('kimi-desktop.composer-height.v1'))), persistedComposerHeight);
 
   await submitPrompt(page, 'Edit sample.txt through an approval request.');
+  const pendingDock = page.locator('.pending-interaction-dock');
   const approval = page.locator('.approval-panel');
   await approval.waitFor({ state: 'visible', timeout: 30_000 });
+  assert.match(await pendingDock.innerText(), /Kimi 等待处理/);
+  await page.locator('.tool-state.waiting').filter({ hasText: '等待批准' }).last().waitFor({ state: 'visible' });
   assert.equal(await readFile(samplePath, 'utf8'), 'before\n');
   await approval.locator('.button-primary').click();
   await waitForAssistant(page, 'Edited sample.txt through approved tool.');
   assert.equal(await readFile(samplePath, 'utf8'), 'after\n');
+
+  const editFrame = page.locator('.tool-frame').filter({ hasText: 'Edit' }).last();
+  await editFrame.locator('.tool-open-action').click();
+  await page.locator('.operation-diff-editor-view').waitFor({ state: 'visible' });
+  assert.match(await page.locator('.operation-diff-editor-view .editor-toolbar').innerText(), /操作前片段[\s\S]*操作后片段/);
+  await page.locator('.operation-diff-editor-view').getByRole('button', { name: '当前 Git 差异', exact: true }).click();
+  await page.locator('.diff-editor-view:not(.operation-diff-editor-view)').waitFor({ state: 'visible' });
+  await selectSessionByTitle(page, 'Desktop E2E Session');
+
+  await submitPrompt(page, 'Write operation record for the file timeline.');
+  await pendingDock.locator('.approval-panel').waitFor({ state: 'visible', timeout: 30_000 });
+  await pendingDock.locator('.approval-panel .button-primary').click();
+  await waitForAssistant(page, 'Wrote record-write.txt through approved tool.');
+  assert.equal(await readFile(recordWritePath, 'utf8'), 'written by tool\n');
+  const writeFrame = page.locator('.tool-frame').filter({ hasText: 'Write' }).last();
+  await writeFrame.locator('.tool-open-action').click();
+  await page.locator('.workbench-tab.active').filter({ hasText: 'record-write.txt' }).waitFor({ state: 'visible' });
+  await page.locator('.editor-view .monaco-editor').waitFor({ state: 'visible' });
+  await selectSessionByTitle(page, 'Desktop E2E Session');
+
+  await submitPrompt(page, 'Read operation record from the file timeline.');
+  await waitForAssistant(page, 'Read record-write.txt through the tool timeline.');
+  const readFrame = page.locator('.tool-frame').filter({ hasText: 'Read' }).last();
+  await readFrame.locator('.tool-open-action').click();
+  await page.locator('.workbench-tab.active').filter({ hasText: 'record-write.txt' }).waitFor({ state: 'visible' });
+  await selectSessionByTitle(page, 'Desktop E2E Session');
 
   await submitPrompt(page, 'Ask me which verification target to run.');
   const question = page.locator('.question-panel');
@@ -351,8 +390,28 @@ try {
   });
   await submitPrompt(page, 'Run a two-agent swarm over alpha and beta.');
 
-  const pendingDock = page.locator('.pending-interaction-dock');
-  await page.waitForFunction(() => document.querySelectorAll('.pending-interaction-item').length === 2, undefined, { timeout: 45_000 });
+  try {
+    await page.waitForFunction(() => document.querySelectorAll('.pending-interaction-item').length >= 2, undefined, { timeout: 45_000 });
+  } catch (error) {
+    const pendingDiagnostic = await page.evaluate(async () => {
+      const snapshot = await window.kimiDesktop.host.snapshot();
+      return {
+        activeSessionId: snapshot.activeSessionId,
+        agents: snapshot.transcript?.agents,
+        interactions: Object.fromEntries(Object.entries(snapshot.transcript?.transcripts ?? {}).map(([agentId, transcript]) => [
+          agentId,
+          transcript.interactions,
+        ])),
+        dock: [...document.querySelectorAll('.pending-interaction-item')].map((item) => item.textContent),
+        bodyTail: document.body.innerText.slice(-2_000),
+      };
+    });
+    throw new Error(`Swarm pending interactions did not appear: ${JSON.stringify({
+      error: error instanceof Error ? error.message : String(error),
+      pendingDiagnostic,
+      providerTail: provider.requests.slice(-12),
+    })}`);
+  }
   await pendingDock.waitFor({ state: 'visible' });
   assert.match(await pendingDock.innerText(), /权限审批/);
   assert.match(await pendingDock.innerText(), /问题/);
@@ -402,7 +461,7 @@ try {
   await childApproval.locator('.pending-interaction-summary > .icon-button').click();
   await page.waitForFunction(() => document.querySelector('.agent-select select')?.value !== 'main');
   const selectedChildAgentId = await page.locator('.agent-select select').inputValue();
-  assert.equal(await pendingDock.locator('.pending-interaction-item').count(), 1);
+  assert.equal(await pendingDock.locator('.pending-interaction-item').count(), 2);
   const selectedChildPending = await page.evaluate(async (agentId) => {
     const snapshot = await window.kimiDesktop.host.snapshot();
     return snapshot.transcript?.transcripts[agentId]?.interactions.filter((interaction) => interaction.state === 'pending').length ?? 0;
@@ -606,7 +665,7 @@ try {
 
   await page.locator('.tree-node[title^="sample.txt"]').click();
   await page.locator('.editor-view .monaco-editor').waitFor({ state: 'visible', timeout: 30_000 });
-  assert.equal(await page.locator('.workbench-tab').filter({ hasText: 'sample.txt' }).count(), 1);
+  assert.equal(await page.locator('.workbench-tab-main[title="sample.txt"]').count(), 1);
   await replaceMonacoText(page, 'desktop editor save\n');
   await page.locator('.workbench-tab.active').waitFor({ state: 'visible' });
   assert.equal(await page.locator('.workbench-tab.active').getAttribute('class').then((value) => value?.includes('dirty')), true);
@@ -622,7 +681,7 @@ try {
   assert.equal(await page.locator('.workbench-tab.active').count(), 1, 'cancel should keep the dirty tab');
   await page.locator('.workbench-tab.active .workbench-tab-close').click();
   await tabDirtyDialog.getByRole('button', { name: '放弃', exact: false }).click();
-  await page.locator('.workbench-tab').filter({ hasText: 'sample.txt' }).waitFor({ state: 'hidden' });
+  await page.locator('.workbench-tab-main[title="sample.txt"]').waitFor({ state: 'hidden' });
   assert.equal(await readFile(samplePath, 'utf8'), 'desktop editor save\n');
 
   await page.locator('.tree-node[title^="sample.txt"]').click();
@@ -836,7 +895,9 @@ try {
   const second = await launchDesktop();
   secondApp = second.app;
   const restoredPage = second.page;
-  await restoredPage.locator('.workbench-tab').filter({ hasText: 'sample.txt' }).waitFor({ state: 'visible' });
+  assert.equal(await restoredPage.locator('html').getAttribute('data-theme'), persistedTheme, 'theme was not restored across app restart');
+  await restoredPage.locator('.workbench-tab-main[title="sample.txt"]').waitFor({ state: 'visible' });
+  assert.equal(await restoredPage.locator('.workbench-tab').filter({ hasText: '操作差异' }).count(), 0, 'ephemeral operation diff was restored');
   assert.ok(await restoredPage.locator('.workbench-tab').count() >= 2, 'saved session and editor tabs were not restored');
   await restoredPage.evaluate((id) => window.kimiDesktop.session.resume(id), sessionId);
   await restoredPage.waitForFunction(async (id) => {
@@ -914,7 +975,7 @@ try {
     swarmMode: true,
   });
   await auditAndScreenshot(secondApp, restoredPage, 1_180, 760, join(artifactDir, 'kimi-desktop-1180x760.png'));
-  await restoredPage.locator('.workbench-tab').filter({ hasText: 'sample.txt' }).last().locator('.workbench-tab-main').click();
+  await restoredPage.locator('.workbench-tab-main[title="sample.txt"]').click();
   await restoredPage.locator('.editor-view .monaco-editor').waitFor({ state: 'visible' });
   await auditAndScreenshot(secondApp, restoredPage, 1_180, 760, join(artifactDir, 'editor-git-1180x760.png'));
 
@@ -1369,6 +1430,9 @@ async function startProvider() {
       const messages = Array.isArray(body.messages) ? body.messages : [];
       const last = messages.at(-1) ?? {};
       const lastText = messageText(last);
+      const promptText = messageText(messages.findLast((message) =>
+        message?.role === 'user' && !messageText(message).trimStart().startsWith('<system-reminder>'),
+      ));
       const historyText = messages.map(messageText).join('\n');
       requests.push({
         url: request.url,
@@ -1403,7 +1467,16 @@ async function startProvider() {
       if (last.role === 'tool') {
         const toolName = findToolName(messages, last.tool_call_id);
         if (toolName === 'Edit') return sendText(response, 'Edited sample.txt through approved tool.', ++responseId);
-        if (toolName === 'Write') return sendText(response, 'Alpha permission resolved.', ++responseId);
+        if (toolName === 'Write') {
+          return sendText(
+            response,
+            historyText.includes('Write operation record for the file timeline.')
+              ? 'Wrote record-write.txt through approved tool.'
+              : 'Alpha permission resolved.',
+            ++responseId,
+          );
+        }
+        if (toolName === 'Read') return sendText(response, 'Read record-write.txt through the tool timeline.', ++responseId);
         if (toolName === 'AskUserQuestion') {
           return sendText(response, historyText.includes('Review beta') ? 'Beta question resolved.' : 'Question answered with the selected target.', ++responseId);
         }
@@ -1425,12 +1498,22 @@ async function startProvider() {
         }
         if (toolName === 'TodoList') return sendText(response, 'TodoList updated by Kimi.', ++responseId);
       }
-      if (lastText.includes('Edit sample.txt through an approval request.')) {
+      if (promptText.includes('Edit sample.txt through an approval request.')) {
         return sendTool(response, 'Edit', {
           path: 'sample.txt', old_string: 'before', new_string: 'after',
         }, 'edit-call-1', ++responseId);
       }
-      if (lastText.includes('Ask me which verification target to run.')) {
+      if (promptText.includes('Write operation record for the file timeline.')) {
+        return sendTool(response, 'Write', {
+          path: 'record-write.txt', content: 'written by tool\n',
+        }, 'write-record-call-1', ++responseId);
+      }
+      if (promptText.includes('Read operation record from the file timeline.')) {
+        return sendTool(response, 'Read', {
+          path: 'record-write.txt',
+        }, 'read-record-call-1', ++responseId);
+      }
+      if (promptText.includes('Ask me which verification target to run.')) {
         return sendTool(response, 'AskUserQuestion', {
           questions: [{
             question: 'Which target should run?',
@@ -1443,10 +1526,10 @@ async function startProvider() {
           }],
         }, 'question-call-1', ++responseId);
       }
-      if (lastText.includes('Render the attached image in the transcript.')) {
+      if (promptText.includes('Render the attached image in the transcript.')) {
         return sendText(response, 'Attached image rendered.', ++responseId);
       }
-      if (lastText.includes('Create a TodoList with one running and one pending desktop task.')) {
+      if (promptText.includes('Create a TodoList with one running and one pending desktop task.')) {
         return sendTool(response, 'TodoList', {
           todos: [
             { title: 'Inspect desktop runtime', status: 'in_progress' },
@@ -1454,7 +1537,7 @@ async function startProvider() {
           ],
         }, 'todo-call-1', ++responseId);
       }
-      if (lastText.includes('Run a two-agent swarm over alpha and beta.')) {
+      if (promptText.includes('Run a two-agent swarm over alpha and beta.')) {
         return sendTool(response, 'AgentSwarm', {
           description: 'Review fixtures',
           prompt_template: 'Review {{item}} and report one finding.',
@@ -1462,7 +1545,7 @@ async function startProvider() {
           subagent_type: 'interactive-worker',
         }, 'swarm-call-1', ++responseId);
       }
-      if (lastText.includes('Launch a Team Mode batch and wait for live updates.')) {
+      if (promptText.includes('Launch a Team Mode batch and wait for live updates.')) {
         return sendTool(response, 'AgentSwarm', {
           description: 'Coordinate Team Mode fixtures',
           prompt_template: 'Inspect {{item}}, send one update with TeamSend, then finish.',
@@ -1470,15 +1553,15 @@ async function startProvider() {
           subagent_type: 'explore',
         }, 'team-swarm-call-1', ++responseId);
       }
-      if (lastText.includes('Inspect team-alpha, send one update with TeamSend, then finish.')) {
+      if (promptText.includes('Inspect team-alpha, send one update with TeamSend, then finish.')) {
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
         return sendTool(response, 'TeamSend', { message: 'team-alpha finding is ready' }, 'team-send-alpha', ++responseId);
       }
-      if (lastText.includes('Inspect team-beta, send one update with TeamSend, then finish.')) {
+      if (promptText.includes('Inspect team-beta, send one update with TeamSend, then finish.')) {
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 900));
         return sendTool(response, 'TeamSend', { message: 'team-beta finding is ready' }, 'team-send-beta', ++responseId);
       }
-      if (lastText.includes('Recover after one transient provider failure.')) {
+      if (promptText.includes('Recover after one transient provider failure.')) {
         transientAttempts += 1;
         if (transientAttempts === 1) {
           response.writeHead(503, { 'content-type': 'application/json', 'retry-after': '0' });
@@ -1487,7 +1570,7 @@ async function startProvider() {
         }
         return sendText(response, 'Recovered after the transient provider failure.', ++responseId);
       }
-      if (lastText.includes('Hold this turn until I cancel it.')) {
+      if (promptText.includes('Hold this turn until I cancel it.')) {
         response.once('close', () => { cancelledStreams += 1; });
         response.writeHead(200, {
           'content-type': 'text/event-stream',
@@ -1497,13 +1580,13 @@ async function startProvider() {
         response.write(`data: ${JSON.stringify(completionChunk({ content: 'Waiting for cancellation...' }, null, ++responseId))}\n\n`);
         return;
       }
-      if (lastText.includes('Review alpha') || historyText.includes('Review alpha')) {
+      if (promptText.includes('Review alpha') || historyText.includes('Review alpha')) {
         return sendTool(response, 'Write', {
           path: 'swarm-alpha.txt',
           content: 'swarm-approved\n',
         }, 'swarm-write-alpha', ++responseId);
       }
-      if (lastText.includes('Review beta') || historyText.includes('Review beta')) {
+      if (promptText.includes('Review beta') || historyText.includes('Review beta')) {
         return sendTool(response, 'AskUserQuestion', {
           questions: [{
             question: 'Approve the beta verification target?',

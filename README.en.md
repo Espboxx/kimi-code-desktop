@@ -34,13 +34,13 @@ Both images are generated from an isolated local E2E fixture and contain no mach
 
 The `desktop-v*` GitHub Actions workflow builds a portable Windows x64 executable. Open this repository's [GitHub Releases](../../releases) page and download:
 
-- `Kimi-Code-Desktop-0.1.0-x64-portable.exe`
-- `Kimi-Code-Desktop-0.1.0-x64-portable.exe.sha256`
+- `Kimi-Code-Desktop-0.1.1-x64-portable.exe`
+- `Kimi-Code-Desktop-0.1.1-x64-portable.exe.sha256`
 
 Verify the SHA256 checksum in PowerShell:
 
 ```powershell
-$exe = ".\Kimi-Code-Desktop-0.1.0-x64-portable.exe"
+$exe = ".\Kimi-Code-Desktop-0.1.1-x64-portable.exe"
 $expected = (Get-Content "$exe.sha256").Split()[0]
 $actual = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
 $actual -eq $expected
@@ -66,7 +66,7 @@ Team Mode is off by default. Enable it before starting Desktop:
 
 ```powershell
 $env:KIMI_CODE_EXPERIMENTAL_TEAM_COLLABORATION = "1"
-& ".\Kimi-Code-Desktop-0.1.0-x64-portable.exe"
+& ".\Kimi-Code-Desktop-0.1.1-x64-portable.exe"
 ```
 
 The first Session Swarm creates a session-scoped Team and a `general` channel. Agents coordinate through `TeamSend`, `TeamStatus`, and `TeamWait`; team logs are restored separately from the normal conversation transcript. This feature remains experimental, and its data format and interactions may change.

@@ -53,6 +53,51 @@ describe('DesktopTranscriptProjector', () => {
     ]));
   });
 
+  it('emits no repeated frame upserts after a streaming tool call is visible', () => {
+    const projector = new DesktopTranscriptProjector('main');
+    projector.map({
+      type: 'turn.started', sessionId: 's1', agentId: 'main', turnId: 1,
+      origin: { kind: 'user' }, prompt: 'Write a file',
+    } as unknown as Event);
+    projector.map({
+      type: 'turn.step.started', sessionId: 's1', agentId: 'main', turnId: 1,
+      step: 1, stepId: 'step-1',
+    } as unknown as Event);
+
+    const first = projector.map({
+      type: 'tool.call.delta', sessionId: 's1', agentId: 'main', turnId: 1,
+      toolCallId: 'call-1', name: 'Write', argumentsPart: '{"path":',
+    } as unknown as Event);
+    const second = projector.map({
+      type: 'tool.call.delta', sessionId: 's1', agentId: 'main', turnId: 1,
+      toolCallId: 'call-1', name: 'Write', argumentsPart: '"sample.txt"}',
+    } as unknown as Event);
+
+    expect(first).toEqual(expect.arrayContaining([expect.objectContaining({ op: 'frame.upsert' })]));
+    expect(second).toEqual([]);
+  });
+
+  it('publishes authoritative parsed input when streamed tool arguments finish', () => {
+    const projector = new DesktopTranscriptProjector('main');
+    const transcript = new TranscriptStore('s1').ensureAgent('main');
+    const events = [
+      { type: 'turn.started', sessionId: 's1', agentId: 'main', turnId: 1, origin: { kind: 'user' }, prompt: 'Write a file' },
+      { type: 'turn.step.started', sessionId: 's1', agentId: 'main', turnId: 1, step: 1, stepId: 'step-1' },
+      { type: 'tool.call.delta', sessionId: 's1', agentId: 'main', turnId: 1, toolCallId: 'call-1', name: 'Write', argumentsPart: '{"path":' },
+      { type: 'tool.call.delta', sessionId: 's1', agentId: 'main', turnId: 1, toolCallId: 'call-1', name: 'Write', argumentsPart: '"sample.txt"}' },
+      { type: 'tool.call.started', sessionId: 's1', agentId: 'main', turnId: 1, toolCallId: 'call-1', name: 'Write', args: '{"path":"sample.txt","content":"hello"}' },
+    ] as unknown as readonly Event[];
+
+    for (const event of events) transcript.apply(projector.map(event));
+
+    const frame = transcript.getTurn('t1')?.steps[0]?.frames[0];
+    expect(frame).toMatchObject({
+      kind: 'tool',
+      input: { path: 'sample.txt', content: 'hello' },
+    });
+    expect(frame).not.toHaveProperty('inputText');
+  });
+
   it('attaches submitted media to the matching live turn', () => {
     const projector = new DesktopTranscriptProjector('main');
     const transcript = new TranscriptStore('s1').ensureAgent('main');

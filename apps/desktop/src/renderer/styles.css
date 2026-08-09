@@ -27,35 +27,6 @@
   --sans: Inter, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
 }
 
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme]) {
-    color-scheme: light;
-    --bg: #f3f4f5;
-    --panel: #ffffff;
-    --panel-2: #f8f9fa;
-    --surface: #eef0f2;
-    --surface-hover: #e7e9ec;
-    --surface-active: #dde1e5;
-    --border: #d8dce0;
-    --border-strong: #c2c7cd;
-    --text: #1c2025;
-    --text-soft: #3f464e;
-    --muted: #69727d;
-    --faint: #8a929b;
-    --accent: #187a60;
-    --accent-strong: #11634e;
-    --accent-bg: rgba(24, 122, 96, 0.1);
-    --blue: #2869ba;
-    --blue-bg: rgba(40, 105, 186, 0.1);
-    --amber: #9a5d16;
-    --amber-bg: rgba(154, 93, 22, 0.1);
-    --red: #bf3636;
-    --red-bg: rgba(191, 54, 54, 0.09);
-    --purple: #7048a6;
-    --shadow: 0 18px 50px rgba(29, 38, 48, 0.18);
-  }
-}
-
 :root[data-theme="light"] {
   color-scheme: light;
   --bg: #f3f4f5;
@@ -918,12 +889,6 @@ progress {
   background: #f1f3f5;
 }
 
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme]) .markdown-body pre {
-    background: #f1f3f5;
-  }
-}
-
 .markdown-body pre code {
   padding: 0;
   background: transparent;
@@ -1088,6 +1053,34 @@ progress {
   white-space: nowrap;
 }
 
+.tool-summary-status,
+.tool-open-action,
+.file-operation-actions,
+.file-operation-actions button {
+  display: flex;
+  align-items: center;
+}
+
+.tool-summary-status {
+  gap: 8px;
+}
+
+.tool-open-action {
+  gap: 4px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text-soft);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.tool-open-action:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-active);
+}
+
 .tool-state {
   display: flex;
   align-items: center;
@@ -1096,6 +1089,10 @@ progress {
 }
 
 .tool-state.running {
+  color: var(--amber);
+}
+
+.tool-state.waiting {
   color: var(--amber);
 }
 
@@ -1113,6 +1110,53 @@ progress {
 
 .tool-details {
   border-top: 1px solid var(--border);
+}
+
+.file-operation-details {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.file-operation-details > div:first-child {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-operation-details code {
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-operation-details small {
+  color: var(--muted);
+}
+
+.file-operation-actions {
+  gap: 6px;
+}
+
+.file-operation-actions button {
+  gap: 4px;
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text-soft);
+  font-size: 10px;
+}
+
+.file-operation-unavailable {
+  max-width: 280px;
 }
 
 .inline-agent-activity {
@@ -1172,6 +1216,10 @@ progress {
   border-left: 1px solid var(--border);
   background: var(--bg);
   overflow: auto;
+}
+
+.payload-block pre small {
+  color: var(--amber);
 }
 
 .tool-progress {
