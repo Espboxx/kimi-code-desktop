@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -176,7 +176,7 @@ describe('desktop runtime boundary', () => {
         { workspaceRoot: workspace, allowedRoots: [workspace], cacheDir },
       );
       expect(prepared.url).toMatch(/^data:image\/png;base64,/);
-      expect(fileURLToPath(prepared.displayUrl)).toBe(imagePath);
+      expect(fileURLToPath(prepared.displayUrl)).toBe(await realpath(imagePath));
 
       const replay = await materializeReplayMedia([
         {
