@@ -89,9 +89,13 @@ function v2AgentsToV1(agents: Readonly<Record<string, V2AgentMeta>>): Record<str
       type: agent.type ?? (agentId === 'main' ? 'main' : 'sub'),
       // v1 persists an explicit null for a parentless agent where v2 leaves
       // the field unset.
-      parentAgentId: agent.parentAgentId ?? null,
-      swarmItem: agent.swarmItem,
+      parentAgentId: nonEmptyLabel(agent.labels?.['parentAgentId']) ?? agent.parentAgentId ?? null,
+      swarmItem: nonEmptyLabel(agent.labels?.['swarmItem']) ?? agent.swarmItem,
     };
   }
   return mapped;
+}
+
+function nonEmptyLabel(value: string | undefined): string | undefined {
+  return value !== undefined && value.length > 0 ? value : undefined;
 }

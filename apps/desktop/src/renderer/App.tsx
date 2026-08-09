@@ -15,8 +15,8 @@ import {
   X,
 } from 'lucide-react';
 
-import type { GitDiffArea, SessionListItem, WorkspaceFileSnapshot } from '../shared/desktop-api';
-import { BottomPanel, type BottomTab } from './BottomPanel';
+import type { GitDiffArea, SessionListItem } from '../shared/desktop-api';
+import { buildAgentActivityForest } from './agent-activity';
 import { Composer } from './Composer';
 import { useDesktopState } from './desktop-state';
 import { DirtyFilesDialog } from './DirtyFilesDialog';
@@ -38,7 +38,6 @@ import {
   activateWorkbenchTab,
   closeWorkbenchTab,
   cycleWorkbenchTab,
-  diffTab,
   EMPTY_WORKBENCH,
   fileTab,
   openWorkbenchTab,
@@ -79,10 +78,8 @@ interface MemoryDiffState {
 export function App() {
   const state = useDesktopState();
   const snapshot = state.snapshot;
-  const [selectedAgentId, setSelectedAgentId] = useState('main');
-  const [bottomTab, setBottomTab] = useState<BottomTab>('changes');
-  const [bottomCollapsed, setBottomCollapsed] = useState(false);
-  const [rawDiff, setRawDiff] = useState<{ path: string; patch: string; truncated: boolean }>();
+  const activeSessionId = snapshot?.activeSessionId;
+  const [selectedAgents, setSelectedAgents] = useState<Record<string, string>>({});
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>('system');
   const [systemDark, setSystemDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -96,18 +93,30 @@ export function App() {
   const [dirtyPromptBusy, setDirtyPromptBusy] = useState(false);
   const [dirtyPromptError, setDirtyPromptError] = useState<string>();
   const [memoryDiff, setMemoryDiff] = useState<MemoryDiffState>();
+  const [planPendingSessions, setPlanPendingSessions] = useState<ReadonlySet<string>>(() => new Set());
   const workbenchRef = useRef(workbench);
   const loadingTabs = useRef(new Set<string>());
   const savingPaths = useRef(new Set<string>());
   const sessionActivation = useRef<{ desired?: string; running: boolean }>({ running: false });
+  const planPendingRef = useRef(new Set<string>());
   workbenchRef.current = workbench;
 
   const [swarmEntryController] = useState(() => new SwarmEntryController(
     (sessionId) => window.kimiDesktop.turn.setPermission('yolo', sessionId),
     (prompt) => { setSwarmPermission(prompt); },
   ));
-  const activeSessionId = snapshot?.activeSessionId;
   const activePermission = snapshot?.session.status?.permission;
+  const selectedAgentId = activeSessionId === undefined ? 'main' : selectedAgents[activeSessionId] ?? 'main';
+  const setSelectedAgentId = useCallback((agentId: string) => {
+    if (activeSessionId === undefined) return;
+    setSelectedAgents((current) => current[activeSessionId] === agentId
+      ? current
+      : { ...current, [activeSessionId]: agentId });
+  }, [activeSessionId]);
+  const agentActivity = useMemo(
+    () => buildAgentActivityForest(state.transcript),
+    [state.transcript, state.transcriptVersion],
+  );
 
   const activateSessionRuntime = useCallback((sessionId: string) => {
     const activation = sessionActivation.current;
@@ -288,9 +297,18 @@ export function App() {
   }, [dirtyTabs.length, state.closeRequest]);
 
   useEffect(() => {
-    setSelectedAgentId('main');
     setSwarmActionError(undefined);
   }, [snapshot?.activeSessionId]);
+
+  useEffect(() => {
+    if (
+      activeSessionId !== undefined &&
+      state.transcript !== undefined &&
+      state.transcript.getAgent(selectedAgentId) === undefined
+    ) {
+      setSelectedAgents((current) => ({ ...current, [activeSessionId]: 'main' }));
+    }
+  }, [activeSessionId, selectedAgentId, state.transcript, state.transcriptVersion]);
 
   useEffect(() => {
     swarmEntryController.cancelOutside(activeSessionId);
@@ -359,6 +377,20 @@ export function App() {
     }
   }, [activePermission, activeSessionId, swarmEntryController]);
   const chooseSwarmPermission = useCallback(async (choice: 'yolo' | 'current') => swarmEntryController.choose(choice), [swarmEntryController]);
+  const setPlanMode = useCallback(async (enabled: boolean): Promise<void> => {
+    if (activeSessionId === undefined || planPendingRef.current.has(activeSessionId)) return;
+    planPendingRef.current.add(activeSessionId);
+    setPlanPendingSessions(new Set(planPendingRef.current));
+    setSwarmActionError(undefined);
+    try {
+      await window.kimiDesktop.turn.setPlanMode(enabled, activeSessionId);
+    } catch (error) {
+      setSwarmActionError(rendererError(error, 'session.plan_mode_failed'));
+    } finally {
+      planPendingRef.current.delete(activeSessionId);
+      setPlanPendingSessions(new Set(planPendingRef.current));
+    }
+  }, [activeSessionId]);
 
   if (snapshot === undefined) {
     return <div className="app-loading"><CircleDashed className="spin" size={22} /><span>正在启动 Kimi Code Desktop</span></div>;
@@ -369,6 +401,7 @@ export function App() {
     ? snapshot.sessions.find((session) => session.id === activeTab.sessionId)
     : snapshot.sessions.find((session) => session.id === snapshot.activeSessionId);
   const transcript = state.transcript?.getAgent(selectedAgentId) ?? state.transcript?.getAgent('main');
+  const planModePending = activeSessionId !== undefined && planPendingSessions.has(activeSessionId);
   const modelOptions = Object.entries(record(snapshot.config.value['models'])).map(([id, raw]) => ({
     id,
     label: text(record(raw)['displayName'], id),
@@ -377,13 +410,6 @@ export function App() {
   const activeFilePath = activeTab?.kind === 'file' || activeTab?.kind === 'diff' ? activeTab.path : undefined;
 
   const openFile = (path: string) => setWorkbench((current) => openWorkbenchTab(current, fileTab(path)));
-  const openGitDiff = (path: string, area: GitDiffArea) => setWorkbench((current) => openWorkbenchTab(current, diffTab(path, area)));
-  const openRawDiff = async (path?: string) => {
-    const result = await window.kimiDesktop.workspace.diff(path);
-    setRawDiff(result);
-    setBottomTab('diff');
-    setBottomCollapsed(false);
-  };
   const openSession = (sessionId: string) => {
     const tab = sessionTab(sessionId);
     setWorkbench((current) => openWorkbenchTab(current, tab));
@@ -511,7 +537,15 @@ export function App() {
                   </label>
                 )}
               </div>
-              <Timeline transcript={transcript} sessionId={snapshot.activeSessionId} version={state.transcriptVersion} />
+              <Timeline
+                transcript={transcript}
+                store={state.transcript}
+                activity={agentActivity}
+                selectedAgentId={selectedAgentId}
+                onSelectAgent={setSelectedAgentId}
+                sessionId={snapshot.activeSessionId}
+                version={state.transcriptVersion}
+              />
               <PendingInteractionDock store={state.transcript} sessionId={snapshot.activeSessionId} selectedAgentId={selectedAgentId} version={state.transcriptVersion} onSelectAgent={setSelectedAgentId} />
               <Composer
                 sessionId={snapshot.activeSessionId}
@@ -525,6 +559,8 @@ export function App() {
                 onCancel={() => window.kimiDesktop.turn.cancel(snapshot.activeSessionId)}
                 swarmPermissionPending={swarmPermission !== undefined}
                 onEnterSwarm={enterSwarm}
+                planModePending={planModePending}
+                onSetPlanMode={setPlanMode}
               />
             </div>
           )}
@@ -547,23 +583,15 @@ export function App() {
         <Inspector
           sessionId={snapshot.activeSessionId}
           details={snapshot.session}
-          transcript={state.transcript}
+          activity={agentActivity}
           selectedAgentId={selectedAgentId}
           onSelectAgent={setSelectedAgentId}
+          planModePending={planModePending}
+          onSetPlanMode={setPlanMode}
           onTaskOutput={(taskId) => {
             setTaskOutput({ taskId });
             void window.kimiDesktop.task.output(taskId, 200_000, snapshot.activeSessionId).then((output) => setTaskOutput({ taskId, output }));
           }}
-        />
-        <BottomPanel
-          snapshot={snapshot}
-          tab={bottomTab}
-          collapsed={bottomCollapsed}
-          diff={rawDiff}
-          onTab={(tab) => { setBottomTab(tab); setBottomCollapsed(false); }}
-          onToggleCollapsed={() => setBottomCollapsed((value) => !value)}
-          onOpenDiff={openGitDiff}
-          onOpenRawDiff={(path) => void openRawDiff(path)}
         />
       </div>
 

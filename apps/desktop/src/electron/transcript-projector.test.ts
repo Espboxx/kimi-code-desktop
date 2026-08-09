@@ -69,6 +69,35 @@ describe('DesktopTranscriptProjector', () => {
     });
   });
 
+  it('attaches a spawned Agent when the parent tool frame arrives later', () => {
+    const projector = new DesktopTranscriptProjector('main');
+    const transcript = new TranscriptStore('s1').ensureAgent('main');
+    const events = [
+      {
+        type: 'subagent.spawned', sessionId: 's1', agentId: 'main', subagentId: 'agent-1',
+        subagentName: 'explore', parentToolCallId: 'swarm-call', swarmIndex: 1,
+        runInBackground: false,
+      },
+      { type: 'turn.started', sessionId: 's1', agentId: 'main', turnId: 1, origin: { kind: 'user' }, prompt: 'Inspect' },
+      { type: 'turn.step.started', sessionId: 's1', agentId: 'main', turnId: 1, step: 1, stepId: 'step-1' },
+      {
+        type: 'tool.call.started', sessionId: 's1', agentId: 'main', turnId: 1,
+        toolCallId: 'swarm-call', name: 'AgentSwarm', args: '{}',
+      },
+    ] as unknown as readonly Event[];
+
+    for (const event of events) expect(transcript.apply(projector.map(event)).gap).toBeUndefined();
+
+    const frame = transcript.getTurn('t1')?.steps[0]?.frames[0];
+    expect(frame).toMatchObject({
+      kind: 'tool',
+      toolCallId: 'swarm-call',
+      view: 'swarm',
+      taskId: 'agent-agent-1',
+      agentRefs: [{ agentId: 'agent-1', role: 'member' }],
+    });
+  });
+
   it('builds a replay baseline with persisted status and background tasks', () => {
     const projector = new DesktopTranscriptProjector('main');
     const transcript = new TranscriptStore('s1').ensureAgent('main');

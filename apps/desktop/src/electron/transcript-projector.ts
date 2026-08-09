@@ -6,6 +6,7 @@ import type {
   ToolCall,
 } from '@moonshot-ai/kimi-code-sdk';
 import type {
+  AgentRef,
   AgentStatusMeta,
   StepHeader,
   TextFrame,
@@ -39,6 +40,12 @@ interface QueuedPromptInput {
   readonly media: readonly DesktopMediaInput[];
 }
 
+interface PendingAgentLink {
+  readonly ref: AgentRef;
+  readonly taskId: string;
+  readonly swarm: boolean;
+}
+
 interface MediaReference {
   readonly type: 'image' | 'video' | 'audio';
   readonly url: string;
@@ -55,6 +62,7 @@ export class DesktopTranscriptProjector {
   private openAssistant?: OpenFrame;
   private openThinking?: OpenFrame;
   private readonly toolFrames = new Map<string, ToolFrameRecord>();
+  private readonly pendingAgentLinks = new Map<string, PendingAgentLink[]>();
   private readonly tasks = new Map<string, TranscriptTask>();
   private readonly shellTaskIds = new Map<string, string>();
   private readonly interactions = new Map<string, TranscriptInteraction>();
@@ -627,10 +635,10 @@ export class DesktopTranscriptProjector {
     const ops: TranscriptOperation[] = [];
     const turnId = `t${event.turnId}`;
     const step = this.ensureLiveStep(turnId, ops);
-    const frame: ToolCallFrame = {
+    const frame = this.attachPendingAgentLinks(event.toolCallId, {
       kind: 'tool', frameId: `${step.stepId}.tool.${event.toolCallId}`, toolCallId: event.toolCallId,
       name: event.name ?? '', state: 'running', inputText: event.argumentsPart ?? '',
-    };
+    });
     this.toolFrames.set(event.toolCallId, { turnId, stepId: step.stepId, frame });
     ops.push({ op: 'frame.upsert', turnId, stepId: step.stepId, frame });
     return ops;
@@ -641,11 +649,12 @@ export class DesktopTranscriptProjector {
     const turnId = `t${event.turnId}`;
     const step = this.ensureLiveStep(turnId, ops);
     const prior = this.toolFrames.get(event.toolCallId)?.frame;
-    const frame: ToolCallFrame = {
+    const frame = this.attachPendingAgentLinks(event.toolCallId, {
       kind: 'tool', frameId: prior?.frameId ?? `${step.stepId}.tool.${event.toolCallId}`,
       toolCallId: event.toolCallId, name: event.name, state: 'running', input: parseArguments(event.args),
       inputText: prior?.inputText, display: event.display, approvalId: prior?.approvalId,
-    };
+      taskId: prior?.taskId, agentRefs: prior?.agentRefs, view: prior?.view, todoId: prior?.todoId,
+    });
     this.toolFrames.set(event.toolCallId, { turnId, stepId: step.stepId, frame });
     ops.push({ op: 'frame.upsert', turnId, stepId: step.stepId, frame });
     return ops;
@@ -720,16 +729,36 @@ export class DesktopTranscriptProjector {
       { op: 'task.upsert', task },
       { op: 'taskref.upsert', item: { kind: 'taskref', refId: `ref-${taskId}`, taskId, at: now() } },
     ];
+    const links = this.pendingAgentLinks.get(event.parentToolCallId) ?? [];
+    if (!links.some((link) => link.ref.agentId === event.subagentId)) {
+      links.push({
+        ref: { agentId: event.subagentId, role: event.swarmIndex === undefined ? 'child' : 'member' },
+        taskId,
+        swarm: event.swarmIndex !== undefined,
+      });
+      this.pendingAgentLinks.set(event.parentToolCallId, links);
+    }
     const parent = this.toolFrames.get(event.parentToolCallId);
     if (parent !== undefined) {
-      const refs = [...(parent.frame.agentRefs ?? [])];
-      if (!refs.some((ref) => ref.agentId === event.subagentId)) {
-        refs.push({ agentId: event.subagentId, role: event.swarmIndex === undefined ? 'child' : 'member' });
-      }
-      parent.frame = { ...parent.frame, taskId, agentRefs: refs, view: event.swarmIndex === undefined ? parent.frame.view : 'swarm' };
+      parent.frame = this.attachPendingAgentLinks(event.parentToolCallId, parent.frame);
       ops.push({ op: 'frame.upsert', turnId: parent.turnId, stepId: parent.stepId, frame: parent.frame });
     }
     return ops;
+  }
+
+  private attachPendingAgentLinks(toolCallId: string, frame: ToolCallFrame): ToolCallFrame {
+    const links = this.pendingAgentLinks.get(toolCallId);
+    if (links === undefined || links.length === 0) return frame;
+    const refs = [...(frame.agentRefs ?? [])];
+    let taskId = frame.taskId;
+    let view = frame.view;
+    for (const link of links) {
+      if (!refs.some((ref) => ref.agentId === link.ref.agentId)) refs.push(link.ref);
+      taskId = link.taskId;
+      if (link.swarm) view = 'swarm';
+    }
+    this.pendingAgentLinks.delete(toolCallId);
+    return { ...frame, taskId, agentRefs: refs, view };
   }
 
   private subagentChanged(event: Extract<Event, { type: 'subagent.started' | 'subagent.suspended' | 'subagent.completed' | 'subagent.failed' }>): TranscriptOperation[] {

@@ -77,6 +77,8 @@ interface ComposerProps {
   readonly onCancel: () => Promise<void>;
   readonly swarmPermissionPending: boolean;
   readonly onEnterSwarm: (activate: () => Promise<void> | void) => Promise<boolean>;
+  readonly planModePending: boolean;
+  readonly onSetPlanMode: (enabled: boolean) => Promise<void>;
 }
 
 export function Composer(props: ComposerProps) {
@@ -340,6 +342,8 @@ export function Composer(props: ComposerProps) {
             placement="composer"
             swarmPermissionPending={props.swarmPermissionPending}
             onEnterSwarm={props.onEnterSwarm}
+            planModePending={props.planModePending}
+            onSetPlanMode={props.onSetPlanMode}
           />
           <div className="composer-usage-indicators">
             <span className="composer-metric context-usage-indicator" title={contextTitle}>

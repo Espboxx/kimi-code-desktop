@@ -45,6 +45,10 @@ export interface SessionRuntimeOptions {
   readonly emit: (notification: KimiDesktopNotification) => void;
   readonly onRawEvent: (event: Event) => void;
   readonly onStateChanged: () => void;
+  readonly onSessionMetadataChanged: (
+    sessionId: string,
+    patch: { readonly title?: string; readonly lastPrompt?: string },
+  ) => void;
 }
 
 const approvalResponseSchema = z.object({
@@ -72,7 +76,9 @@ export class SessionRuntime {
   private readonly emit: SessionRuntimeOptions['emit'];
   private readonly onRawEvent: SessionRuntimeOptions['onRawEvent'];
   private readonly onStateChanged: SessionRuntimeOptions['onStateChanged'];
+  private readonly onSessionMetadataChanged: SessionRuntimeOptions['onSessionMetadataChanged'];
   private readonly projectors = new Map<string, DesktopTranscriptProjector>();
+  private readonly descriptors = new Map<string, AgentDescriptor>();
   private readonly seqByAgent = new Map<string, number>();
   private readonly pending = new Map<string, PendingInteraction>();
   private unsubscribe?: () => void;
@@ -82,6 +88,7 @@ export class SessionRuntime {
   private status?: SessionStatusSnapshot;
   private details: SessionDetailsSnapshot = emptyDetails();
   private shell: ShellSnapshot = emptyShell();
+  private planModeQueue: Promise<void> = Promise.resolve();
 
   constructor(options: SessionRuntimeOptions) {
     this.session = options.session;
@@ -91,6 +98,7 @@ export class SessionRuntime {
     this.emit = options.emit;
     this.onRawEvent = options.onRawEvent;
     this.onStateChanged = options.onStateChanged;
+    this.onSessionMetadataChanged = options.onSessionMetadataChanged;
   }
 
   get sdkSession(): Session {
@@ -112,19 +120,20 @@ export class SessionRuntime {
   async initialize(): Promise<void> {
     if (this.initialized) return;
     this.initialized = true;
-    this.unsubscribe = this.session.onEvent((event) => this.handleEvent(event));
+    this.unsubscribe = this.session.onEvent((event) => { this.handleEvent(event); });
     this.session.setApprovalHandler((request) => this.requestApproval(request));
     this.session.setQuestionHandler((request) => this.requestQuestion(request));
 
     const resume = this.session.getResumeState();
     if (resume !== undefined) {
       for (const [agentId, agent] of Object.entries(resume.agents)) {
-        const descriptor: AgentDescriptor = {
-          agentId,
-          type: agentId === 'main' ? 'main' : 'sub',
-          label: agentId === 'main' ? 'Main Agent' : agentId,
-        };
-        this.store.ensureAgent(agentId, descriptor);
+        const metadata = resume.sessionMetadata.agents[agentId];
+        const type = transcriptAgentType(metadata?.type ?? agent.type, agentId);
+        this.describeAgent(agentId, {
+          type,
+          parentAgentId: stringValue(metadata?.parentAgentId),
+          label: agent.config.profileName ?? (agentId === 'main' ? 'Main Agent' : agentId),
+        });
         const replay = await materializeReplayMedia(agent.replay, this.mediaCacheDir);
         const ops = this.projector(agentId).seedReplay(
           replay,
@@ -135,7 +144,7 @@ export class SessionRuntime {
       }
     }
     if (this.store.getAgent('main') === undefined) {
-      this.store.ensureAgent('main', { agentId: 'main', type: 'main', label: 'Main Agent' });
+      this.describeAgent('main', { type: 'main', label: 'Main Agent' });
       this.projector('main');
     }
     await this.refreshDetails();
@@ -218,6 +227,28 @@ export class SessionRuntime {
       projector.discardPromptInput(queuedId);
       throw error;
     }
+  }
+
+  setPlanMode(enabled: boolean): Promise<void> {
+    const operation = this.planModeQueue.then(
+      () => this.applyPlanMode(enabled),
+      () => this.applyPlanMode(enabled),
+    );
+    this.planModeQueue = operation.catch(() => undefined);
+    return operation;
+  }
+
+  async startBtw(): Promise<string> {
+    this.ensureOpen();
+    const agentId = await this.session.startBtw();
+    this.describeAgent(agentId, {
+      type: 'sub',
+      parentAgentId: 'main',
+      label: 'BTW Agent',
+      createdAt: new Date().toISOString(),
+    });
+    this.onStateChanged();
+    return agentId;
   }
 
   async runShell(command: string): Promise<ShellSnapshot> {
@@ -313,14 +344,14 @@ export class SessionRuntime {
   private handleEvent(event: Event): void {
     if (this.disposed) return;
     this.onRawEvent(event);
-    this.store.ensureAgent(event.agentId, {
-      agentId: event.agentId,
-      type: event.agentId === 'main' ? 'main' : 'sub',
-      label: event.agentId === 'main' ? 'Main Agent' : event.agentId,
-    });
+    if (!this.descriptors.has(event.agentId)) {
+      this.describeAgent(event.agentId, {
+        type: event.agentId === 'main' ? 'main' : 'sub',
+        label: event.agentId === 'main' ? 'Main Agent' : event.agentId,
+      });
+    }
     if (event.type === 'subagent.spawned') {
-      this.store.ensureAgent(event.subagentId, {
-        agentId: event.subagentId,
+      this.describeAgent(event.subagentId, {
         type: 'sub',
         parentAgentId: event.parentAgentId ?? event.callerAgentId ?? event.agentId,
         label: event.subagentName,
@@ -345,8 +376,20 @@ export class SessionRuntime {
       };
       this.emit({ type: 'session.status', sessionId: this.id, status: this.status });
     }
-    if (event.type === 'session.meta.updated' && event.title !== undefined && this.session.summary !== undefined) {
-      this.session.summary = { ...this.session.summary, title: event.title };
+    if (event.type === 'session.meta.updated') {
+      const title = event.title ?? stringValue(event.patch?.['title']);
+      const lastPrompt = stringValue(event.patch?.['lastPrompt']);
+      if (this.session.summary !== undefined && (title !== undefined || lastPrompt !== undefined)) {
+        this.session.summary = {
+          ...this.session.summary,
+          title: title ?? this.session.summary.title,
+          lastPrompt: lastPrompt ?? this.session.summary.lastPrompt,
+          updatedAt: Date.now(),
+        };
+      }
+      if (title !== undefined || lastPrompt !== undefined) {
+        this.onSessionMetadataChanged(this.id, { title, lastPrompt });
+      }
     }
     this.onStateChanged();
     if (event.type === 'turn.ended' || event.type === 'goal.updated' || event.type.startsWith('subagent.') || event.type.startsWith('task.') || event.type.startsWith('background.task.')) {
@@ -358,7 +401,13 @@ export class SessionRuntime {
     return new Promise((resolve) => {
       const interactionId = `approval:${request.toolCallId}`;
       const agentId = this.agentForToolCall(request.toolCallId);
-      const pending: PendingInteraction = { interactionId, agentId, kind: 'approval', request, resolve: (response) => resolve(response) };
+      const pending: PendingInteraction = {
+        interactionId,
+        agentId,
+        kind: 'approval',
+        request,
+        resolve: (response) => { resolve(response); },
+      };
       this.pending.set(interactionId, pending);
       this.publishPending(pending);
     });
@@ -376,7 +425,13 @@ export class SessionRuntime {
     return new Promise((resolve) => {
       const interactionId = `question:${request.toolCallId ?? randomUUID()}`;
       const agentId = request.toolCallId === undefined ? 'main' : this.agentForToolCall(request.toolCallId);
-      const pending: PendingInteraction = { interactionId, agentId, kind: 'question', request, resolve: (response) => resolve(response) };
+      const pending: PendingInteraction = {
+        interactionId,
+        agentId,
+        kind: 'question',
+        request,
+        resolve: (response) => { resolve(response); },
+      };
       this.pending.set(interactionId, pending);
       this.publishPending(pending);
     });
@@ -410,6 +465,54 @@ export class SessionRuntime {
       this.seqByAgent.set(agentId, this.seqByAgent.get(agentId) ?? 0);
     }
     return projector;
+  }
+
+  private async applyPlanMode(enabled: boolean): Promise<void> {
+    this.ensureOpen();
+    const before = await this.session.getStatus();
+    this.publishStatus(before);
+    if (before.planMode === enabled) return;
+
+    try {
+      await this.session.setPlanMode(enabled);
+    } catch (error) {
+      let afterFailure: Awaited<ReturnType<Session['getStatus']>>;
+      try {
+        afterFailure = await this.session.getStatus();
+      } catch {
+        throw error;
+      }
+      this.publishStatus(afterFailure);
+      if (errorCode(error) === 'session.plan_mode_invalid' && afterFailure.planMode === enabled) {
+        await this.refreshDetails();
+        return;
+      }
+      throw error;
+    }
+    await this.refreshDetails();
+  }
+
+  private publishStatus(status: Omit<SessionStatusSnapshot, 'busy'>): void {
+    this.status = { ...status, busy: this.busy };
+    this.details = { ...this.details, status: this.status };
+    this.emit({ type: 'session.status', sessionId: this.id, status: this.status });
+    this.onStateChanged();
+  }
+
+  private describeAgent(agentId: string, patch: Omit<AgentDescriptor, 'agentId'>): void {
+    const existing = this.descriptors.get(agentId);
+    const descriptor: AgentDescriptor = {
+      agentId,
+      type: patch.type ?? existing?.type ?? (agentId === 'main' ? 'main' : 'sub'),
+      parentAgentId: patch.parentAgentId ?? existing?.parentAgentId,
+      label: patch.label ?? existing?.label ?? (agentId === 'main' ? 'Main Agent' : agentId),
+      createdAt: patch.createdAt ?? existing?.createdAt,
+      disposedAt: patch.disposedAt ?? existing?.disposedAt,
+    };
+    this.store.ensureAgent(agentId);
+    if (existing !== undefined && sameDescriptor(existing, descriptor)) return;
+    this.descriptors.set(agentId, descriptor);
+    this.store.describeAgent(descriptor);
   }
 
   private applyOps(agentId: string, ops: readonly import('@moonshot-ai/transcript').TranscriptOperation[], publish = true): void {
@@ -452,6 +555,33 @@ function emptyShell(): ShellSnapshot {
 
 function settled<T>(result: PromiseSettledResult<T>): T | undefined {
   return result.status === 'fulfilled' ? result.value : undefined;
+}
+
+function transcriptAgentType(
+  type: 'main' | 'sub' | 'independent' | undefined,
+  agentId: string,
+): AgentDescriptor['type'] {
+  if (type === 'main' || type === 'independent') return type;
+  return agentId === 'main' ? 'main' : 'sub';
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function errorCode(error: unknown): string | undefined {
+  if (error === null || typeof error !== 'object') return undefined;
+  const code = (error as { readonly code?: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
+}
+
+function sameDescriptor(left: AgentDescriptor, right: AgentDescriptor): boolean {
+  return left.agentId === right.agentId &&
+    left.type === right.type &&
+    left.parentAgentId === right.parentAgentId &&
+    left.label === right.label &&
+    left.createdAt === right.createdAt &&
+    left.disposedAt === right.disposedAt;
 }
 
 function interactionState(

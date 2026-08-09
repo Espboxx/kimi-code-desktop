@@ -21,6 +21,7 @@ describe('DesktopTranscriptReplica', () => {
     const next = { sessionId: 's1', agentId: 'main', seq: 5, ops: [{ op: 'turn.upsert', turn: turn('t2', 2) }] } as const;
     expect(replica.apply(next)).toBe('applied');
     expect(replica.store?.getAgent('main')?.getTurn('t2')).toBeDefined();
+    expect(replica.store?.agents()).toContainEqual({ agentId: 'main', type: 'main' });
     expect(replica.apply(next)).toBe('ignored');
     expect(replica.apply({ ...next, seq: 7 })).toBe('gap');
     expect(replica.apply({ ...next, sessionId: 'other', seq: 6 })).toBe('ignored');

@@ -59,7 +59,6 @@ try {
     permission: 'manual',
   }));
   assert.equal(typeof sessionId, 'string');
-  await page.evaluate((id) => window.kimiDesktop.session.rename(id, 'Desktop E2E Session'), sessionId);
 
   const composerControls = page.locator('.session-controls[data-placement="composer"]');
   assert.equal(await page.locator('.session-controls[data-placement="topbar"]').count(), 0, 'top session controls should be removed');
@@ -67,10 +66,24 @@ try {
   assert.deepEqual(await page.locator('.composer-modes button').allTextContents(), ['Prompt', 'Steer']);
   assert.equal(await page.locator('.composer-modes').getByTitle('Agent Swarm').count(), 0, 'one-shot Swarm should not be exposed');
   assert.equal(await composerControls.getByTitle('Session Swarm 模式').count(), 1, 'exactly one session-level Swarm control should be exposed');
-  await composerControls.getByTitle('Plan 模式').click();
+  const automaticTitle = 'Live title sync E2E';
+  await submitPrompt(page, automaticTitle);
+  await waitForAssistant(page, 'Desktop fixture response.');
+  await page.waitForFunction(async ({ id, title }) => {
+    const session = (await window.kimiDesktop.session.list()).find((item) => item.id === id);
+    return session?.title === title
+      && [...document.querySelectorAll('.session-row strong')].some((element) => element.textContent === title)
+      && [...document.querySelectorAll('.workbench-tab')].some((element) => element.textContent?.includes(title));
+  }, { id: sessionId, title: automaticTitle });
+  await page.evaluate((id) => window.kimiDesktop.session.rename(id, 'Desktop E2E Session'), sessionId);
+  await page.locator('.workbench-tab').filter({ hasText: 'Desktop E2E Session' }).waitFor({ state: 'visible' });
+
+  const planButton = composerControls.getByTitle('Plan 模式');
+  await planButton.evaluate((button) => { button.click(); button.click(); });
   await page.waitForFunction(async () => (await window.kimiDesktop.host.snapshot()).session.status?.planMode === true);
-  assert.equal(await composerControls.getByTitle('Plan 模式').getAttribute('aria-pressed'), 'true');
-  await composerControls.getByTitle('Plan 模式').click();
+  assert.equal(await planButton.getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.locator('.error-toast').filter({ hasText: 'session.plan_mode_invalid' }).count(), 0);
+  await planButton.click();
   await page.waitForFunction(async () => (await window.kimiDesktop.host.snapshot()).session.status?.planMode === false);
   await composerControls.getByLabel('Thinking').selectOption('low');
   await page.waitForFunction(async () => (await window.kimiDesktop.host.snapshot()).session.status?.thinkingEffort === 'low');
@@ -233,6 +246,43 @@ try {
   assert.match(await pendingDock.innerText(), /问题/);
   assert.equal(await page.locator('.agent-select select').inputValue(), 'main');
   assert.equal(await pendingDock.locator('.pending-interaction-toggle[aria-expanded="true"]').count(), 1);
+  await page.locator('.inspector-tabs button').nth(1).click();
+  await page.waitForFunction(() => document.querySelectorAll('.agent-activity-row').length >= 3);
+  try {
+    await page.locator('.inline-agent-activity').first().waitFor({ state: 'visible', timeout: 5_000 });
+  } catch {
+    const diagnostic = await page.evaluate(async () => {
+      const snapshot = await window.kimiDesktop.host.snapshot();
+      const main = snapshot.transcript?.transcripts.main;
+      return {
+        events: snapshot.rawEvents.filter((event) =>
+          typeof event.type === 'string' &&
+          (event.type.startsWith('subagent.') || event.type.startsWith('tool.call'))),
+        mainTail: main === undefined ? undefined : {
+          items: main.items.slice(-3),
+          tasks: main.tasks,
+        },
+        selectedAgent: document.querySelector('.agent-select select')?.value,
+        dimensions: ['.conversation-surface', '.conversation-header', '.timeline-scroll', '.pending-interaction-dock', '.composer-wrap']
+          .map((selector) => {
+            const element = document.querySelector(selector);
+            const rect = element?.getBoundingClientRect();
+            return { selector, height: rect?.height, top: rect?.top, bottom: rect?.bottom };
+          }),
+        timelineRows: [...document.querySelectorAll('.timeline-virtual-row')].map((row) => ({
+          index: row.getAttribute('data-index'),
+          text: row.textContent?.slice(0, 180),
+          toolFrames: row.querySelectorAll('.tool-frame').length,
+        })),
+      };
+    });
+    assert.fail(`main timeline is missing inline Agent activity: ${JSON.stringify(diagnostic)}`);
+  }
+  assert.ok(await page.locator('.agent-activity-row.status-waiting').count() >= 2, 'pending child Agents are not shown as waiting');
+  const agentDepths = await page.locator('.inspector .agent-activity-row').evaluateAll((rows) =>
+    rows.map((row) => row.style.getPropertyValue('--agent-depth')),
+  );
+  assert.ok(agentDepths.includes('1'), `child Agents are not nested under Main Agent: ${JSON.stringify(agentDepths)}`);
   await auditAndScreenshot(firstApp, page, 1_620, 1_040, join(artifactDir, 'swarm-interactions-1620x1040.png'));
   await auditAndScreenshot(firstApp, page, 1_180, 760, join(artifactDir, 'swarm-interactions-1180x760.png'));
 
@@ -264,6 +314,13 @@ try {
   await childQuestion.locator('.button-primary').click();
   await pendingDock.waitFor({ state: 'hidden' });
   await waitForAssistant(page, 'Swarm complete with two agent results.', 45_000);
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll('.inspector .agent-activity-state')]
+      .filter((element) => element.textContent?.includes('已完成（保留）')).length >= 2,
+  );
+  assert.equal(await page.locator('.inline-agent-summary').last().getAttribute('aria-expanded'), 'false');
+  await auditAndScreenshot(firstApp, page, 1_620, 1_040, join(artifactDir, 'swarm-completed-1620x1040.png'));
+  await auditAndScreenshot(firstApp, page, 1_180, 760, join(artifactDir, 'swarm-completed-1180x760.png'));
   assert.equal(await readFile(swarmOutputPath, 'utf8'), 'swarm-approved\n');
   assert.equal(await page.locator('.agent-select select').inputValue(), 'main');
   await assertActiveSessionSettings(page, {
@@ -281,7 +338,25 @@ try {
 
   await page.locator('.composer-modes button').first().click();
   await submitPrompt(page, 'Recover after one transient provider failure.');
-  await waitForAssistant(page, 'Recovered after the transient provider failure.');
+  try {
+    await waitForAssistant(page, 'Recovered after the transient provider failure.');
+  } catch (error) {
+    const diagnostic = await page.evaluate(async () => {
+      const snapshot = await window.kimiDesktop.host.snapshot();
+      const main = snapshot.transcript?.transcripts.main;
+      return {
+        status: snapshot.session.status,
+        mainTail: main === undefined ? undefined : {
+          items: main.items.slice(-2),
+          tasks: main.tasks,
+        },
+        selectedAgent: document.querySelector('.agent-select select')?.value,
+        timelineHeight: document.querySelector('.timeline-scroll')?.getBoundingClientRect().height,
+        timelineText: document.querySelector('.timeline-scroll')?.textContent,
+      };
+    });
+    throw new Error(`transient retry response is not visible (${String(provider.transientAttempts)} attempts): ${JSON.stringify(diagnostic)}`, { cause: error });
+  }
   assert.ok(provider.transientAttempts >= 2, `expected a provider retry, got ${provider.transientAttempts} attempt(s)`);
   await assertActiveSessionSettings(page, {
     sessionId,
@@ -308,8 +383,6 @@ try {
 
   const shellResult = await page.evaluate((id) => window.kimiDesktop.shell.run('echo shell-ok', id), sessionId);
   assert.ok(JSON.stringify(shellResult).includes('shell-ok'));
-  await page.locator('.bottom-tabs [role="tab"]').nth(2).click();
-  await page.locator('.shell-output pre').getByText('shell-ok', { exact: false }).waitFor();
 
   await page.locator('.tree-node[title^="sample.txt"]').click();
   await page.locator('.editor-view .monaco-editor').waitFor({ state: 'visible', timeout: 30_000 });
@@ -363,23 +436,18 @@ try {
   await page.evaluate(() => window.kimiDesktop.workspace.refresh());
   const editorGitSnapshot = await page.evaluate(() => window.kimiDesktop.host.snapshot());
   assert.ok(editorGitSnapshot.gitFiles.some((file) => file.path === 'src/new/untracked.txt' && file.worktreeStatus === 'untracked'), JSON.stringify(editorGitSnapshot.gitFiles));
-  await page.locator('.bottom-tabs [role="tab"]').first().click();
-  const stagedGroup = page.locator('.change-group').filter({ hasText: 'STAGED CHANGES' });
-  const workingGroup = page.locator('.change-group').filter({ has: page.getByText('CHANGES', { exact: true }) });
-  await stagedGroup.locator('.change-tree-main').filter({ hasText: 'dual.txt' }).click();
-  await page.locator('.diff-editor-view .monaco-diff-editor').waitFor({ state: 'visible', timeout: 30_000 });
-  assert.match(await page.locator('.diff-editor-view .editor-toolbar').innerText(), /HEAD.*Index/s);
-  await workingGroup.locator('.change-tree-main').filter({ hasText: 'dual.txt' }).click();
-  await page.locator('.diff-editor-view .monaco-diff-editor').waitFor({ state: 'visible' });
-  assert.match(await page.locator('.diff-editor-view .editor-toolbar').innerText(), /Index.*Workspace/s);
-  await workingGroup.locator('.change-tree-main[title^="src/new/untracked.txt"]').waitFor({ state: 'visible' });
-  const workingDualRow = workingGroup.locator('.change-tree-row').filter({ hasText: 'dual.txt' });
-  await workingDualRow.hover();
-  await workingDualRow.locator('.raw-diff-button').click();
-  await page.locator('.diff-view pre').waitFor({ state: 'visible' });
-  assert.match(await page.locator('.diff-view pre').innerText(), /dual working/);
-  await page.locator('.bottom-tabs [role="tab"]').first().click();
-  await workingGroup.locator('.change-tree-main').filter({ hasText: 'dual.txt' }).click();
+  const dualExplorerRow = page.locator('.tree-node[title^="dual.txt"]').first();
+  await dualExplorerRow.waitFor({ state: 'visible' });
+  assert.equal(await dualExplorerRow.locator('.tree-git-status').innerText(), 'M');
+  const editorGitDiffs = await page.evaluate(async () => ({
+    staged: await window.kimiDesktop.workspace.readDiff('dual.txt', 'staged'),
+    working: await window.kimiDesktop.workspace.readDiff('dual.txt', 'working'),
+  }));
+  assert.match(editorGitDiffs.staged.originalLabel, /HEAD/);
+  assert.match(editorGitDiffs.staged.modified ?? '', /dual staged/);
+  assert.match(editorGitDiffs.working.originalLabel, /Index/);
+  assert.match(editorGitDiffs.working.modified ?? '', /dual working/);
+  assert.equal(await page.locator('.bottom-panel').count(), 0);
   await auditAndScreenshot(firstApp, page, 1_620, 1_040, join(artifactDir, 'editor-git-1620x1040.png'));
   await page.locator('.workbench-tab').filter({ hasText: 'Desktop E2E Session' }).locator('.workbench-tab-main').click();
   await composerControls.waitFor({ state: 'visible' });
@@ -542,7 +610,7 @@ try {
   secondApp = second.app;
   const restoredPage = second.page;
   await restoredPage.locator('.workbench-tab').filter({ hasText: 'sample.txt' }).waitFor({ state: 'visible' });
-  assert.ok(await restoredPage.locator('.workbench-tab').count() >= 3, 'saved editor tabs were not restored');
+  assert.ok(await restoredPage.locator('.workbench-tab').count() >= 2, 'saved session and editor tabs were not restored');
   await restoredPage.evaluate((id) => window.kimiDesktop.session.resume(id), sessionId);
   await restoredPage.waitForFunction(async (id) => {
     const snapshot = await window.kimiDesktop.host.snapshot();
@@ -561,6 +629,16 @@ try {
   const restored = await restoredPage.evaluate(() => window.kimiDesktop.host.snapshot());
   assert.equal(restored.activeSessionId, sessionId);
   assert.ok((restored.transcript?.agents.length ?? 0) >= 3);
+  await restoredPage.locator('.inspector-tabs button').nth(1).click();
+  await restoredPage.waitForFunction(() => document.querySelectorAll('.inspector .agent-activity-row').length >= 3);
+  assert.ok(
+    await restoredPage.locator('.inspector .agent-activity-state').filter({ hasText: '已完成（保留）' }).count() >= 2,
+    'completed child Agents were not restored as retained terminal transcripts',
+  );
+  const restoredDepths = await restoredPage.locator('.inspector .agent-activity-row').evaluateAll((rows) =>
+    rows.map((row) => row.style.getPropertyValue('--agent-depth')),
+  );
+  assert.ok(restoredDepths.includes('1'), `restored Agent parentage is missing: ${JSON.stringify(restoredDepths)}`);
   await restoredPage.locator('.message-attachments img').last().waitFor({ state: 'visible', timeout: 30_000 });
   const restoredComposerHeight = await restoredPage.locator('.composer textarea').evaluate((element) => Math.round(element.getBoundingClientRect().height));
   assert.equal(restoredComposerHeight, persistedComposerHeight, 'composer height was not restored across app restart');
@@ -593,9 +671,8 @@ try {
     swarmMode: true,
   });
   await auditAndScreenshot(secondApp, restoredPage, 1_180, 760, join(artifactDir, 'kimi-desktop-1180x760.png'));
-  await restoredPage.locator('.workbench-tab').filter({ hasText: 'dual.txt' }).last().locator('.workbench-tab-main').click();
-  await restoredPage.locator('.diff-editor-view .monaco-diff-editor').waitFor({ state: 'visible' });
-  await restoredPage.locator('.bottom-tabs [role="tab"]').first().click();
+  await restoredPage.locator('.workbench-tab').filter({ hasText: 'sample.txt' }).last().locator('.workbench-tab-main').click();
+  await restoredPage.locator('.editor-view .monaco-editor').waitFor({ state: 'visible' });
   await auditAndScreenshot(secondApp, restoredPage, 1_180, 760, join(artifactDir, 'editor-git-1180x760.png'));
 
   await restoredPage.evaluate(() => window.kimiDesktop.extension.removePlugin('desktop-fixture'));
@@ -627,6 +704,8 @@ try {
       join(artifactDir, 'swarm-permission-1180x760.png'),
       join(artifactDir, 'swarm-interactions-1620x1040.png'),
       join(artifactDir, 'swarm-interactions-1180x760.png'),
+      join(artifactDir, 'swarm-completed-1620x1040.png'),
+      join(artifactDir, 'swarm-completed-1180x760.png'),
     ],
     processLogs,
   };
@@ -881,7 +960,7 @@ async function auditAndScreenshot(app, page, width, height, outputPath) {
       pendingDock: rect('.pending-interaction-dock'),
       composer: rect('.composer-wrap'),
       inspector: rect('.inspector'),
-      bottom: rect('.bottom-panel'),
+      bottomPanelCount: document.querySelectorAll('.bottom-panel').length,
     };
   });
   assert.ok(audit.textLength > 200, 'renderer is blank');
@@ -889,7 +968,9 @@ async function auditAndScreenshot(app, page, width, height, outputPath) {
   assert.ok(audit.document.height <= audit.viewport.height + 1, JSON.stringify(audit));
   assert.ok(audit.sidebar.right <= audit.conversation.left + 1, JSON.stringify(audit));
   assert.ok(audit.conversation.right <= audit.inspector.left + 1, JSON.stringify(audit));
-  assert.ok(audit.conversation.bottom <= audit.bottom.top + 1, JSON.stringify(audit));
+  assert.equal(audit.bottomPanelCount, 0, JSON.stringify(audit));
+  assert.ok(Math.abs(audit.sidebar.bottom - audit.conversation.bottom) <= 1, JSON.stringify(audit));
+  assert.ok(Math.abs(audit.conversation.bottom - audit.inspector.bottom) <= 1, JSON.stringify(audit));
   if (audit.pendingDock !== null) {
     assert.ok(audit.pendingDock.left >= audit.conversation.left, JSON.stringify(audit));
     assert.ok(audit.pendingDock.right <= audit.conversation.right, JSON.stringify(audit));

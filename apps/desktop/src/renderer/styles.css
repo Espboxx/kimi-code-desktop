@@ -350,11 +350,9 @@ progress {
 
 .workbench {
   display: grid;
-  grid-template-areas:
-    "sidebar conversation inspector"
-    "bottom bottom bottom";
+  grid-template-areas: "sidebar conversation inspector";
   grid-template-columns: 252px minmax(480px, 1fr) 326px;
-  grid-template-rows: minmax(0, 1fr) 226px;
+  grid-template-rows: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -504,8 +502,7 @@ progress {
   text-transform: uppercase;
 }
 
-.section-heading em,
-.bottom-tabs em {
+.section-heading em {
   padding: 0 5px;
   border-radius: 8px;
   background: var(--surface);
@@ -1051,6 +1048,40 @@ progress {
 
 .tool-details {
   border-top: 1px solid var(--border);
+}
+
+.inline-agent-activity {
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel-2) 82%, var(--blue-bg));
+}
+
+.inline-agent-activity.active {
+  border-top-color: color-mix(in srgb, var(--amber) 45%, var(--border));
+}
+
+.inline-agent-summary {
+  display: grid;
+  width: 100%;
+  min-height: 34px;
+  grid-template-columns: 14px 16px auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-soft);
+  text-align: left;
+}
+
+.inline-agent-summary > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .payload-block {
@@ -1817,8 +1848,7 @@ progress {
   overflow: hidden;
 }
 
-.inspector-tabs,
-.bottom-tabs {
+.inspector-tabs {
   display: flex;
   min-width: 0;
   align-items: center;
@@ -1831,8 +1861,7 @@ progress {
   scrollbar-width: none;
 }
 
-.inspector-tabs button,
-.bottom-tabs > button:not(.icon-button) {
+.inspector-tabs button {
   position: relative;
   display: inline-flex;
   height: 100%;
@@ -1847,13 +1876,11 @@ progress {
   white-space: nowrap;
 }
 
-.inspector-tabs button.active,
-.bottom-tabs > button.active {
+.inspector-tabs button.active {
   color: var(--text);
 }
 
-.inspector-tabs button.active::after,
-.bottom-tabs > button.active::after {
+.inspector-tabs button.active::after {
   position: absolute;
   right: 7px;
   bottom: -1px;
@@ -2008,6 +2035,198 @@ progress {
   text-align: left;
 }
 
+.agent-activity-tree {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.agent-activity-branch,
+.agent-activity-children {
+  position: relative;
+  min-width: 0;
+}
+
+.agent-activity-children::before {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  bottom: 8px;
+  left: calc(17px + var(--agent-parent-depth, 0) * 14px);
+  width: 1px;
+  background: var(--border-strong);
+  content: "";
+  opacity: 0.65;
+}
+
+.agent-activity-row {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  min-width: 0;
+  min-height: 48px;
+  grid-template-columns: 18px 26px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 7px 5px calc(7px + var(--agent-depth) * 14px);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.agent-activity-row:hover {
+  background: var(--surface-hover);
+}
+
+.agent-activity-row.selected {
+  background: var(--accent-bg);
+}
+
+.agent-activity-row.active {
+  box-shadow: inset 2px 0 var(--amber);
+}
+
+.agent-tree-toggle,
+.agent-tree-spacer {
+  display: grid;
+  width: 18px;
+  height: 22px;
+  place-items: center;
+}
+
+.agent-tree-toggle {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+
+.agent-activity-avatar {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.agent-activity-row.active .agent-activity-avatar {
+  border-color: color-mix(in srgb, var(--amber) 55%, var(--border));
+  color: var(--amber);
+}
+
+.agent-activity-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.agent-activity-title,
+.agent-activity-detail {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+}
+
+.agent-activity-title strong,
+.agent-activity-title small,
+.agent-activity-detail > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-activity-title strong {
+  color: var(--text);
+  font-size: 11px;
+}
+
+.agent-activity-title small,
+.agent-activity-detail {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.agent-activity-detail > span {
+  flex: 1;
+}
+
+.agent-activity-detail time {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+}
+
+.agent-activity-state {
+  display: inline-flex;
+  max-width: 92px;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.agent-activity-state > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-activity-row.status-running .agent-activity-state,
+.agent-activity-row.status-retrying .agent-activity-state,
+.agent-activity-row.status-waiting .agent-activity-state {
+  color: var(--amber);
+}
+
+.agent-activity-row.status-completed .agent-activity-state {
+  color: var(--accent);
+}
+
+.agent-activity-row.status-failed .agent-activity-state {
+  color: var(--red);
+}
+
+.agent-activity-row.status-interrupted .agent-activity-state {
+  color: var(--blue);
+}
+
+.agent-activity-tree.compact {
+  border-top: 1px solid var(--border);
+}
+
+.agent-activity-tree.compact .agent-activity-row {
+  min-height: 42px;
+  background: transparent;
+}
+
+.agent-activity-tree.compact .agent-activity-row:hover,
+.agent-activity-tree.compact .agent-activity-row.selected {
+  background: var(--surface-hover);
+}
+
+.unattached-agents {
+  border-top: 1px solid var(--border-strong);
+}
+
+.unattached-agents > h4 {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  padding: 4px 9px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
 .agent-row.selected {
   background: var(--accent-bg);
 }
@@ -2149,221 +2368,6 @@ progress {
 .inline-form input {
   min-width: 0;
   flex: 1;
-}
-
-.bottom-panel {
-  grid-area: bottom;
-  display: grid;
-  grid-template-rows: 34px minmax(0, 1fr);
-  min-width: 0;
-  min-height: 0;
-  border-top: 1px solid var(--border);
-  background: var(--panel);
-  overflow: hidden;
-}
-
-.workbench:has(.bottom-panel.collapsed) {
-  grid-template-rows: minmax(0, 1fr) 34px;
-}
-
-.bottom-panel.collapsed {
-  grid-template-rows: 33px;
-}
-
-.bottom-tabs {
-  padding-left: 5px;
-}
-
-.bottom-tabs > button:not(.icon-button) {
-  gap: 5px;
-  padding: 0 10px;
-}
-
-.bottom-spacer {
-  flex: 1;
-}
-
-.bottom-content {
-  min-height: 0;
-  overflow: hidden;
-}
-
-.changes-view,
-.events-view,
-.diff-view,
-.shell-view {
-  height: 100%;
-  overflow: auto;
-  scrollbar-width: thin;
-}
-
-.changes-view {
-  display: block;
-}
-
-.changes-view > button {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto;
-  min-height: 30px;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 8px;
-  border: 0;
-  border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  border-radius: 0;
-  background: transparent;
-  text-align: left;
-}
-
-.changes-view > button > span:nth-child(2) {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.changes-view small {
-  display: flex;
-  gap: 5px;
-  font-family: var(--mono);
-  font-size: 9px;
-}
-
-.changes-view small b {
-  color: var(--accent);
-}
-
-.changes-view small i {
-  color: var(--red);
-  font-style: normal;
-}
-
-.git-status {
-  font-family: var(--mono);
-  font-size: 10px;
-  font-weight: 700;
-  text-align: center;
-}
-
-.git-added {
-  color: var(--accent);
-}
-
-.git-modified {
-  color: var(--amber);
-}
-
-.git-deleted {
-  color: var(--red);
-}
-
-.diff-view {
-  display: grid;
-  grid-template-rows: 28px minmax(0, 1fr);
-}
-
-.diff-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 9px;
-  border-bottom: 1px solid var(--border);
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 10px;
-}
-
-.diff-title em {
-  color: var(--amber);
-  font-style: normal;
-}
-
-.diff-view > pre {
-  min-width: 100%;
-  padding: 9px 11px;
-  background: var(--bg);
-  overflow: auto;
-  white-space: pre;
-}
-
-.shell-view {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) 33px;
-  background: #0c0e11;
-}
-
-.shell-output {
-  padding: 7px 10px;
-  overflow: auto;
-  color: #d6dadf;
-  font-family: var(--mono);
-  font-size: 11px;
-}
-
-.shell-output .panel-empty {
-  color: #717780;
-}
-
-.shell-command {
-  margin-bottom: 5px;
-  color: var(--accent-strong);
-}
-
-.shell-output .stderr {
-  color: var(--red);
-}
-
-.shell-input {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) 28px;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 5px 2px 10px;
-  border-top: 1px solid #2b2e34;
-  color: var(--accent);
-  font-family: var(--mono);
-}
-
-.shell-input input {
-  height: 27px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #e7e9ec;
-  font-family: var(--mono);
-  outline: none;
-}
-
-.events-view details {
-  border-bottom: 1px solid var(--border);
-}
-
-.events-view summary {
-  display: flex;
-  height: 29px;
-  align-items: center;
-  gap: 6px;
-  padding: 0 9px;
-  cursor: pointer;
-  color: var(--muted);
-  list-style: none;
-}
-
-.events-view summary strong {
-  color: var(--text-soft);
-  font-family: var(--mono);
-  font-size: 10px;
-}
-
-.events-view summary span {
-  font-size: 9px;
-}
-
-.events-view details pre {
-  max-height: 240px;
-  padding: 8px 12px;
-  background: var(--bg);
-  overflow: auto;
 }
 
 .dialog-backdrop {
@@ -2807,10 +2811,6 @@ progress {
 }
 
 @media (max-height: 820px) {
-  .workbench {
-    grid-template-rows: minmax(0, 1fr) 188px;
-  }
-
   .composer-wrap {
     padding-top: 5px;
     padding-bottom: 7px;
@@ -2819,6 +2819,10 @@ progress {
   .pending-interaction-dock {
     max-height: min(180px, 24vh);
     margin-top: 5px;
+  }
+
+  .conversation-surface:has(.pending-interaction-dock) .composer textarea {
+    height: min(var(--composer-editor-height, 112px), 72px);
   }
 
   .conversation-turn {
@@ -2871,9 +2875,6 @@ progress {
     margin-left: 0;
   }
 
-  .changes-view {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* Central editor group */
@@ -3158,107 +3159,6 @@ progress {
 
 .session-row.open-tab:not(.selected) {
   background: color-mix(in srgb, var(--surface) 45%, transparent);
-}
-
-/* Source Control tree */
-.change-group {
-  min-width: 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.change-group-heading,
-.change-tree-folder,
-.change-tree-main {
-  display: flex;
-  width: 100%;
-  min-width: 0;
-  align-items: center;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  text-align: left;
-}
-
-.change-group-heading {
-  height: 26px;
-  gap: 5px;
-  padding: 0 8px;
-  color: var(--muted);
-}
-
-.change-group-heading strong {
-  flex: 1;
-  font-size: 9px;
-}
-
-.change-group-heading em {
-  font-size: 9px;
-  font-style: normal;
-}
-
-.change-tree-folder {
-  height: 25px;
-  gap: 5px;
-  color: var(--text-soft);
-  font-size: 10px;
-}
-
-.change-tree-row {
-  display: flex;
-  min-width: 0;
-  height: 27px;
-  align-items: center;
-}
-
-.change-tree-row:hover,
-.change-tree-folder:hover {
-  background: var(--surface-hover);
-}
-
-.change-tree-main {
-  height: 100%;
-  flex: 1;
-  gap: 5px;
-  padding: 0;
-  color: var(--text-soft);
-}
-
-.change-tree-main > span:nth-last-of-type(1) {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.change-tree-main small {
-  display: flex;
-  flex: 0 0 auto;
-  gap: 5px;
-  font-family: var(--mono);
-  font-size: 9px;
-}
-
-.change-tree-main small b {
-  color: var(--accent);
-}
-
-.change-tree-main small i {
-  color: var(--red);
-  font-style: normal;
-}
-
-.raw-diff-button {
-  width: 23px;
-  height: 23px;
-  flex: 0 0 23px;
-  margin: 0 4px;
-  opacity: 0;
-}
-
-.change-tree-row:hover .raw-diff-button,
-.raw-diff-button:focus-visible {
-  opacity: 1;
 }
 
 .git-untracked,

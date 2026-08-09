@@ -15,13 +15,15 @@
  * `{type, payload}` envelope.
  */
 import type { Event } from '@moonshot-ai/agent-core';
-import type { DomainEvent } from '@moonshot-ai/agent-core-v2';
+import type { AgentActivityState, DomainEvent } from '@moonshot-ai/agent-core-v2';
+
+type AgentStatusEvent = Extract<Event, { type: 'agent.status.updated' }>;
+type AgentPhase = NonNullable<AgentStatusEvent['phase']>;
 
 /**
  * DomainEvent types the v1 SDK event stream never carries:
- * - v2-internal facts with no v1 protocol counterpart: `agent.activity.updated`
- *   (kap-server folds it into the `agent.status.updated` phase slice at the WS
- *   edge), `context.spliced`, `task.notified`, `plan.revision`, and the
+ * - v2-internal facts with no v1 protocol counterpart: `context.spliced`,
+ *   `task.notified`, `plan.revision`, and the
  *   `permission.approval.*` pair (v1 surfaces approvals through the
  *   `requestApproval` callback, never as events).
  * - `prompt.*`: the v2 prompt service publishes them on the agent bus, but in
@@ -29,7 +31,6 @@ import type { DomainEvent } from '@moonshot-ai/agent-core-v2';
  *   `IEventService` — the in-process SDK client never sees them.
  */
 const DROPPED_DOMAIN_EVENT_TYPES: ReadonlySet<string> = new Set([
-  'agent.activity.updated',
   'context.spliced',
   'task.notified',
   'plan.revision',
@@ -65,9 +66,109 @@ export function translateDomainEvent(
   sessionId: string,
   agentId: string,
 ): Event | undefined {
+  if (event.type === 'agent.activity.updated') {
+    const phase = toLegacyPhase(event);
+    if (phase === undefined) return undefined;
+    return { type: 'agent.status.updated', phase, sessionId, agentId } as AgentStatusEvent;
+  }
+  if (
+    event.type === 'agent.status.updated' &&
+    (event as { readonly phase?: unknown }).phase !== undefined
+  ) {
+    return undefined;
+  }
   if (DROPPED_DOMAIN_EVENT_TYPES.has(event.type)) return undefined;
   const type = RENAMED_DOMAIN_EVENT_TYPES[event.type] ?? event.type;
   return { ...event, type, sessionId, agentId } as unknown as Event;
+}
+
+/** Keep the in-process SDK's v1 phase projection aligned with kap-server. */
+export function toLegacyPhase(state: AgentActivityState): AgentPhase | undefined {
+  const { lifecycle, turn, lastTurn } = state;
+
+  if (turn === undefined && lifecycle === 'ready') {
+    if (lastTurn !== undefined) {
+      return {
+        kind: 'ended',
+        turnId: lastTurn.turnId,
+        reason: lastTurn.reason,
+        durationMs: lastTurn.durationMs,
+        at: lastTurn.at,
+      };
+    }
+    return { kind: 'idle' };
+  }
+
+  if (lifecycle === 'ready' && turn !== undefined) {
+    const latestApproval = turn.pendingApprovals.at(-1);
+    if (latestApproval !== undefined) {
+      return {
+        kind: 'awaiting_approval',
+        turnId: turn.turnId,
+        step: turn.step || undefined,
+        approval: {
+          approvalId: latestApproval.approvalId,
+          toolCallId: latestApproval.toolCallId,
+        },
+        since: latestApproval.since,
+      };
+    }
+    if (turn.ending && turn.endingReason !== undefined) {
+      return {
+        kind: 'interrupted',
+        turnId: turn.turnId,
+        step: turn.step,
+        reason: turn.endingReason,
+        at: turn.since,
+      };
+    }
+    switch (turn.phase) {
+      case 'running':
+        return {
+          kind: 'running',
+          turnId: turn.turnId,
+          step: turn.step,
+          stepId: '',
+          since: turn.since,
+        };
+      case 'streaming':
+        return {
+          kind: 'streaming',
+          turnId: turn.turnId,
+          step: turn.step,
+          stepId: '',
+          stream: turn.stream ?? 'assistant',
+          since: turn.since,
+        };
+      case 'retrying':
+        return {
+          kind: 'retrying',
+          turnId: turn.turnId,
+          step: turn.step,
+          stepId: '',
+          failedAttempt: turn.retry?.failedAttempt ?? 0,
+          nextAttempt: turn.retry?.nextAttempt ?? 0,
+          maxAttempts: turn.retry?.maxAttempts ?? 0,
+          delayMs: turn.retry?.delayMs ?? 0,
+          errorName: turn.retry?.errorName,
+          statusCode: turn.retry?.statusCode,
+          since: turn.since,
+        };
+      case 'tool_call': {
+        const latestTool = turn.activeToolCalls.at(-1);
+        return {
+          kind: 'tool_call',
+          turnId: turn.turnId,
+          step: turn.step,
+          toolCallId: latestTool?.toolCallId ?? '',
+          name: latestTool?.name ?? '',
+          since: latestTool?.since ?? turn.since,
+        };
+      }
+    }
+  }
+
+  return undefined;
 }
 
 /**

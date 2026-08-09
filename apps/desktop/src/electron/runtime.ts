@@ -101,6 +101,7 @@ export class KimiDesktopRuntime {
   private initialized = false;
   private closing = false;
   private snapshotTimer?: ReturnType<typeof setTimeout>;
+  private sessionIndexRefreshTimer?: ReturnType<typeof setTimeout>;
   private workspaceWatcher?: FSWatcher;
   private workspaceRefreshTimer?: ReturnType<typeof setTimeout>;
   private readonly pendingWorkspacePaths = new Set<string>();
@@ -174,6 +175,7 @@ export class KimiDesktopRuntime {
     if (this.closing) return;
     this.closing = true;
     if (this.snapshotTimer !== undefined) clearTimeout(this.snapshotTimer);
+    if (this.sessionIndexRefreshTimer !== undefined) clearTimeout(this.sessionIndexRefreshTimer);
     if (this.workspaceRefreshTimer !== undefined) clearTimeout(this.workspaceRefreshTimer);
     await this.workspaceWatcher?.close();
     this.workspaceWatcher = undefined;
@@ -403,8 +405,8 @@ export class KimiDesktopRuntime {
       }
       case 'turn.planMode': {
         const input = payload<{ sessionId?: string; enabled: boolean }>(command);
-        await this.runtimeFor(input.sessionId).sdkSession.setPlanMode(input.enabled);
-        return this.refreshActiveSession(input.sessionId);
+        await this.runtimeFor(input.sessionId).setPlanMode(input.enabled);
+        return undefined;
       }
       case 'turn.swarmMode': {
         const input = payload<{ sessionId?: string; enabled: boolean; trigger: 'manual' | 'task' | 'tool' }>(command);
@@ -584,7 +586,7 @@ export class KimiDesktopRuntime {
         return result;
       }
       case 'task.startBtw':
-        return this.runtimeFor(payload<{ sessionId?: string }>(command).sessionId).sdkSession.startBtw();
+        return this.runtimeFor(payload<{ sessionId?: string }>(command).sessionId).startBtw();
 
       case 'goal.get':
         return this.runtimeFor(payload<{ sessionId?: string }>(command).sessionId).sdkSession.getGoal();
@@ -671,8 +673,8 @@ export class KimiDesktopRuntime {
   }
 
   private async refreshSessions(): Promise<void> {
-    this.sessions = [...await this.harness.listSessions({ workDir: this.workspaceRoot })]
-      .sort((left, right) => right.updatedAt - left.updatedAt);
+    this.sessions = (await this.harness.listSessions({ workDir: this.workspaceRoot }))
+      .toSorted((left, right) => right.updatedAt - left.updatedAt);
   }
 
   private async refreshConfig(): Promise<void> {
@@ -761,7 +763,7 @@ export class KimiDesktopRuntime {
     if (this.workspaceRefreshTimer !== undefined) clearTimeout(this.workspaceRefreshTimer);
     this.workspaceRefreshTimer = setTimeout(() => {
       this.workspaceRefreshTimer = undefined;
-      const changedPaths = [...this.pendingWorkspacePaths].sort();
+      const changedPaths = [...this.pendingWorkspacePaths].toSorted();
       this.pendingWorkspacePaths.clear();
       void this.refreshWorkspace(changedPaths).catch((error) => this.publishError(error, 'workspace.watch'));
     }, 180);
@@ -791,6 +793,9 @@ export class KimiDesktopRuntime {
       emit: (notification) => this.host.notify(notification),
       onRawEvent: (event) => this.pushRawEvent(event as unknown as JsonRecord),
       onStateChanged: () => this.scheduleSnapshot(),
+      onSessionMetadataChanged: (sessionId, patch) => {
+        this.handleSessionMetadataChanged(sessionId, patch);
+      },
     });
     this.sessionRuntimes.set(session.id, runtime);
     try {
@@ -878,6 +883,40 @@ export class KimiDesktopRuntime {
     const safe = redactSecrets(event) as JsonRecord;
     this.rawEvents = [...this.rawEvents.slice(-299), safe];
     this.scheduleSnapshot();
+  }
+
+  private handleSessionMetadataChanged(
+    sessionId: string,
+    patch: { readonly title?: string; readonly lastPrompt?: string },
+  ): void {
+    const runtimeSummary = this.sessionRuntimes.get(sessionId)?.sdkSession.summary;
+    let found = false;
+    this.sessions = this.sessions.map((summary) => {
+      if (summary.id !== sessionId) return summary;
+      found = true;
+      return {
+        ...summary,
+        title: patch.title ?? summary.title,
+        lastPrompt: patch.lastPrompt ?? summary.lastPrompt,
+        updatedAt: runtimeSummary?.updatedAt ?? Date.now(),
+      };
+    });
+    if (!found && runtimeSummary !== undefined) {
+      this.sessions = [...this.sessions, runtimeSummary];
+    }
+    this.sessions = this.sessions.toSorted((left, right) => right.updatedAt - left.updatedAt);
+    this.scheduleSnapshot();
+    this.scheduleSessionIndexRefresh();
+  }
+
+  private scheduleSessionIndexRefresh(): void {
+    if (this.sessionIndexRefreshTimer !== undefined) clearTimeout(this.sessionIndexRefreshTimer);
+    this.sessionIndexRefreshTimer = setTimeout(() => {
+      this.sessionIndexRefreshTimer = undefined;
+      void this.refreshSessions()
+        .then(() => { this.scheduleSnapshot(); })
+        .catch((error) => { this.publishError(error, 'session.list'); });
+    }, 120);
   }
 
   private scheduleSnapshot(): void {

@@ -15,6 +15,8 @@ interface SessionControlsProps {
   readonly placement: 'topbar' | 'composer';
   readonly swarmPermissionPending: boolean;
   readonly onEnterSwarm: (activate: () => Promise<void> | void) => Promise<boolean>;
+  readonly planModePending: boolean;
+  readonly onSetPlanMode: (enabled: boolean) => Promise<void>;
 }
 
 export function SessionControls({
@@ -24,6 +26,8 @@ export function SessionControls({
   placement,
   swarmPermissionPending,
   onEnterSwarm,
+  planModePending,
+  onSetPlanMode,
 }: SessionControlsProps) {
   const disabled = sessionId === undefined;
   const toggleSwarm = async () => {
@@ -77,10 +81,10 @@ export function SessionControls({
       </label>
       <button
         className={classNames('mode-toggle', status?.planMode && 'active')}
-        disabled={disabled}
+        disabled={disabled || planModePending}
         aria-pressed={status?.planMode === true}
         title="Plan 模式"
-        onClick={() => void window.kimiDesktop.turn.setPlanMode(status?.planMode !== true, sessionId)}
+        onClick={() => void onSetPlanMode(status?.planMode !== true)}
       ><Pencil size={13} /><span>Plan</span></button>
       <button
         className={classNames('mode-toggle', status?.swarmMode && 'active')}

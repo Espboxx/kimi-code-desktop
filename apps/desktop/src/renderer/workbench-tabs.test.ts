@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { GitFile } from '../shared/desktop-api';
-import { buildGitTree, gitDecoration, groupGitChanges } from './git-tree';
+import { gitDecoration } from './git-tree';
 import {
   activateWorkbenchTab,
   closeWorkbenchTab,
@@ -38,8 +38,8 @@ describe('workbench tab state', () => {
   });
 });
 
-describe('Git change tree', () => {
-  it('places dual-state files in staged and working groups and builds directories', () => {
+describe('Explorer Git decorations', () => {
+  it('aggregates file status onto directories', () => {
     const files: GitFile[] = [
       {
         path: 'src/nested/main.ts',
@@ -55,26 +55,15 @@ describe('Git change tree', () => {
         worktreeStats: { additions: 0, deletions: 0 },
       },
     ];
-    const groups = groupGitChanges(files);
-    expect(groups.map((group) => [group.id, group.entries.length])).toEqual([['staged', 1], ['working', 2]]);
-    expect(buildGitTree(groups[1]?.entries ?? [])).toEqual([
-      expect.objectContaining({ kind: 'directory', name: 'src' }),
-      expect.objectContaining({ kind: 'file', name: 'new file.md' }),
-    ]);
     expect(gitDecoration('src', files, true)).toBe('modified');
     expect(gitDecoration('new file.md', files)).toBe('untracked');
   });
 
-  it('deduplicates conflict entries into the merge group', () => {
-    const files: GitFile[] = [{
-      path: 'conflict.ts',
-      indexStatus: 'conflicted',
-      worktreeStatus: 'conflicted',
-      indexStats: { additions: 0, deletions: 0 },
-      worktreeStats: { additions: 0, deletions: 0 },
-    }];
-    expect(groupGitChanges(files)).toEqual([
-      expect.objectContaining({ id: 'merge', entries: [expect.objectContaining({ area: 'conflict' })] }),
-    ]);
+  it('prefers the highest-priority status for a directory', () => {
+    const files: GitFile[] = [
+      { path: 'src/new.ts', worktreeStatus: 'untracked', indexStats: { additions: 0, deletions: 0 }, worktreeStats: { additions: 0, deletions: 0 } },
+      { path: 'src/conflict.ts', worktreeStatus: 'conflicted', indexStats: { additions: 0, deletions: 0 }, worktreeStats: { additions: 0, deletions: 0 } },
+    ];
+    expect(gitDecoration('src', files, true)).toBe('conflicted');
   });
 });

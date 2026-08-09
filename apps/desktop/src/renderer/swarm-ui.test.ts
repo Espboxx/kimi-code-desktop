@@ -12,6 +12,10 @@ import {
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  agentActivityLabel,
+  buildAgentActivityForest,
+} from './agent-activity';
+import {
   collectPendingAgentInteractions,
   interactionSummary,
   requiresSwarmPermissionChoice,
@@ -100,6 +104,76 @@ describe('Swarm UI coordination', () => {
       state: 'pending',
       request: { questions: [{ question: 'Choose a target' }] },
     })).toBe('Choose a target');
+  });
+});
+
+describe('Agent activity view model', () => {
+  it('builds a recursive tree and isolates missing or cyclic relationships', () => {
+    const store = new TranscriptStore('s1');
+    store.ensureAgent('main', { agentId: 'main', type: 'main', label: 'Main Agent' });
+    store.ensureAgent('agent-1', { agentId: 'agent-1', type: 'sub', parentAgentId: 'main' });
+    store.ensureAgent('agent-2', { agentId: 'agent-2', type: 'sub', parentAgentId: 'agent-1' });
+    store.ensureAgent('orphan', { agentId: 'orphan', type: 'sub', parentAgentId: 'missing' });
+    store.ensureAgent('cycle-a', { agentId: 'cycle-a', type: 'sub', parentAgentId: 'cycle-b' });
+    store.ensureAgent('cycle-b', { agentId: 'cycle-b', type: 'sub', parentAgentId: 'cycle-a' });
+
+    const forest = buildAgentActivityForest(store);
+
+    expect(forest.roots).toHaveLength(1);
+    expect(forest.roots[0]?.agent.agentId).toBe('main');
+    expect(forest.roots[0]?.children[0]?.agent.agentId).toBe('agent-1');
+    expect(forest.roots[0]?.children[0]?.children[0]?.agent.agentId).toBe('agent-2');
+    expect(forest.unattached.map((node) => node.agent.agentId)).toEqual(['cycle-a', 'cycle-b', 'orphan']);
+  });
+
+  it('keeps a completed child terminal when its phase later reports idle', () => {
+    const store = new TranscriptStore('s1');
+    const main = store.ensureAgent('main', { agentId: 'main', type: 'main', label: 'Main Agent' });
+    const child = store.ensureAgent('agent-1', {
+      agentId: 'agent-1',
+      type: 'sub',
+      parentAgentId: 'main',
+      label: 'Explorer',
+    });
+    main.apply([{
+      op: 'task.upsert',
+      task: {
+        taskId: 'agent-agent-1',
+        kind: 'subagent',
+        state: 'completed',
+        detached: false,
+        agentId: 'agent-1',
+        outputTail: '',
+        startedAt: new Date(10).toISOString(),
+        endedAt: new Date(20).toISOString(),
+      },
+    }]);
+    child.apply([{ op: 'meta.merge', meta: { agent: { phase: { kind: 'idle' } } } }]);
+
+    const node = buildAgentActivityForest(store).byId.get('agent-1');
+
+    expect(node?.status).toBe('completed');
+    expect(agentActivityLabel(node?.status ?? 'idle')).toBe('已完成（保留）');
+  });
+
+  it('prioritizes pending interaction and active work over older terminal tasks', () => {
+    const store = new TranscriptStore('s1');
+    const main = store.ensureAgent('main', { agentId: 'main', type: 'main' });
+    const child = store.ensureAgent('agent-1', { agentId: 'agent-1', type: 'sub', parentAgentId: 'main' });
+    main.apply([{
+      op: 'task.upsert',
+      task: { taskId: 'agent-agent-1', kind: 'subagent', state: 'completed', detached: false, agentId: 'agent-1', outputTail: '' },
+    }]);
+    child.apply([
+      { op: 'meta.merge', meta: { agent: { phase: { kind: 'running', turnId: 2, step: 1, stepId: '', since: 1 } } } },
+      upsert({ interactionId: 'approval:next', interactionKind: 'approval', state: 'pending' }),
+    ]);
+
+    const node = buildAgentActivityForest(store).byId.get('agent-1');
+
+    expect(node?.status).toBe('waiting');
+    expect(node?.action).toBe('等待权限确认');
+    expect(buildAgentActivityForest(store).roots[0]?.counts.waiting).toBe(1);
   });
 });
 

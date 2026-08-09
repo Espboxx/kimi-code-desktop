@@ -42,7 +42,7 @@ export class DesktopTranscriptReplica {
     if (batch.seq <= current) return 'ignored';
     if (batch.seq !== current + 1) return 'gap';
 
-    const result = store.ensureAgent(batch.agentId, { agentId: batch.agentId }).apply(batch.ops);
+    const result = (store.getAgent(batch.agentId) ?? store.ensureAgent(batch.agentId, { agentId: batch.agentId })).apply(batch.ops);
     if (result.gap !== undefined) return 'gap';
     this.sequences.set(batch.agentId, batch.seq);
     return 'applied';

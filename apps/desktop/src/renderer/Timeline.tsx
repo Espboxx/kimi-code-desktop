@@ -18,6 +18,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type {
   AgentTranscript,
+  TranscriptStore,
   TranscriptAttachment,
   TranscriptFrame,
   TranscriptInteraction,
@@ -26,18 +27,33 @@ import type {
   TranscriptTurn,
 } from '@moonshot-ai/transcript';
 
+import { InlineAgentActivity } from './AgentActivity';
+import type { AgentActivityForest } from './agent-activity';
 import { InteractionPanel } from './InteractionPanel';
 import { classNames, formatJson, record, text } from './ui-utils';
 
 interface TimelineProps {
   readonly transcript?: AgentTranscript;
+  readonly store?: TranscriptStore;
+  readonly activity: AgentActivityForest;
+  readonly selectedAgentId: string;
+  readonly onSelectAgent: (agentId: string) => void;
   readonly sessionId?: string;
   readonly version: number;
 }
 
-export function Timeline({ transcript, sessionId, version }: TimelineProps) {
+export function Timeline({
+  transcript,
+  store,
+  activity,
+  selectedAgentId,
+  onSelectAgent,
+  sessionId,
+  version,
+}: TimelineProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const shouldStick = useRef(true);
+  const previousTailId = useRef<string | undefined>(undefined);
   const items = transcript?.getItems() ?? [];
   const tasks = transcript?.getTasks() ?? new Map<string, TranscriptTask>();
   const interactions = transcript?.getInteractions() ?? new Map<string, TranscriptInteraction>();
@@ -51,12 +67,17 @@ export function Timeline({ transcript, sessionId, version }: TimelineProps) {
     estimateSize: (index) => items[index]?.kind === 'turn' ? 260 : 56,
     overscan: 5,
   });
+  const tail = items.at(-1);
+  const tailId = tail === undefined ? undefined : itemId(tail);
 
   useEffect(() => {
-    if (shouldStick.current && virtualizer.options.count > 0) {
+    const appended = previousTailId.current !== undefined && previousTailId.current !== tailId;
+    previousTailId.current = tailId;
+    if ((shouldStick.current || appended) && virtualizer.options.count > 0) {
+      shouldStick.current = true;
       virtualizer.scrollToIndex(virtualizer.options.count - 1, { align: 'end' });
     }
-  }, [version, virtualizer]);
+  }, [tailId, version, virtualizer]);
 
   if (transcript === undefined || sessionId === undefined) {
     return (
@@ -105,7 +126,17 @@ export function Timeline({ transcript, sessionId, version }: TimelineProps) {
                   ))}
                 </div>
               ) : (
-                <TimelineItem item={item} tasks={tasks} interactions={interactions} attachments={attachments} sessionId={sessionId} />
+                <TimelineItem
+                  item={item}
+                  tasks={tasks}
+                  interactions={interactions}
+                  attachments={attachments}
+                  sessionId={sessionId}
+                  store={store}
+                  activity={activity}
+                  selectedAgentId={selectedAgentId}
+                  onSelectAgent={onSelectAgent}
+                />
               )}
             </div>
           );
@@ -121,12 +152,20 @@ function TimelineItem({
   interactions,
   attachments,
   sessionId,
+  store,
+  activity,
+  selectedAgentId,
+  onSelectAgent,
 }: {
   readonly item: TranscriptItem;
   readonly tasks: ReadonlyMap<string, TranscriptTask>;
   readonly interactions: ReadonlyMap<string, TranscriptInteraction>;
   readonly attachments: ReadonlyMap<string, TranscriptAttachment>;
   readonly sessionId: string;
+  readonly store?: TranscriptStore;
+  readonly activity: AgentActivityForest;
+  readonly selectedAgentId: string;
+  readonly onSelectAgent: (agentId: string) => void;
 }) {
   if (item.kind === 'marker') {
     const payload = record(item.payload);
@@ -143,9 +182,20 @@ function TimelineItem({
   }
   if (item.kind === 'taskref') {
     const task = tasks.get(item.taskId);
-    return task === undefined ? null : <TaskStrip task={task} />;
+    return task === undefined || activity.linkedTaskIds.has(item.taskId) ? null : <TaskStrip task={task} />;
   }
-  return <TurnView turn={item} interactions={interactions} attachments={attachments} sessionId={sessionId} />;
+  return (
+    <TurnView
+      turn={item}
+      interactions={interactions}
+      attachments={attachments}
+      sessionId={sessionId}
+      store={store}
+      activity={activity}
+      selectedAgentId={selectedAgentId}
+      onSelectAgent={onSelectAgent}
+    />
+  );
 }
 
 function TurnView({
@@ -153,11 +203,19 @@ function TurnView({
   interactions,
   attachments,
   sessionId,
+  store,
+  activity,
+  selectedAgentId,
+  onSelectAgent,
 }: {
   readonly turn: TranscriptTurn;
   readonly interactions: ReadonlyMap<string, TranscriptInteraction>;
   readonly attachments: ReadonlyMap<string, TranscriptAttachment>;
   readonly sessionId: string;
+  readonly store?: TranscriptStore;
+  readonly activity: AgentActivityForest;
+  readonly selectedAgentId: string;
+  readonly onSelectAgent: (agentId: string) => void;
 }) {
   return (
     <article className="conversation-turn">
@@ -185,6 +243,10 @@ function TurnView({
                   : undefined}
               sessionId={sessionId}
               attachments={attachments}
+              store={store}
+              activity={activity}
+              selectedAgentId={selectedAgentId}
+              onSelectAgent={onSelectAgent}
               key={frame.frameId}
             />
           )))}
@@ -208,11 +270,19 @@ function FrameView({
   interaction,
   sessionId,
   attachments,
+  store,
+  activity,
+  selectedAgentId,
+  onSelectAgent,
 }: {
   readonly frame: TranscriptFrame;
   readonly interaction?: TranscriptInteraction;
   readonly sessionId: string;
   readonly attachments: ReadonlyMap<string, TranscriptAttachment>;
+  readonly store?: TranscriptStore;
+  readonly activity: AgentActivityForest;
+  readonly selectedAgentId: string;
+  readonly onSelectAgent: (agentId: string) => void;
 }) {
   switch (frame.kind) {
     case 'text':
@@ -260,6 +330,14 @@ function FrameView({
               {frame.output !== undefined && <PayloadBlock title={frame.state === 'error' ? '错误' : '结果'} value={frame.output} />}
             </div>
           </details>
+          {store !== undefined && frame.agentRefs !== undefined && frame.agentRefs.length > 0 && (
+            <InlineAgentActivity
+              refs={frame.agentRefs}
+              forest={activity}
+              selectedAgentId={selectedAgentId}
+              onSelectAgent={onSelectAgent}
+            />
+          )}
           {interaction !== undefined && (
             <InteractionPanel interaction={interaction} sessionId={sessionId} />
           )}

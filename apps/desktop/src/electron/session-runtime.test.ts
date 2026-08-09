@@ -21,6 +21,7 @@ describe('SessionRuntime interactions', () => {
       emit: (event) => notifications.push(event),
       onRawEvent: () => undefined,
       onStateChanged: () => undefined,
+      onSessionMetadataChanged: () => undefined,
     });
     await runtime.initialize();
 
@@ -48,6 +49,7 @@ describe('SessionRuntime interactions', () => {
       emit: () => undefined,
       onRawEvent: () => undefined,
       onStateChanged: () => undefined,
+      onSessionMetadataChanged: () => undefined,
     });
     await runtime.initialize();
 
@@ -70,6 +72,7 @@ describe('SessionRuntime interactions', () => {
       emit: (event) => notifications.push(event),
       onRawEvent: () => undefined,
       onStateChanged: () => undefined,
+      onSessionMetadataChanged: () => undefined,
     });
     await runtime.initialize();
 
@@ -82,11 +85,132 @@ describe('SessionRuntime interactions', () => {
     ]);
     await runtime.close();
   });
+
+  it('restores nested agent descriptors without losing parent metadata on later events', async () => {
+    const fixture = createSessionFixture({
+      resumeState: {
+        sessionMetadata: {
+          createdAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString(),
+          title: '',
+          isCustomTitle: false,
+          agents: {
+            main: { type: 'main' },
+            'agent-1': { type: 'sub', parentAgentId: 'main' },
+            'agent-2': { type: 'sub', parentAgentId: 'agent-1' },
+          },
+          custom: {},
+        },
+        agents: {
+          main: resumedAgent('main', 'Main Agent'),
+          'agent-1': resumedAgent('sub', 'Explorer'),
+          'agent-2': resumedAgent('sub', 'Reviewer'),
+        },
+      },
+    });
+    const runtime = new SessionRuntime({
+      session: fixture.session,
+      mediaCacheDir: 'D:\\workspace\\.media-cache',
+      emit: () => undefined,
+      onRawEvent: () => undefined,
+      onStateChanged: () => undefined,
+      onSessionMetadataChanged: () => undefined,
+    });
+    await runtime.initialize();
+
+    fixture.emitEvent({
+      type: 'agent.status.updated',
+      sessionId: 's1',
+      agentId: 'agent-2',
+      phase: { kind: 'running', turnId: 1, step: 1, stepId: '', since: 1 },
+    } as Event);
+
+    expect(runtime.transcriptSnapshot().agents).toEqual(expect.arrayContaining([
+      expect.objectContaining({ agentId: 'agent-1', parentAgentId: 'main', label: 'Explorer' }),
+      expect.objectContaining({ agentId: 'agent-2', parentAgentId: 'agent-1', label: 'Reviewer' }),
+    ]));
+    await runtime.close();
+  });
+
+  it('publishes title and last-prompt metadata immediately', async () => {
+    const fixture = createSessionFixture();
+    const changed = vi.fn();
+    const runtime = new SessionRuntime({
+      session: fixture.session,
+      mediaCacheDir: 'D:\\workspace\\.media-cache',
+      emit: () => undefined,
+      onRawEvent: () => undefined,
+      onStateChanged: () => undefined,
+      onSessionMetadataChanged: changed,
+    });
+    await runtime.initialize();
+
+    fixture.emitEvent({
+      type: 'session.meta.updated',
+      sessionId: 's1',
+      agentId: 'main',
+      title: 'Live title',
+      patch: { lastPrompt: 'Latest prompt' },
+    } as Event);
+
+    expect(fixture.session.summary).toMatchObject({ title: 'Live title', lastPrompt: 'Latest prompt' });
+    expect(changed).toHaveBeenCalledWith('s1', { title: 'Live title', lastPrompt: 'Latest prompt' });
+    await runtime.close();
+  });
+
+  it('serializes concurrent plan changes and skips an already-satisfied target', async () => {
+    const fixture = createSessionFixture();
+    const runtime = createRuntime(fixture);
+    await runtime.initialize();
+
+    await Promise.all([runtime.setPlanMode(true), runtime.setPlanMode(true)]);
+
+    expect(fixture.setPlanMode).toHaveBeenCalledOnce();
+    expect(runtime.sessionStatus?.planMode).toBe(true);
+    await runtime.close();
+  });
+
+  it('accepts a plan-mode conflict only when the refreshed state reached the target', async () => {
+    const conflict = Object.assign(new Error('Already in plan mode'), { code: 'session.plan_mode_invalid' });
+    const fixture = createSessionFixture({
+      planMutation: async (enabled, update) => {
+        update(enabled);
+        throw conflict;
+      },
+    });
+    const runtime = createRuntime(fixture);
+    await runtime.initialize();
+
+    await expect(runtime.setPlanMode(true)).resolves.toBeUndefined();
+    expect(runtime.sessionStatus?.planMode).toBe(true);
+    await runtime.close();
+  });
+
+  it('preserves a real plan-mode failure when the target state was not reached', async () => {
+    const failure = Object.assign(new Error('Plan transition failed'), { code: 'session.plan_mode_invalid' });
+    const fixture = createSessionFixture({ planMutation: async () => { throw failure; } });
+    const runtime = createRuntime(fixture);
+    await runtime.initialize();
+
+    await expect(runtime.setPlanMode(true)).rejects.toBe(failure);
+    expect(runtime.sessionStatus?.planMode).toBe(false);
+    await runtime.close();
+  });
 });
 
-function createSessionFixture(): {
+interface SessionFixtureOptions {
+  readonly resumeState?: unknown;
+  readonly initialPlanMode?: boolean;
+  readonly planMutation?: (
+    enabled: boolean,
+    update: (enabled: boolean) => void,
+  ) => Promise<void>;
+}
+
+function createSessionFixture(options: SessionFixtureOptions = {}): {
   readonly session: Session;
   readonly close: ReturnType<typeof vi.fn>;
+  readonly setPlanMode: ReturnType<typeof vi.fn>;
   readonly emitEvent: (event: Event) => void;
   readonly approvalHandler?: ApprovalHandler;
   readonly questionHandler?: QuestionHandler;
@@ -94,7 +218,15 @@ function createSessionFixture(): {
   let approvalHandler: ApprovalHandler | undefined;
   let questionHandler: QuestionHandler | undefined;
   let eventHandler: ((event: Event) => void) | undefined;
+  let planMode = options.initialPlanMode ?? false;
   const close = vi.fn(async () => undefined);
+  const setPlanMode = vi.fn(async (enabled: boolean) => {
+    if (options.planMutation !== undefined) {
+      await options.planMutation(enabled, (next) => { planMode = next; });
+      return;
+    }
+    planMode = enabled;
+  });
   const session = {
     id: 's1',
     summary: { id: 's1', workDir: 'D:\\workspace', additionalDirs: [] },
@@ -104,8 +236,9 @@ function createSessionFixture(): {
     },
     setApprovalHandler: (handler?: ApprovalHandler) => { approvalHandler = handler; },
     setQuestionHandler: (handler?: QuestionHandler) => { questionHandler = handler; },
-    getResumeState: () => undefined,
-    getStatus: async () => ({ model: 'kimi-test', thinkingEffort: 'off', permission: 'manual', planMode: false, contextTokens: 0, maxContextTokens: 0, contextUsage: 0 }),
+    getResumeState: () => options.resumeState,
+    getStatus: async () => ({ model: 'kimi-test', thinkingEffort: 'off', permission: 'manual', planMode, contextTokens: 0, maxContextTokens: 0, contextUsage: 0 }),
+    setPlanMode,
     getPlan: async () => null,
     listBackgroundTasks: async () => [],
     getGoal: async () => null,
@@ -121,8 +254,34 @@ function createSessionFixture(): {
   return {
     session,
     close,
+    setPlanMode,
     emitEvent: (event) => eventHandler?.(event),
     get approvalHandler() { return approvalHandler; },
     get questionHandler() { return questionHandler; },
+  };
+}
+
+function createRuntime(fixture: ReturnType<typeof createSessionFixture>): SessionRuntime {
+  return new SessionRuntime({
+    session: fixture.session,
+    mediaCacheDir: 'D:\\workspace\\.media-cache',
+    emit: () => undefined,
+    onRawEvent: () => undefined,
+    onStateChanged: () => undefined,
+    onSessionMetadataChanged: () => undefined,
+  });
+}
+
+function resumedAgent(type: 'main' | 'sub', profileName: string): unknown {
+  return {
+    type,
+    config: { profileName, thinkingEffort: 'off' },
+    context: { history: [], tokenCount: 0 },
+    replay: [],
+    permission: { mode: 'manual' },
+    plan: null,
+    usage: {},
+    tools: [],
+    background: [],
   };
 }

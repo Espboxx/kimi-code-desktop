@@ -212,7 +212,9 @@ function WorkspaceTree({ root, nodes, revision, gitFiles, activeFilePath, onOpen
       loading={loading}
       gitFiles={gitFiles}
       activeFilePath={activeFilePath}
-      onToggle={toggle}
+      onToggle={(node, force) => {
+        void toggle(node, force);
+      }}
       onOpenFile={onOpenFile}
     />
   );

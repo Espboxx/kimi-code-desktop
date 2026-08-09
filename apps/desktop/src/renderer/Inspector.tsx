@@ -1,10 +1,6 @@
 import { useState } from 'react';
 import {
-  Bot,
   Brain,
-  CheckCircle2,
-  CirclePause,
-  CirclePlay,
   Clock3,
   FileText,
   FolderPlus,
@@ -20,9 +16,10 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { TranscriptStore } from '@moonshot-ai/transcript';
 
 import type { SessionDetailsSnapshot } from '../shared/desktop-api';
+import { AgentActivityTree } from './AgentActivity';
+import type { AgentActivityForest } from './agent-activity';
 import { contextPercentage, contextProgress } from './composer-utils';
 import { classNames, formatJson, number, record, text } from './ui-utils';
 
@@ -31,10 +28,12 @@ type InspectorTab = 'plan' | 'agents' | 'tasks' | 'goal' | 'context';
 interface InspectorProps {
   readonly sessionId?: string;
   readonly details: SessionDetailsSnapshot;
-  readonly transcript?: TranscriptStore;
+  readonly activity: AgentActivityForest;
   readonly selectedAgentId: string;
   readonly onSelectAgent: (agentId: string) => void;
   readonly onTaskOutput: (taskId: string) => void;
+  readonly planModePending: boolean;
+  readonly onSetPlanMode: (enabled: boolean) => Promise<void>;
 }
 
 export function Inspector(props: InspectorProps) {
@@ -62,7 +61,15 @@ export function Inspector(props: InspectorProps) {
       <div className="inspector-content">
         {props.sessionId === undefined ? <div className="inspector-empty">选择会话后可查看运行状态</div> : (
           <>
-            {tab === 'plan' && <PlanPanel sessionId={props.sessionId} plan={props.details.plan} />}
+            {tab === 'plan' && (
+              <PlanPanel
+                sessionId={props.sessionId}
+                plan={props.details.plan}
+                planMode={props.details.status?.planMode === true}
+                pending={props.planModePending}
+                onSetPlanMode={props.onSetPlanMode}
+              />
+            )}
             {tab === 'agents' && <AgentsPanel {...props} />}
             {tab === 'tasks' && <TasksPanel sessionId={props.sessionId} tasks={props.details.backgroundTasks} onOutput={props.onTaskOutput} />}
             {tab === 'goal' && <GoalPanel sessionId={props.sessionId} goal={props.details.goal} cron={props.details.cron} />}
@@ -74,15 +81,30 @@ export function Inspector(props: InspectorProps) {
   );
 }
 
-function PlanPanel({ sessionId, plan }: { readonly sessionId: string; readonly plan: unknown }) {
+function PlanPanel({
+  sessionId,
+  plan,
+  planMode,
+  pending,
+  onSetPlanMode,
+}: {
+  readonly sessionId: string;
+  readonly plan: unknown;
+  readonly planMode: boolean;
+  readonly pending: boolean;
+  readonly onSetPlanMode: (enabled: boolean) => Promise<void>;
+}) {
   const data = record(plan);
   const content = text(data['content']);
   if (content.length === 0) {
     return (
       <div className="inspector-empty compact-empty">
         <FileText size={20} />
-        <strong>暂无 Plan</strong>
-        <button onClick={() => void window.kimiDesktop.turn.setPlanMode(true, sessionId)}>进入 Plan 模式</button>
+        <strong>{planMode ? 'Plan 模式已开启' : '暂无 Plan'}</strong>
+        <span>{planMode ? '等待 Kimi 生成或更新计划' : '进入 Plan 模式后由 Kimi 创建计划'}</span>
+        <button disabled={pending} onClick={() => void onSetPlanMode(!planMode)}>
+          {pending ? '正在切换…' : planMode ? '退出 Plan 模式' : '进入 Plan 模式'}
+        </button>
       </div>
     );
   }
@@ -94,7 +116,7 @@ function PlanPanel({ sessionId, plan }: { readonly sessionId: string; readonly p
       </div>
       <div className="plan-content markdown-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown></div>
       <div className="panel-actions">
-        <button onClick={() => void window.kimiDesktop.turn.setPlanMode(false, sessionId)}>退出 Plan</button>
+        <button disabled={pending} onClick={() => void onSetPlanMode(false)}>{pending ? '正在切换…' : '退出 Plan'}</button>
         <button onClick={() => void window.kimiDesktop.context.clearPlan(sessionId)}><Trash2 size={13} />清空</button>
       </div>
     </div>
@@ -102,32 +124,32 @@ function PlanPanel({ sessionId, plan }: { readonly sessionId: string; readonly p
 }
 
 function AgentsPanel(props: InspectorProps) {
-  const agents = props.transcript?.agents() ?? [];
+  const agents = props.activity.counts.total;
   return (
     <div className="panel-stack">
       <div className="panel-heading-row">
-        <div><strong>Agent 活动</strong><small>{agents.length} 个 transcript</small></div>
+        <div><strong>Agent 活动</strong><small>{agents} 个 transcript</small></div>
         <button className="icon-button" onClick={() => void window.kimiDesktop.task.startBtw(props.sessionId)} title="启动 BTW Agent"><Plus size={14} /></button>
       </div>
-      <div className="agent-list">
-        {agents.map((agent) => {
-          const transcript = props.transcript?.getAgent(agent.agentId);
-          const meta = transcript?.getMeta();
-          const phase = meta?.agent?.phase?.kind ?? 'idle';
-          const tasks = transcript === undefined ? [] : [...transcript.getTasks().values()];
-          return (
-            <button
-              className={classNames('agent-row', props.selectedAgentId === agent.agentId && 'selected')}
-              onClick={() => props.onSelectAgent(agent.agentId)}
-              key={agent.agentId}
-            >
-              <span className={classNames('agent-avatar', phase !== 'idle' && phase !== 'ended' && 'running')}><Bot size={14} /></span>
-              <span><strong>{agent.label ?? agent.agentId}</strong><small>{agent.type ?? 'sub'} · {phase} · {tasks.length} tasks</small></span>
-              {agent.disposedAt !== undefined ? <CheckCircle2 size={14} /> : phase === 'idle' || phase === 'ended' ? <CirclePause size={14} /> : <CirclePlay size={14} />}
-            </button>
-          );
-        })}
-      </div>
+      {agents === 0 ? (
+        <div className="inspector-empty compact-empty">暂无 Agent transcript</div>
+      ) : (
+        <AgentActivityTree
+          nodes={props.activity.roots}
+          selectedAgentId={props.selectedAgentId}
+          onSelectAgent={props.onSelectAgent}
+        />
+      )}
+      {props.activity.unattached.length > 0 && (
+        <section className="unattached-agents">
+          <h4>未挂载 <span>{props.activity.unattached.length}</span></h4>
+          <AgentActivityTree
+            nodes={props.activity.unattached}
+            selectedAgentId={props.selectedAgentId}
+            onSelectAgent={props.onSelectAgent}
+          />
+        </section>
+      )}
     </div>
   );
 }

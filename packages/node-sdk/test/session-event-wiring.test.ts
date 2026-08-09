@@ -27,6 +27,7 @@ import {
 } from '@moonshot-ai/agent-core-v2';
 
 import { SessionEventWiring, type SessionEventSink } from '#/v2/session-wiring';
+import { v2MetaToSessionMeta } from '#/v2/session-mapper';
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -123,6 +124,50 @@ function bindStatusServices(agent: FakeAgentHandle, model: string): void {
 // ---------------------------------------------------------------------------
 
 describe('SessionEventWiring status snapshot fold', () => {
+  it('projects native activity updates into stable legacy phases', () => {
+    const sub = new FakeAgentHandle('agent-1');
+    const { sink, events } = collectingSink();
+    const wiring = new SessionEventWiring(makeSession([sub]), sink);
+    try {
+      sub.bus.emit({
+        type: 'agent.activity.updated',
+        lifecycle: 'ready',
+        background: [],
+        turn: {
+          turnId: 3,
+          origin: 'prompt',
+          phase: 'tool_call',
+          step: 2,
+          ending: false,
+          pendingApprovals: [],
+          activeToolCalls: [{ toolCallId: 'tool-1', name: 'ReadFile', since: 20 }],
+          since: 10,
+        },
+      });
+      sub.bus.emit({
+        type: 'agent.activity.updated',
+        lifecycle: 'ready',
+        background: [],
+        lastTurn: { turnId: 3, reason: 'completed', durationMs: 25, at: 35 },
+      });
+    } finally {
+      wiring.dispose();
+    }
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'agent.status.updated',
+        sessionId: 's1',
+        agentId: 'agent-1',
+        phase: expect.objectContaining({ kind: 'tool_call', name: 'ReadFile' }),
+      }),
+      expect.objectContaining({
+        type: 'agent.status.updated',
+        phase: expect.objectContaining({ kind: 'ended', reason: 'completed', durationMs: 25 }),
+      }),
+    ]);
+  });
+
   it('folds a consistent usage + context + model snapshot into every status event', () => {
     const sub = new FakeAgentHandle('agent-1');
     bindStatusServices(sub, 'sub-model');
@@ -281,5 +326,29 @@ describe('SessionEventWiring pending interaction baseline', () => {
     } finally {
       wiring.dispose();
     }
+  });
+});
+
+describe('v2 session metadata mapping', () => {
+  it('prefers persisted relationship labels when restoring nested agents', () => {
+    const mapped = v2MetaToSessionMeta({
+      id: 's1',
+      createdAt: 1,
+      updatedAt: 2,
+      archived: false,
+      agents: {
+        'agent-2': {
+          type: 'sub',
+          parentAgentId: 'main',
+          swarmItem: 'legacy item',
+          labels: { parentAgentId: 'agent-1', swarmItem: 'nested item' },
+        },
+      },
+    });
+
+    expect(mapped.agents['agent-2']).toMatchObject({
+      parentAgentId: 'agent-1',
+      swarmItem: 'nested item',
+    });
   });
 });
