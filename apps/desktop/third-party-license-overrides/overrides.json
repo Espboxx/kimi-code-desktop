@@ -1,0 +1,26 @@
+{
+  "@tokenizer/token@0.3.0": {
+    "directory": "tokenizer-token-0.3.0",
+    "source": "https://github.com/Borewit/tokenizer-token/blob/e068a455370090f44c757946b8571bb3fb1f117e/README.md#licence"
+  },
+  "boolbase@1.0.0": {
+    "directory": "boolbase-1.0.0",
+    "source": "https://github.com/fb55/boolbase/blob/ede159ca6b89b9709e7322c53eeb385ac7fdfefb/LICENSE"
+  },
+  "data-uri-to-buffer@4.0.1": {
+    "directory": "data-uri-to-buffer-4.0.1",
+    "source": "https://github.com/TooTallNate/node-data-uri-to-buffer/blob/85cd8c854aefbf1bb636789d80364cfac8ea1583/README.md#license"
+  },
+  "omggif@1.0.10": {
+    "directory": "omggif-1.0.10",
+    "source": "https://github.com/deanm/omggif/blob/334a0c0b6aa2eb5e63fae64ba7911ee647655ab2/README"
+  },
+  "parse-bmfont-ascii@1.0.6": {
+    "directory": "parse-bmfont-ascii-1.0.6",
+    "source": "https://github.com/mattdesl/parse-bmfont-ascii/blob/5f22b037ae7460f629dd681db23cd9b543a76b06/LICENSE.md"
+  },
+  "standardwebhooks@1.0.0": {
+    "directory": "standardwebhooks-1.0.0",
+    "source": "https://github.com/standard-webhooks/standard-webhooks/blob/929bf0c1928b188287eaf88d0a9f0a4e87df6499/libraries/LICENSE"
+  }
+}

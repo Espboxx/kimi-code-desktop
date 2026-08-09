@@ -5,6 +5,7 @@ import {
   ChevronDown,
   CircleDashed,
   FileOutput,
+  FolderOpen,
   GitFork,
   Moon,
   Pencil,
@@ -87,6 +88,7 @@ export function App() {
   const sessionIndexKey = snapshot?.sessions.map((session) => session.id).join('\0') ?? '';
   const [selectedAgents, setSelectedAgents] = useState<Record<string, string>>({});
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [workspaceChoosing, setWorkspaceChoosing] = useState(false);
   const [theme, setTheme] = useState<Theme>('system');
   const [systemDark, setSystemDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
   const [sessionDialog, setSessionDialog] = useState<SessionDialogState>();
@@ -517,7 +519,7 @@ export function App() {
     }
   }, []);
 
-  if (snapshot === undefined) {
+  if (snapshot === undefined || snapshot.loading) {
     return <div className="app-loading"><CircleDashed className="spin" size={22} /><span>正在启动 Kimi Code Desktop</span></div>;
   }
 
@@ -564,12 +566,23 @@ export function App() {
     failed: teamState.snapshot.assignments.filter((assignment) => assignment.status === 'failed').length,
   }]));
   const createSession = async () => openSession(await window.kimiDesktop.session.create());
+  const selectWorkspace = async () => {
+    setWorkspaceChoosing(true);
+    setSwarmActionError(undefined);
+    try {
+      await window.kimiDesktop.workspace.choose();
+    } catch (error) {
+      setSwarmActionError(rendererError(error, 'workspace.open_failed'));
+    } finally {
+      setWorkspaceChoosing(false);
+    }
+  };
   const chooseWorkspace = () => {
     if (dirtyTabs.length > 0) {
       setDirtyPrompt({ kind: 'workspace' });
       setDirtyPromptError(undefined);
     } else {
-      void window.kimiDesktop.workspace.choose();
+      void selectWorkspace();
     }
   };
   const reloadFile = (tab: FileWorkbenchTab) => void loadFile(tab.id, tab.path);
@@ -624,6 +637,7 @@ export function App() {
     setDirtyPrompt(undefined);
     setDirtyPromptError(undefined);
   };
+  const workspaceSelected = snapshot.workspace.root.length > 0;
 
   return (
     <div className="desktop-app">
@@ -631,7 +645,7 @@ export function App() {
         <div className="brand-block">
           <span className="brand-mark"><Bot size={17} /></span>
           <strong>Kimi Code Desktop</strong>
-          <span className={classNames('runtime-state', status?.busy && 'busy')}><span />{status?.busy ? 'Working' : snapshot.activeSessionId === undefined ? 'No session' : 'Ready'}</span>
+          <span className={classNames('runtime-state', status?.busy && 'busy')}><span />{status?.busy ? 'Working' : !workspaceSelected ? '未选择工作区' : snapshot.activeSessionId === undefined ? 'No session' : 'Ready'}</span>
         </div>
         <div className="top-actions">
           <button className="icon-button" onClick={cycleTheme} title={`主题：${theme}`}>{theme === 'light' ? <Sun size={15} /> : theme === 'dark' ? <Moon size={15} /> : <Settings size={15} />}</button>
@@ -639,7 +653,7 @@ export function App() {
         </div>
       </header>
 
-      <div className="workbench">
+      {workspaceSelected ? <div className="workbench">
         <Sidebar
           workspace={snapshot.workspace}
           tree={snapshot.tree}
@@ -765,7 +779,9 @@ export function App() {
             void window.kimiDesktop.task.output(taskId, 200_000, snapshot.activeSessionId).then((output) => setTaskOutput({ taskId, output }));
           }}
         />
-      </div>
+      </div> : (
+        <WorkspaceWelcome busy={workspaceChoosing} onChoose={chooseWorkspace} />
+      )}
 
       {settingsOpen && <SettingsDialog snapshot={snapshot} onClose={() => setSettingsOpen(false)} />}
       {swarmPermission !== undefined && <SwarmPermissionDialog permission={swarmPermission.permission} onChoose={chooseSwarmPermission} onCancel={cancelSwarmPermission} />}
@@ -789,8 +805,29 @@ export function App() {
           <button className="icon-button" onClick={() => { if (swarmActionError !== undefined) setSwarmActionError(undefined); else state.clearError(); }} title="关闭"><X size={14} /></button>
         </div>
       )}
-      {snapshot.loading && <div className="loading-line" />}
     </div>
+  );
+}
+
+function WorkspaceWelcome({ busy, onChoose }: {
+  readonly busy: boolean;
+  readonly onChoose: () => void;
+}) {
+  return (
+    <main className="workspace-welcome">
+      <div className="workspace-welcome-card">
+        <span className="workspace-welcome-icon"><FolderOpen size={28} /></span>
+        <div>
+          <h1>选择一个工作区</h1>
+          <p>打开包含项目文件的文件夹后，Kimi Code 才会加载文件、Git 状态和该工作区的会话。</p>
+        </div>
+        <button className="button-primary workspace-welcome-action" disabled={busy} onClick={onChoose} autoFocus>
+          {busy ? <CircleDashed className="spin" size={15} /> : <FolderOpen size={15} />}
+          {busy ? '正在打开…' : '选择工作区'}
+        </button>
+        <small>成功选择后，下次启动会自动恢复这个工作区。</small>
+      </div>
+    </main>
   );
 }
 

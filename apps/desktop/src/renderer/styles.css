@@ -358,6 +358,71 @@ progress {
   overflow: hidden;
 }
 
+.workspace-welcome {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  place-items: center;
+  padding: 32px;
+  overflow: auto;
+  background:
+    radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 36%),
+    var(--bg);
+}
+
+.workspace-welcome-card {
+  display: flex;
+  width: min(480px, 100%);
+  align-items: center;
+  flex-direction: column;
+  gap: 18px;
+  padding: 38px 42px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 18px 60px rgb(0 0 0 / 10%);
+  text-align: center;
+}
+
+.workspace-welcome-icon {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: 14px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+
+.workspace-welcome-card h1 {
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: 21px;
+  line-height: 1.25;
+}
+
+.workspace-welcome-card p {
+  max-width: 390px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.workspace-welcome-action {
+  display: inline-flex;
+  min-width: 150px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.workspace-welcome-card > small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
 .sidebar {
   grid-area: sidebar;
   display: flex;

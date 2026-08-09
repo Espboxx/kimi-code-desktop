@@ -21,6 +21,7 @@ const workspace = join(fixtureRoot, 'workspace');
 const additionalDir = join(fixtureRoot, 'additional');
 const pluginDir = join(fixtureRoot, 'fixture-plugin');
 const electronProfile = join(fixtureRoot, 'electron-profile');
+const firstLaunchProfile = join(fixtureRoot, 'first-launch-profile');
 const exportPath = join(fixtureRoot, 'session-export.zip');
 const samplePath = join(workspace, 'sample.txt');
 const dualPath = join(workspace, 'dual.txt');
@@ -35,6 +36,7 @@ const processLogs = [];
 const pageErrors = [];
 let firstApp;
 let secondApp;
+let bootstrapApp;
 let provider;
 let persistedComposerHeight;
 let secondarySessionId;
@@ -52,6 +54,56 @@ try {
   await preparePlugin();
   provider = await startProvider();
   await writeConfig(provider.baseUrl);
+
+  const bootstrap = await launchDesktopWith({ profile: firstLaunchProfile });
+  bootstrapApp = bootstrap.app;
+  const bootstrapPage = bootstrap.page;
+  await bootstrapPage.locator('.workspace-welcome').waitFor({ state: 'visible' });
+  assert.equal(await bootstrapPage.locator('.workspace-welcome-action').innerText(), '选择工作区');
+  assert.equal(await bootstrapPage.locator('.workbench').count(), 0, 'first launch must not enter a workspace');
+  assert.equal(await bootstrapPage.locator('.sidebar').count(), 0, 'sidebar must stay hidden without a workspace');
+  assert.equal(await bootstrapPage.locator('.inspector').count(), 0, 'inspector must stay hidden without a workspace');
+  const emptyWorkspaceSnapshot = await bootstrapPage.evaluate(() => window.kimiDesktop.host.snapshot());
+  assert.equal(emptyWorkspaceSnapshot.workspace.root, '');
+  assert.deepEqual(emptyWorkspaceSnapshot.sessions, []);
+  await auditWelcomeAndScreenshot(bootstrapApp, bootstrapPage, 1_620, 1_040, join(artifactDir, 'workspace-welcome-1620x1040.png'));
+  await auditWelcomeAndScreenshot(bootstrapApp, bootstrapPage, 1_180, 760, join(artifactDir, 'workspace-welcome-1180x760.png'));
+  assert.equal(await bootstrapPage.evaluate(async () => {
+    try {
+      await window.kimiDesktop.session.create();
+      return false;
+    } catch {
+      return true;
+    }
+  }), true, 'session commands must be rejected until a workspace is selected');
+  const noWorkspaceError = bootstrapPage.locator('.error-toast').filter({ hasText: 'workspace.not_selected' });
+  await noWorkspaceError.waitFor({ state: 'visible' });
+  await noWorkspaceError.getByTitle('关闭').click();
+
+  await bootstrapPage.evaluate((path) => window.kimiDesktop.workspace.open(path), workspace);
+  await bootstrapPage.waitForFunction(async (path) => (await window.kimiDesktop.host.snapshot()).workspace.root === path, workspace);
+  await bootstrapPage.locator('.workbench').waitFor({ state: 'visible' });
+  await stopDesktop(bootstrapApp);
+  bootstrapApp = undefined;
+
+  const restoredWorkspaceApp = await launchDesktopWith({ profile: firstLaunchProfile });
+  bootstrapApp = restoredWorkspaceApp.app;
+  await restoredWorkspaceApp.page.waitForFunction(async (path) => (await window.kimiDesktop.host.snapshot()).workspace.root === path, workspace);
+  assert.equal(await restoredWorkspaceApp.page.locator('.workspace-welcome').count(), 0, 'remembered workspace should restore on restart');
+  await stopDesktop(bootstrapApp);
+  bootstrapApp = undefined;
+
+  await writeFile(join(firstLaunchProfile, 'workspace-state.json'), `${JSON.stringify({
+    version: 1,
+    lastWorkspace: join(fixtureRoot, 'missing-workspace'),
+  }, null, 2)}\n`, 'utf8');
+  const missing = await launchDesktopWith({ profile: firstLaunchProfile });
+  bootstrapApp = missing.app;
+  await missing.page.locator('.workspace-welcome').waitFor({ state: 'visible' });
+  assert.equal((await missing.page.evaluate(() => window.kimiDesktop.host.snapshot())).workspace.root, '');
+  await stopDesktop(bootstrapApp);
+  bootstrapApp = undefined;
+  assert.deepEqual(JSON.parse(await readFile(join(firstLaunchProfile, 'workspace-state.json'), 'utf8')), { version: 1 });
 
   const first = await launchDesktop();
   firstApp = first.app;
@@ -888,6 +940,8 @@ try {
     restoredAgents: restored.transcript?.agents.length ?? 0,
     exportPath,
     screenshots: [
+      join(artifactDir, 'workspace-welcome-1620x1040.png'),
+      join(artifactDir, 'workspace-welcome-1180x760.png'),
       join(artifactDir, 'kimi-desktop-1620x1040.png'),
       join(artifactDir, 'kimi-desktop-1180x760.png'),
       join(artifactDir, 'editor-git-1620x1040.png'),
@@ -912,8 +966,10 @@ try {
   process.stderr.write(`${JSON.stringify({ processLogs, pageErrors }, null, 2)}\n`);
   throw error;
 } finally {
+  await bootstrapApp?.evaluate(({ app }) => app.exit(0)).catch(() => undefined);
   await firstApp?.evaluate(({ app }) => app.exit(0)).catch(() => undefined);
   await secondApp?.evaluate(({ app }) => app.exit(0)).catch(() => undefined);
+  await bootstrapApp?.close().catch(() => undefined);
   await firstApp?.close().catch(() => undefined);
   await secondApp?.close().catch(() => undefined);
   await provider?.close().catch(() => undefined);
@@ -1003,16 +1059,22 @@ max_attempts_per_step = 2
 }
 
 async function launchDesktop() {
+  return launchDesktopWith({ profile: electronProfile, workspaceOverride: workspace });
+}
+
+async function launchDesktopWith({ profile, workspaceOverride }) {
+  const env = {
+    ...process.env,
+    KIMI_CODE_HOME: kimiHome,
+    KIMI_DESKTOP_E2E: '1',
+  };
+  delete env.KIMI_DESKTOP_WORKSPACE;
+  if (workspaceOverride !== undefined) env.KIMI_DESKTOP_WORKSPACE = workspaceOverride;
   const app = await electron.launch({
     executablePath: electronPath,
-    args: [appDir, `--user-data-dir=${electronProfile}`],
+    args: [appDir, `--user-data-dir=${profile}`],
     cwd: appDir,
-    env: {
-      ...process.env,
-      KIMI_CODE_HOME: kimiHome,
-      KIMI_DESKTOP_WORKSPACE: workspace,
-      KIMI_DESKTOP_E2E: '1',
-    },
+    env,
     timeout: 30_000,
   });
   const child = app.process();
@@ -1024,6 +1086,11 @@ async function launchDesktop() {
   await page.locator('.desktop-app').waitFor({ timeout: 30_000 });
   await page.waitForFunction(async () => (await window.kimiDesktop.host.snapshot()).loading === false, undefined, { timeout: 30_000 });
   return { app, page };
+}
+
+async function stopDesktop(app) {
+  await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined);
+  await app.close().catch(() => undefined);
 }
 
 async function removeWithRetry(path) {
@@ -1174,8 +1241,69 @@ async function auditAndScreenshot(app, page, width, height, outputPath) {
     assert.ok(audit.pendingDock.right <= audit.conversation.right, JSON.stringify(audit));
     assert.ok(audit.pendingDock.bottom <= audit.composer.top + 1, JSON.stringify(audit));
   }
-  await page.screenshot({ path: outputPath });
+  await captureSanitizedFixtureScreenshot(page, outputPath);
   assert.ok((await stat(outputPath)).size > 20_000, 'screenshot is unexpectedly small');
+}
+
+async function auditWelcomeAndScreenshot(app, page, width, height, outputPath) {
+  await app.evaluate(({ BrowserWindow }, size) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    if (window === undefined) throw new Error('Desktop window is missing');
+    window.setSize(size.width, size.height);
+  }, { width, height });
+  await page.waitForTimeout(350);
+  const audit = await page.evaluate(() => {
+    const welcome = document.querySelector('.workspace-welcome');
+    const card = document.querySelector('.workspace-welcome-card');
+    if (!(welcome instanceof HTMLElement) || !(card instanceof HTMLElement)) return null;
+    const welcomeRect = welcome.getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
+    return {
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      document: { width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight },
+      welcome: { left: welcomeRect.left, right: welcomeRect.right, top: welcomeRect.top, bottom: welcomeRect.bottom },
+      card: { left: cardRect.left, right: cardRect.right, top: cardRect.top, bottom: cardRect.bottom },
+      workbenchCount: document.querySelectorAll('.workbench').length,
+    };
+  });
+  assert.ok(audit !== null, 'workspace welcome is missing');
+  assert.ok(audit.document.width <= audit.viewport.width + 1, JSON.stringify(audit));
+  assert.ok(audit.document.height <= audit.viewport.height + 1, JSON.stringify(audit));
+  assert.equal(audit.workbenchCount, 0, JSON.stringify(audit));
+  assert.ok(audit.card.left >= audit.welcome.left, JSON.stringify(audit));
+  assert.ok(audit.card.right <= audit.welcome.right, JSON.stringify(audit));
+  assert.ok(audit.card.top >= audit.welcome.top, JSON.stringify(audit));
+  assert.ok(audit.card.bottom <= audit.welcome.bottom, JSON.stringify(audit));
+  await page.screenshot({ path: outputPath });
+  assert.ok((await stat(outputPath)).size > 20_000, 'welcome screenshot is unexpectedly small');
+}
+
+async function captureSanitizedFixtureScreenshot(page, outputPath) {
+  const originals = await page.evaluate(() => {
+    const replacements = [
+      { selector: '.workspace-title small', text: 'Fixture workspace' },
+      { selector: '.session-copy small', text: 'Fixture session' },
+      { selector: '.conversation-header > div > span', text: 'fixture-session' },
+    ];
+    return replacements.map(({ selector, text }) => {
+      const elements = [...document.querySelectorAll(selector)];
+      const values = elements.map((element) => element.textContent);
+      for (const element of elements) element.textContent = text;
+      return { selector, values };
+    });
+  });
+  try {
+    await page.screenshot({ path: outputPath });
+  } finally {
+    await page.evaluate((replacements) => {
+      for (const { selector, values } of replacements) {
+        const elements = [...document.querySelectorAll(selector)];
+        for (let index = 0; index < elements.length; index += 1) {
+          elements[index].textContent = values[index] ?? '';
+        }
+      }
+    }, originals);
+  }
 }
 
 async function startProvider() {

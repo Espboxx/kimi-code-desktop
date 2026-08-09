@@ -1,6 +1,6 @@
-# Contributing to kimi-code
+# Contributing to Kimi Code Desktop
 
-Thanks for taking the time to contribute! This project moves quickly, and thoughtful contributions from the community are what keep it sharp. The guide below walks you through how we work so your PR has the best chance of landing smoothly.
+Thanks for taking the time to contribute! This repository maintains the unofficial Kimi Code Desktop derivative together with the retained CLI, SDK, and engine packages. The guide below explains how to prepare a focused, reviewable change.
 
 ## Before You Start
 
@@ -27,7 +27,8 @@ We only merge PRs aligned with the roadmap. Drive-by refactors without context a
 
 This is a pnpm monorepo. The most relevant entry points are:
 
-- `apps/kimi-code` — CLI / TUI
+- `apps/desktop` — Electron / React Desktop application and Windows packaging
+- `apps/kimi-code` — retained CLI / TUI
 - `apps/vis` — session replay & debugging visualizer
 - `packages/node-sdk` — public TypeScript SDK (`@moonshot-ai/kimi-code-sdk`)
 - `packages/agent-core`, `kosong`, `kaos`, `oauth`, `telemetry` — internal engine packages
@@ -40,8 +41,8 @@ For the full project map, see [AGENTS.md](AGENTS.md).
 Prerequisites: Node.js >= 24.15.0, pnpm 10.33.0, Git.
 
 ```sh
-git clone https://github.com/MoonshotAI/kimi-code.git
-cd kimi-code
+git clone <repository-url>
+cd <repository-directory>
 pnpm install
 ```
 
@@ -53,6 +54,8 @@ Useful scripts:
 - `pnpm lint` — oxlint
 - `pnpm lint:fix` — oxlint with auto-fix
 - `pnpm build` — build all packages
+- `pnpm --filter @moonshot-ai/kimi-code-desktop licenses:check` — verify the Desktop third-party notice inventory
+- `pnpm --filter @moonshot-ai/kimi-code-desktop dist:win` — build the portable Windows x64 executable
 
 ## Commit Convention
 

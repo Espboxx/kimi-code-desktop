@@ -7,6 +7,13 @@ import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron';
 import type { KimiDesktopNotification } from '../shared/desktop-api';
 import { parseDesktopCommand } from '../shared/desktop-command-schema';
 import { assertExternalUrl, KimiDesktopRuntime, serializeError } from './runtime';
+import {
+  isWorkspaceDirectory,
+  readWorkspacePreferences,
+  selectInitialWorkspace,
+  workspacePreferencesPath,
+  writeWorkspacePreferences,
+} from './workspace-preferences';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const COMMAND_CHANNEL = 'kimi-desktop:command';
@@ -101,11 +108,23 @@ function registerIpc(): void {
   });
 }
 
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
   session.defaultSession.setPermissionCheckHandler(() => false);
+  const preferencesPath = workspacePreferencesPath(app.getPath('userData'));
+  const environmentWorkspace = process.env['KIMI_DESKTOP_WORKSPACE'];
+  const preferences = await readWorkspacePreferences(preferencesPath);
+  let initialWorkspace = selectInitialWorkspace(environmentWorkspace, preferences);
+  if (
+    environmentWorkspace === undefined &&
+    initialWorkspace !== undefined &&
+    !await isWorkspaceDirectory(initialWorkspace)
+  ) {
+    initialWorkspace = undefined;
+    await writeWorkspacePreferences(preferencesPath, undefined).catch(() => undefined);
+  }
   runtime = new KimiDesktopRuntime({
-    workspaceRoot: process.env['KIMI_DESKTOP_WORKSPACE'] ?? process.cwd(),
+    workspaceRoot: initialWorkspace,
     homeDir: process.env['KIMI_CODE_HOME'],
     host: {
       chooseDirectory: async () => {
@@ -137,6 +156,7 @@ void app.whenReady().then(() => {
         allowWindowClose = true;
         mainWindow?.close();
       },
+      rememberWorkspace: (path) => writeWorkspacePreferences(preferencesPath, path),
       notify,
     },
   });

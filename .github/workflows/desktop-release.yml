@@ -1,0 +1,83 @@
+name: Desktop Release
+
+on:
+  push:
+    tags:
+      - "desktop-v*"
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  windows-portable:
+    name: Windows x64 portable
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Validate release tag
+        run: node apps/desktop/scripts/check-release-tag.mjs "$env:GITHUB_REF_NAME"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test Desktop
+        run: pnpm --filter @moonshot-ai/kimi-code-desktop test
+
+      - name: Typecheck Desktop
+        run: pnpm --filter @moonshot-ai/kimi-code-desktop typecheck
+
+      - name: Check third-party notices
+        run: pnpm --filter @moonshot-ai/kimi-code-desktop licenses:check
+
+      - name: Build Windows portable executable
+        run: pnpm --filter @moonshot-ai/kimi-code-desktop dist:win
+
+      - name: Generate SHA256 checksum
+        run: |
+          $version = (Get-Content apps/desktop/package.json -Raw | ConvertFrom-Json).version
+          $artifact = Resolve-Path "apps/desktop/release/Kimi-Code-Desktop-$version-x64-portable.exe"
+          $checksum = "$($artifact.Path).sha256"
+          $hash = (Get-FileHash $artifact.Path -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $([System.IO.Path]::GetFileName($artifact.Path))" | Set-Content -Path $checksum -Encoding ascii
+          "DESKTOP_VERSION=$version" >> $env:GITHUB_ENV
+          "DESKTOP_EXE=$($artifact.Path)" >> $env:GITHUB_ENV
+          "DESKTOP_SHA256=$checksum" >> $env:GITHUB_ENV
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$env:GITHUB_REF_NAME" *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create "$env:GITHUB_REF_NAME" --verify-tag --generate-notes --title "Kimi Code Desktop $env:DESKTOP_VERSION"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            gh release edit "$env:GITHUB_REF_NAME" --title "Kimi Code Desktop $env:DESKTOP_VERSION"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          gh release upload "$env:GITHUB_REF_NAME" "$env:DESKTOP_EXE" "$env:DESKTOP_SHA256" --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

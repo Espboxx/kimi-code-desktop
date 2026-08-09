@@ -7,6 +7,7 @@ import {
   CircleAlert,
   Cloud,
   FlaskConical,
+  FolderOpen,
   KeyRound,
   LogIn,
   LogOut,
@@ -197,7 +198,7 @@ function McpSettings({ snapshot }: { readonly snapshot: DesktopSnapshot }) {
                 <div><strong>{name}</strong><small>{text(server['transport'])} · {text(server['url'], text(server['command']))}</small></div>
                 <span className={classNames('mcp-state', authState === 'authorized' && 'connected')}>{authState || (server['enabled'] === false ? 'disabled' : 'configured')}</span>
                 <div className="row-actions">
-                  <button onClick={() => void window.kimiDesktop.mcp.test(name)} title="连通性测试"><Activity size={13} /></button>
+                  <button disabled={snapshot.workspace.root.length === 0} onClick={() => void window.kimiDesktop.mcp.test(name)} title={snapshot.workspace.root.length === 0 ? '选择工作区后可测试' : '连通性测试'}><Activity size={13} /></button>
                   {server['auth'] === 'oauth' && <button onClick={() => void window.kimiDesktop.mcp.authenticate(name)} title="OAuth"><KeyRound size={13} /></button>}
                   {authState === 'authorized' && <button onClick={() => void window.kimiDesktop.mcp.resetAuth(name)} title="重置 OAuth"><RefreshCw size={13} /></button>}
                   <button className="danger" onClick={() => void window.kimiDesktop.mcp.remove(name)} title="移除"><Trash2 size={13} /></button>
@@ -293,7 +294,7 @@ function ExtensionSettings({ snapshot }: { readonly snapshot: DesktopSnapshot })
             const skill = record(raw);
             return <div className="skill-row" key={text(skill['name'], `skill-${index}`)}><Sparkles size={13} /><div><strong>{text(skill['name'])}</strong><small>{text(skill['description'], text(skill['path']))}</small></div><em>{text(skill['source'])}</em></div>;
           })}
-          {snapshot.extensions.workspaceSkills.length === 0 && <div className="settings-empty">当前工作区没有 Skills</div>}
+          {snapshot.extensions.workspaceSkills.length === 0 && <div className="settings-empty">{snapshot.workspace.root.length === 0 ? '选择工作区后显示 Workspace Skills' : '当前工作区没有 Skills'}</div>}
         </div>
       </section>
     </SettingsPage>
@@ -301,6 +302,19 @@ function ExtensionSettings({ snapshot }: { readonly snapshot: DesktopSnapshot })
 }
 
 function WorkspaceSettings({ snapshot }: { readonly snapshot: DesktopSnapshot }) {
+  if (snapshot.workspace.root.length === 0) {
+    return (
+      <SettingsPage title="工作区" description="尚未选择工作区">
+        <section className="settings-section">
+          <div className="trust-status">
+            <span className="account-icon"><FolderOpen size={17} /></span>
+            <div><strong>选择一个工作区</strong><small>选择后才能使用文件、Git、会话和工作区 Skills。</small></div>
+            <button className="button-primary" onClick={() => void window.kimiDesktop.workspace.choose()}>打开工作区</button>
+          </div>
+        </section>
+      </SettingsPage>
+    );
+  }
   return (
     <SettingsPage title="工作区" description={snapshot.workspace.root}>
       <section className="settings-section">

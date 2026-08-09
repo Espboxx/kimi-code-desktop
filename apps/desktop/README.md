@@ -1,6 +1,8 @@
 # Kimi Code Desktop
 
-Private Electron/React host for the Kimi Code v2 engine. The Electron main
+Windows-first Electron/React host for the Kimi Code v2 engine. This is part of
+the unofficial derivative project described in the root [README](../../README.en.md)
+and [NOTICE](../../NOTICE.md). The Electron main
 process owns one application-lifetime `createKimiHarnessV2` instance and a
 runtime for every active session. The sandboxed renderer uses the validated
 `window.kimiDesktop` bridge and never receives OAuth tokens, API keys, raw
@@ -53,9 +55,13 @@ Use Node.js 24.15.0 from the repository root:
 ```powershell
 fnm exec --using=24.15.0 -- pnpm install
 fnm exec --using=24.15.0 -- pnpm --filter @moonshot-ai/kimi-code-desktop build
-$env:KIMI_DESKTOP_WORKSPACE = 'D:\path\to\workspace'
 fnm exec --using=24.15.0 -- pnpm --filter @moonshot-ai/kimi-code-desktop start
 ```
+
+On the first launch Desktop shows a welcome page and waits for the user to
+choose a workspace. A successful selection is remembered and restored on the
+next launch; a missing remembered directory falls back to the welcome page.
+Set `KIMI_DESKTOP_WORKSPACE` only when an explicit startup override is needed.
 
 `KIMI_CODE_HOME` selects an isolated Kimi Code state directory. Existing
 sessions retain their own model and mode settings; current global settings are
@@ -68,6 +74,7 @@ session is immediately usable.
 ```powershell
 fnm exec --using=24.15.0 -- pnpm --filter @moonshot-ai/kimi-code-desktop test
 fnm exec --using=24.15.0 -- pnpm --filter @moonshot-ai/kimi-code-desktop typecheck
+fnm exec --using=24.15.0 -- pnpm --filter @moonshot-ai/kimi-code-desktop licenses:check
 fnm exec --using=24.15.0 -- pnpm --filter @moonshot-ai/kimi-code-desktop build
 fnm exec --using=24.15.0 -- pnpm --filter @moonshot-ai/kimi-code-desktop e2e
 ```
@@ -75,3 +82,24 @@ fnm exec --using=24.15.0 -- pnpm --filter @moonshot-ai/kimi-code-desktop e2e
 The Electron test uses isolated workspace and home directories plus local
 fixtures. Screenshots are written under `apps/desktop/output/playwright/` at the
 default and minimum supported window sizes.
+
+## Package for Windows
+
+Build a self-contained x64 portable executable that does not require Node.js or
+pnpm on the target computer:
+
+```powershell
+fnm exec --using=24.15.0 -- pnpm --filter @moonshot-ai/kimi-code-desktop dist:win
+```
+
+The distributable is written to
+`apps/desktop/release/Kimi-Code-Desktop-<version>-x64-portable.exe`. Use
+`pack:win` to produce an unpacked directory for local smoke testing without
+creating the portable archive. Both commands reject a stale
+`THIRD_PARTY_NOTICES.md`; regenerate it with `licenses:generate` after changing
+runtime dependencies.
+
+Windows builds are unsigned by default, so SmartScreen may prompt on first
+launch. Packaged resources include the repository MIT License, project NOTICE,
+and the generated third-party notice inventory. Electron's own `LICENSE.electron.txt` and
+`LICENSES.chromium.html` remain in the distribution root.

@@ -2,4 +2,5 @@
 /dist-renderer/
 /node_modules/
 /output/
+/release/
 /.tmp/

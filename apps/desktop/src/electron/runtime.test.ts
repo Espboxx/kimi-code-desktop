@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +15,13 @@ import {
   serializeError,
 } from './runtime';
 import { materializeReplayMedia, prepareDesktopMedia } from './media-service';
+import {
+  isWorkspaceDirectory,
+  readWorkspacePreferences,
+  selectInitialWorkspace,
+  workspacePreferencesPath,
+  writeWorkspacePreferences,
+} from './workspace-preferences';
 
 describe('desktop runtime boundary', () => {
   it('applies global defaults to new sessions without overriding explicit choices', () => {
@@ -111,6 +118,45 @@ describe('desktop runtime boundary', () => {
     expect(() => assertExternalUrl('http://example.test')).toThrow(/not allowed/);
     expect(() => assertExternalUrl('file:///C:/secret.txt')).toThrow(/not allowed/);
     expect(redactSecrets({ password: '' })).toEqual({});
+  });
+
+  it('selects an explicit startup workspace before the remembered workspace', () => {
+    expect(selectInitialWorkspace('D:\\explicit', { version: 1, lastWorkspace: 'D:\\remembered' }))
+      .toBe('D:\\explicit');
+    expect(selectInitialWorkspace(undefined, { version: 1, lastWorkspace: 'D:\\remembered' }))
+      .toBe('D:\\remembered');
+    expect(selectInitialWorkspace('   ', { version: 1 })).toBeUndefined();
+  });
+
+  it('persists and validates the last workspace without leaving temporary files', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kimi-desktop-preferences-'));
+    const path = workspacePreferencesPath(root);
+    try {
+      expect(await readWorkspacePreferences(path)).toEqual({ version: 1 });
+      await writeWorkspacePreferences(path, 'D:\\first');
+      expect(await readWorkspacePreferences(path)).toEqual({ version: 1, lastWorkspace: 'D:\\first' });
+      await writeWorkspacePreferences(path, 'D:\\second');
+      expect(await readWorkspacePreferences(path)).toEqual({ version: 1, lastWorkspace: 'D:\\second' });
+      expect((await readdir(root)).filter((entry) => entry.endsWith('.tmp'))).toEqual([]);
+
+      await writeFile(path, '{"version":2,"lastWorkspace":42}', 'utf8');
+      expect(await readWorkspacePreferences(path)).toEqual({ version: 1 });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts only existing directories as remembered workspaces', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kimi-desktop-workspace-'));
+    const file = join(root, 'file.txt');
+    try {
+      await writeFile(file, 'not a workspace', 'utf8');
+      expect(await isWorkspaceDirectory(root)).toBe(true);
+      expect(await isWorkspaceDirectory(file)).toBe(false);
+      expect(await isWorkspaceDirectory(join(root, 'missing'))).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('converts allowed local images for the provider and caches replay bytes for rendering', async () => {

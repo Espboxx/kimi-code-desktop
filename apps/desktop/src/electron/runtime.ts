@@ -48,11 +48,12 @@ export interface KimiDesktopRuntimeHost {
   readonly openPath: (path: string) => Promise<void>;
   readonly setDirtyFiles: (paths: readonly string[]) => void;
   readonly resolveClose: (requestId: string, action: 'proceed' | 'cancel') => void;
+  readonly rememberWorkspace: (path: string) => Promise<void>;
   readonly notify: (notification: KimiDesktopNotification) => void;
 }
 
 export interface KimiDesktopRuntimeOptions {
-  readonly workspaceRoot: string;
+  readonly workspaceRoot?: string;
   readonly homeDir?: string;
   readonly host: KimiDesktopRuntimeHost;
 }
@@ -85,7 +86,7 @@ export class KimiDesktopRuntime {
 
   private readonly host: KimiDesktopRuntimeHost;
   private readonly sessionRuntimes = new Map<string, SessionRuntime>();
-  private workspaceRoot: string;
+  private workspaceRoot?: string;
   private workspace = EMPTY_WORKSPACE;
   private tree: DesktopSnapshot['tree'] = [];
   private gitFiles: DesktopSnapshot['gitFiles'] = [];
@@ -107,7 +108,7 @@ export class KimiDesktopRuntime {
   private readonly pendingWorkspacePaths = new Set<string>();
 
   constructor(options: KimiDesktopRuntimeOptions) {
-    this.workspaceRoot = resolve(options.workspaceRoot);
+    this.workspaceRoot = options.workspaceRoot === undefined ? undefined : resolve(options.workspaceRoot);
     this.host = options.host;
     this.harness = createKimiHarnessV2({
       homeDir: options.homeDir,
@@ -124,15 +125,19 @@ export class KimiDesktopRuntime {
   async initialize(): Promise<void> {
     if (this.initialized) return;
     this.initialized = true;
+    const initialWorkspace = this.workspaceRoot;
+    this.workspaceRoot = undefined;
     await this.harness.ensureConfigFile();
-    await this.refreshAll();
-    await this.restartWorkspaceWatcher();
-    const latest = this.sessions[0];
-    if (latest !== undefined) {
+    await this.refreshGlobalState();
+    if (initialWorkspace !== undefined) {
       try {
-        await this.resumeSession(latest.id);
+        await this.openWorkspace(initialWorkspace, { remember: false, publish: false });
       } catch (error) {
-        this.publishError(error, 'session.resume');
+        await this.clearWorkspaceState();
+        this.publishError(Object.assign(new Error(`无法恢复工作区：${initialWorkspace}`), {
+          code: 'workspace.restore_failed',
+          details: { path: initialWorkspace, reason: error instanceof Error ? error.message : String(error) },
+        }), 'workspace.restore');
       }
     }
     this.loading = false;
@@ -141,6 +146,9 @@ export class KimiDesktopRuntime {
 
   async execute(command: DesktopCommand & { readonly name: DesktopCommandName }): Promise<unknown> {
     try {
+      if (this.workspaceRoot === undefined && commandRequiresWorkspace(command.name)) {
+        this.requireWorkspaceRoot();
+      }
       return await this.executeCommand(command);
     } catch (error) {
       this.publishError(error, command.name);
@@ -205,9 +213,9 @@ export class KimiDesktopRuntime {
         this.publishSnapshot();
         return undefined;
       case 'workspace.listDirectory':
-        return readWorkspaceDirectory(this.workspaceRoot, payload<{ path?: string }>(command).path);
+        return readWorkspaceDirectory(this.requireWorkspaceRoot(), payload<{ path?: string }>(command).path);
       case 'workspace.readFile':
-        return readWorkspaceFile(this.workspaceRoot, payload<{ path: string }>(command).path);
+        return readWorkspaceFile(this.requireWorkspaceRoot(), payload<{ path: string }>(command).path);
       case 'workspace.writeFile': {
         const input = payload<{
           path: string;
@@ -216,7 +224,7 @@ export class KimiDesktopRuntime {
           force?: boolean;
           bom?: boolean;
         }>(command);
-        const result = await writeWorkspaceFile(this.workspaceRoot, input);
+        const result = await writeWorkspaceFile(this.requireWorkspaceRoot(), input);
         await this.refreshWorkspace([result.path]);
         return result;
       }
@@ -233,12 +241,12 @@ export class KimiDesktopRuntime {
             details: { path: input.path, area: input.area },
           });
         }
-        return readGitFileDiff(this.workspaceRoot, file, input.area);
+        return readGitFileDiff(this.requireWorkspaceRoot(), file, input.area);
       }
       case 'workspace.diff':
-        return readGitDiff(this.workspaceRoot, payload<{ path?: string }>(command).path);
+        return readGitDiff(this.requireWorkspaceRoot(), payload<{ path?: string }>(command).path);
       case 'workspace.trust':
-        await this.harness.trustWorkspace(this.workspaceRoot);
+        await this.harness.trustWorkspace(this.requireWorkspaceRoot());
         await this.refreshWorkspace();
         this.publishSnapshot();
         return undefined;
@@ -318,7 +326,7 @@ export class KimiDesktopRuntime {
           additionalDirs?: string[];
         }>(command);
         const session = await this.harness.createSession({
-          workDir: this.workspaceRoot,
+          workDir: this.requireWorkspaceRoot(),
           ...applySessionCreationDefaults(this.config.value, input),
         });
         await this.attachSession(session);
@@ -406,7 +414,7 @@ export class KimiDesktopRuntime {
         const input = payload<{ sessionId?: string; mode: 'prompt' | 'steer' | 'swarm'; text: string; media: { type: 'image_url' | 'video_url'; url: string }[] }>(command);
         const runtime = this.runtimeFor(input.sessionId);
         const media = await Promise.all(input.media.map((item) => prepareDesktopMedia(item, {
-          workspaceRoot: this.workspaceRoot,
+          workspaceRoot: this.requireWorkspaceRoot(),
           allowedRoots: this.allowedRoots(runtime),
           cacheDir: join(this.harness.homeDir, 'cache', 'desktop-media'),
         })));
@@ -588,7 +596,7 @@ export class KimiDesktopRuntime {
         return undefined;
       case 'mcp.test': {
         const name = payload<{ name: string }>(command).name;
-        return this.harness.testMcpServer(name, { cwd: this.workspaceRoot });
+        return this.harness.testMcpServer(name, { cwd: this.requireWorkspaceRoot() });
       }
       case 'mcp.reconnect': {
         const input = payload<{ sessionId?: string; name: string }>(command);
@@ -687,11 +695,9 @@ export class KimiDesktopRuntime {
     }
   }
 
-  private async refreshAll(): Promise<void> {
+  private async refreshGlobalState(): Promise<void> {
     this.loading = true;
     const results = await Promise.allSettled([
-      this.refreshWorkspace(),
-      this.refreshSessions(),
       this.refreshConfig(),
       this.refreshAuth(),
       this.refreshExtensions(),
@@ -700,13 +706,13 @@ export class KimiDesktopRuntime {
     for (const result of results) {
       if (result.status === 'rejected') this.publishError(result.reason, 'runtime.initialize');
     }
-    this.loading = false;
   }
 
   private async refreshWorkspace(changedPaths: readonly string[] = []): Promise<void> {
+    const root = this.requireWorkspaceRoot();
     const [refreshed, trust] = await Promise.all([
-      refreshWorkspace(this.workspaceRoot),
-      this.harness.getWorkspaceTrustInfo(this.workspaceRoot),
+      refreshWorkspace(root),
+      this.harness.getWorkspaceTrustInfo(root),
     ]);
     this.workspace = {
       ...refreshed.workspace,
@@ -726,7 +732,7 @@ export class KimiDesktopRuntime {
   }
 
   private async refreshSessions(): Promise<void> {
-    this.sessions = (await this.harness.listSessions({ workDir: this.workspaceRoot }))
+    this.sessions = (await this.harness.listSessions({ workDir: this.requireWorkspaceRoot() }))
       .toSorted((left, right) => right.updatedAt - left.updatedAt);
   }
 
@@ -749,10 +755,11 @@ export class KimiDesktopRuntime {
   }
 
   private async refreshExtensions(): Promise<void> {
+    const root = this.workspaceRoot;
     const [pluginSummaries, capabilities, workspaceSkills] = await Promise.all([
       this.harness.listPlugins(),
       this.harness.listCapabilities(),
-      this.harness.listWorkspaceSkills(this.workspaceRoot),
+      root === undefined ? Promise.resolve([]) : this.harness.listWorkspaceSkills(root),
     ]);
     const plugins = await Promise.all(pluginSummaries.map(async (plugin) => {
       try {
@@ -777,21 +784,84 @@ export class KimiDesktopRuntime {
     this.globalMcpAuth = redactSecrets(auth) as readonly unknown[];
   }
 
-  private async openWorkspace(path: string): Promise<void> {
+  private async openWorkspace(
+    path: string,
+    options: { readonly remember?: boolean; readonly publish?: boolean } = {},
+  ): Promise<void> {
     const root = resolve(path);
-    const info = await stat(root);
-    if (!info.isDirectory()) throw new Error(`Workspace is not a directory: ${root}`);
+    let directory = false;
+    try {
+      directory = (await stat(root)).isDirectory();
+    } catch {
+      // The structured error below keeps missing and inaccessible paths on the same boundary.
+    }
+    if (!directory) {
+      throw Object.assign(new Error(`Workspace is not a directory: ${root}`), {
+        code: 'workspace.invalid_directory',
+        details: { path: root },
+      });
+    }
+
+    const [refreshed, trust, sessions] = await Promise.all([
+      refreshWorkspace(root),
+      this.harness.getWorkspaceTrustInfo(root),
+      this.harness.listSessions({ workDir: root }),
+    ]);
+    const switchingWorkspace = this.workspaceRoot !== undefined && this.workspaceRoot !== root;
+    if (switchingWorkspace) await this.clearWorkspaceState();
+
     this.workspaceRoot = root;
-    this.activeSessionId = undefined;
-    await this.refreshAll();
+    this.workspace = {
+      ...refreshed.workspace,
+      isRepo: refreshed.isRepo,
+      trusted: trust.trusted,
+      gatedMcpServers: trust.gatedMcpServers,
+    };
+    this.tree = refreshed.tree;
+    this.gitFiles = refreshed.files;
+    this.sessions = sessions.toSorted((left, right) => right.updatedAt - left.updatedAt);
+    this.host.notify({
+      type: 'workspace.changed',
+      workspace: this.workspace,
+      tree: this.tree,
+      gitFiles: this.gitFiles,
+      changedPaths: [],
+    });
+
+    try {
+      await this.refreshExtensions();
+    } catch (error) {
+      this.publishError(error, 'extension.list');
+    }
     await this.restartWorkspaceWatcher();
-    this.publishSnapshot();
+    if (this.activeSessionId === undefined || !this.sessions.some((session) => session.id === this.activeSessionId)) {
+      this.activeSessionId = undefined;
+      const latest = this.sessions[0];
+      if (latest !== undefined) {
+        try {
+          await this.resumeSession(latest.id);
+        } catch (error) {
+          this.publishError(error, 'session.resume');
+        }
+      }
+    }
+    if (options.remember !== false) {
+      try {
+        await this.host.rememberWorkspace(root);
+      } catch (error) {
+        this.publishError(Object.assign(new Error('无法记住当前工作区'), {
+          code: 'workspace.remember_failed',
+          details: { path: root, reason: error instanceof Error ? error.message : String(error) },
+        }), 'workspace.remember');
+      }
+    }
+    if (options.publish !== false) this.publishSnapshot();
   }
 
   private async restartWorkspaceWatcher(): Promise<void> {
     await this.workspaceWatcher?.close();
-    if (this.closing) return;
     const root = this.workspaceRoot;
+    if (this.closing || root === undefined) return;
     this.workspaceWatcher = watch(root, {
       ignoreInitial: true,
       followSymlinks: false,
@@ -804,22 +874,44 @@ export class KimiDesktopRuntime {
         return isIgnoredWorkspacePath(relativePath);
       },
     });
-    this.workspaceWatcher.on('all', (_event, path) => this.scheduleWorkspaceRefresh(path));
+    this.workspaceWatcher.on('all', (_event, path) => this.scheduleWorkspaceRefresh(root, path));
     this.workspaceWatcher.on('error', (error) => this.publishError(error, 'workspace.watch'));
   }
 
-  private scheduleWorkspaceRefresh(path: string): void {
-    const relativePath = relative(this.workspaceRoot, path).split('\\').join('/');
+  private scheduleWorkspaceRefresh(root: string, path: string): void {
+    if (this.workspaceRoot !== root) return;
+    const relativePath = relative(root, path).split('\\').join('/');
     if (relativePath.length > 0 && !relativePath.startsWith('.git/')) {
       this.pendingWorkspacePaths.add(relativePath);
     }
     if (this.workspaceRefreshTimer !== undefined) clearTimeout(this.workspaceRefreshTimer);
     this.workspaceRefreshTimer = setTimeout(() => {
       this.workspaceRefreshTimer = undefined;
+      if (this.workspaceRoot !== root) return;
       const changedPaths = [...this.pendingWorkspacePaths].toSorted();
       this.pendingWorkspacePaths.clear();
       void this.refreshWorkspace(changedPaths).catch((error) => this.publishError(error, 'workspace.watch'));
     }, 180);
+  }
+
+  private async clearWorkspaceState(): Promise<void> {
+    if (this.workspaceRefreshTimer !== undefined) clearTimeout(this.workspaceRefreshTimer);
+    if (this.sessionIndexRefreshTimer !== undefined) clearTimeout(this.sessionIndexRefreshTimer);
+    this.workspaceRefreshTimer = undefined;
+    this.sessionIndexRefreshTimer = undefined;
+    this.pendingWorkspacePaths.clear();
+    await this.workspaceWatcher?.close();
+    this.workspaceWatcher = undefined;
+    await Promise.allSettled([...this.sessionRuntimes.values()].map((runtime) => runtime.close()));
+    this.sessionRuntimes.clear();
+    this.workspaceRoot = undefined;
+    this.workspace = EMPTY_WORKSPACE;
+    this.tree = [];
+    this.gitFiles = [];
+    this.sessions = [];
+    this.activeSessionId = undefined;
+    this.extensions = { ...this.extensions, workspaceSkills: [] };
+    this.rawEvents = [];
   }
 
   private async resumeSession(id: string): Promise<void> {
@@ -989,9 +1081,16 @@ export class KimiDesktopRuntime {
     this.host.notify({ type: 'error', error: serializeError(error), command });
   }
 
+  private requireWorkspaceRoot(): string {
+    if (this.workspaceRoot !== undefined) return this.workspaceRoot;
+    throw Object.assign(new Error('请先选择一个工作区'), {
+      code: 'workspace.not_selected',
+    });
+  }
+
   private allowedRoots(runtime?: SessionRuntime): readonly string[] {
     return [
-      this.workspaceRoot,
+      ...(this.workspaceRoot === undefined ? [] : [this.workspaceRoot]),
       this.harness.homeDir,
       ...(runtime?.sdkSession.summary?.additionalDirs ?? []),
     ];
@@ -1004,6 +1103,25 @@ export class KimiDesktopRuntime {
 
 function payload<T>(command: DesktopCommand): T {
   return (command.payload ?? {}) as T;
+}
+
+function commandRequiresWorkspace(name: DesktopCommandName): boolean {
+  const domain = name.split('.')[0];
+  if (domain === 'workspace') return name !== 'workspace.choose' && name !== 'workspace.open';
+  if (
+    domain === 'session' ||
+    domain === 'turn' ||
+    domain === 'interaction' ||
+    domain === 'context' ||
+    domain === 'task' ||
+    domain === 'team' ||
+    domain === 'goal' ||
+    domain === 'shell'
+  ) return true;
+  if (domain === 'extension') {
+    return name === 'extension.activateSkill' || name === 'extension.activatePlugin' || name === 'extension.runCommand';
+  }
+  return name === 'mcp.test' || name === 'mcp.reconnect';
 }
 
 export function serializeError(error: unknown): KimiDesktopError {
