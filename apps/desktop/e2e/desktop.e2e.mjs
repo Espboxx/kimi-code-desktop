@@ -1,3 +1,6 @@
+// Scenario: Desktop end-to-end product flows across sessions, transcripts, files, teams, and lifecycle actions.
+// Responsibilities: validate user-observable Electron behavior against isolated local provider and workspace fixtures.
+// Wiring: real Electron main/renderer with local mock OAuth, MCP, provider, plugin, and filesystem boundaries.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -78,6 +81,28 @@ try {
   }, { id: sessionId, title: automaticTitle });
   await page.evaluate((id) => window.kimiDesktop.session.rename(id, 'Desktop E2E Session'), sessionId);
   await page.locator('.workbench-tab').filter({ hasText: 'Desktop E2E Session' }).waitFor({ state: 'visible' });
+
+  const sessionsBeforeDelete = await page.evaluate(() => window.kimiDesktop.session.list().then((items) => items.map((item) => item.id)));
+  await page.locator('.section-heading button[title="新建会话"]').click();
+  await page.waitForFunction(async (known) => (await window.kimiDesktop.session.list()).some((item) => !known.includes(item.id)), sessionsBeforeDelete);
+  const deletedSessionId = await page.evaluate(async (known) => (
+    await window.kimiDesktop.session.list()
+  ).find((item) => !known.includes(item.id))?.id, sessionsBeforeDelete);
+  assert.equal(typeof deletedSessionId, 'string');
+  await page.evaluate((id) => window.kimiDesktop.session.rename(id, 'Desktop Delete E2E'), deletedSessionId);
+  const deletedSessionRow = page.locator('.session-row').filter({ hasText: 'Desktop Delete E2E' });
+  await deletedSessionRow.waitFor({ state: 'visible' });
+  await deletedSessionRow.getByTitle('永久删除').click();
+  const deleteDialog = page.locator('.action-dialog').filter({ hasText: '永久删除会话' });
+  await deleteDialog.waitFor({ state: 'visible' });
+  await deleteDialog.getByRole('button', { name: '确认', exact: true }).click();
+  await deletedSessionRow.waitFor({ state: 'hidden' });
+  await page.locator('.workbench-tab').filter({ hasText: 'Desktop Delete E2E' }).waitFor({ state: 'hidden' });
+  await page.locator('.workbench-tab.active').filter({ hasText: 'Desktop E2E Session' }).waitFor({ state: 'visible' });
+  await page.waitForFunction(async (id) => (await window.kimiDesktop.host.snapshot()).activeSessionId === id, sessionId);
+  assert.equal(await page.locator('.editor-state').filter({ hasText: '正在恢复会话' }).count(), 0);
+  assert.equal(await page.locator('.error-toast').filter({ hasText: 'session.resume_failed' }).count(), 0);
+  assert.equal(await page.evaluate((id) => Object.values(localStorage).some((value) => value.includes(id)), deletedSessionId), false);
 
   const todoPanel = page.locator('.todo-fixed-panel');
   await todoPanel.waitFor({ state: 'visible' });

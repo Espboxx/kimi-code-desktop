@@ -149,6 +149,14 @@ export function useDesktopState(): DesktopState {
       switch (notification.type) {
         case 'snapshot.reset':
           setSnapshot(notification.snapshot);
+          setSessionStatuses((current) => pruneSessionState(
+            current,
+            new Set(notification.snapshot.sessions.map((session) => session.id)),
+          ));
+          setPendingInteractions((current) => prunePendingInteractions(
+            current,
+            new Set(notification.snapshot.sessions.map((session) => session.id)),
+          ));
           if (notification.snapshot.activeSessionId !== undefined && notification.snapshot.session.status !== undefined) {
             setSessionStatuses((current) => ({
               ...current,
@@ -230,4 +238,17 @@ export function useDesktopState(): DesktopState {
     clearError: () => setError(undefined),
     refresh,
   };
+}
+
+function pruneSessionState<T>(value: Record<string, T>, validSessionIds: ReadonlySet<string>): Record<string, T> {
+  const entries = Object.entries(value).filter(([sessionId]) => validSessionIds.has(sessionId));
+  return entries.length === Object.keys(value).length ? value : Object.fromEntries(entries);
+}
+
+function prunePendingInteractions<T extends { readonly sessionId: string }>(
+  value: Record<string, T>,
+  validSessionIds: ReadonlySet<string>,
+): Record<string, T> {
+  const entries = Object.entries(value).filter(([, interaction]) => validSessionIds.has(interaction.sessionId));
+  return entries.length === Object.keys(value).length ? value : Object.fromEntries(entries);
 }

@@ -373,8 +373,30 @@ export class KimiDesktopRuntime {
       }
       case 'session.delete': {
         const id = payload<{ sessionId: string }>(command).sessionId;
+        const previousActiveSessionId = this.activeSessionId;
+        const wasAttached = this.sessionRuntimes.has(id);
         await this.detachSession(id);
-        await this.harness.deleteSession(id);
+        try {
+          await this.harness.deleteSession(id);
+        } catch (error) {
+          try {
+            await this.refreshSessions();
+            if (wasAttached && this.sessions.some((session) => session.id === id)) {
+              await this.resumeSession(id);
+              if (
+                previousActiveSessionId !== undefined &&
+                previousActiveSessionId !== id &&
+                this.sessionRuntimes.has(previousActiveSessionId)
+              ) {
+                this.activeSessionId = previousActiveSessionId;
+              }
+            }
+            this.publishSnapshot();
+          } catch (rollbackError) {
+            this.publishError(rollbackError, 'session.delete.rollback');
+          }
+          throw error;
+        }
         await this.refreshSessions();
         this.publishSnapshot();
         return undefined;

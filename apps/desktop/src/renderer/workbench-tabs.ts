@@ -128,14 +128,26 @@ export function patchWorkbenchTab(
 }
 
 export function closeWorkbenchTab(state: WorkbenchTabState, id: string): WorkbenchTabState {
-  const index = state.tabs.findIndex((tab) => tab.id === id);
-  if (index < 0) return state;
-  const tabs = state.tabs.filter((tab) => tab.id !== id);
-  const recentIds = state.recentIds.filter((recent) => recent !== id);
-  if (state.activeId !== id) return { ...state, tabs, recentIds };
-  const recent = recentIds.find((recentId) => tabs.some((tab) => tab.id === recentId));
-  const adjacent = tabs[Math.min(index, Math.max(0, tabs.length - 1))]?.id;
-  return { tabs, activeId: recent ?? adjacent, recentIds };
+  return removeWorkbenchTabs(state, new Set([id]));
+}
+
+export function closeSessionWorkbenchTabs(state: WorkbenchTabState, sessionId: string): WorkbenchTabState {
+  return removeWorkbenchTabs(state, new Set(
+    state.tabs
+      .filter((tab) => (tab.kind === 'session' || tab.kind === 'team') && tab.sessionId === sessionId)
+      .map((tab) => tab.id),
+  ));
+}
+
+export function pruneInvalidSessionWorkbenchTabs(
+  state: WorkbenchTabState,
+  validSessionIds: ReadonlySet<string>,
+): WorkbenchTabState {
+  return removeWorkbenchTabs(state, new Set(
+    state.tabs
+      .filter((tab) => (tab.kind === 'session' || tab.kind === 'team') && !validSessionIds.has(tab.sessionId))
+      .map((tab) => tab.id),
+  ));
 }
 
 export function cycleWorkbenchTab(state: WorkbenchTabState, backwards = false): WorkbenchTabState {
@@ -206,4 +218,16 @@ export function workbenchStorageKey(workspaceRoot: string): string {
 
 function touchRecent(recentIds: readonly string[], id: string): readonly string[] {
   return [id, ...recentIds.filter((recent) => recent !== id)].slice(0, 50);
+}
+
+function removeWorkbenchTabs(state: WorkbenchTabState, ids: ReadonlySet<string>): WorkbenchTabState {
+  if (ids.size === 0) return state;
+  const firstRemovedIndex = state.tabs.findIndex((tab) => ids.has(tab.id));
+  if (firstRemovedIndex < 0) return state;
+  const tabs = state.tabs.filter((tab) => !ids.has(tab.id));
+  const recentIds = state.recentIds.filter((recent) => !ids.has(recent));
+  if (state.activeId !== undefined && !ids.has(state.activeId)) return { ...state, tabs, recentIds };
+  const recent = recentIds.find((recentId) => tabs.some((tab) => tab.id === recentId));
+  const adjacent = tabs[Math.min(firstRemovedIndex, Math.max(0, tabs.length - 1))]?.id;
+  return { tabs, activeId: recent ?? adjacent, recentIds };
 }

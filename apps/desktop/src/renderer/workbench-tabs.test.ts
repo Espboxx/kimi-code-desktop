@@ -1,3 +1,6 @@
+// Scenario: Workbench tab lifecycle and Explorer Git decoration behavior.
+// Responsibilities: stable tab identity, session-owned tab cleanup, persistence filtering, and Git aggregation.
+// Wiring: pure renderer state helpers with no stubbed collaborators. Run with the Desktop Vitest config.
 import { describe, expect, it } from 'vitest';
 
 import type { GitFile } from '../shared/desktop-api';
@@ -5,10 +8,12 @@ import { gitDecoration } from './git-tree';
 import {
   activateWorkbenchTab,
   closeWorkbenchTab,
+  closeSessionWorkbenchTabs,
   diffTab,
   ensureWorkbenchTab,
   fileTab,
   openWorkbenchTab,
+  pruneInvalidSessionWorkbenchTabs,
   restoreWorkbenchState,
   serializeWorkbenchState,
   sessionTab,
@@ -49,6 +54,50 @@ describe('workbench tab state', () => {
     expect(restoreWorkbenchState(serialized, new Set(['s1']), new Set()).tabs).toHaveLength(1);
     const restored = restoreWorkbenchState(serialized, new Set(['s1']), new Set(['s1']));
     expect(restored.tabs.map((tab) => tab.id)).toEqual(['file:src/main.ts', 'team:s1']);
+  });
+
+  it('removes session-owned tabs when a session is deleted, selecting the most recent survivor', () => {
+    let state = openWorkbenchTab({ tabs: [], recentIds: [] }, sessionTab('s1'));
+    state = openWorkbenchTab(state, fileTab('src/main.ts'));
+    state = openWorkbenchTab(state, sessionTab('s2'));
+    state = activateWorkbenchTab(state, 'file:src/main.ts');
+    state = openWorkbenchTab(state, teamTab('s1'));
+
+    state = closeSessionWorkbenchTabs(state, 's1');
+
+    expect(state.tabs.map((tab) => tab.id)).toEqual(['file:src/main.ts', 'session:s2']);
+    expect(state.activeId).toBe('file:src/main.ts');
+    expect(state.recentIds).toEqual(['file:src/main.ts', 'session:s2']);
+  });
+
+  it('keeps the active editor when an inactive session is deleted', () => {
+    let state = openWorkbenchTab({ tabs: [], recentIds: [] }, sessionTab('s1'));
+    state = openWorkbenchTab(state, fileTab('src/main.ts'));
+
+    state = closeSessionWorkbenchTabs(state, 's1');
+
+    expect(state.tabs.map((tab) => tab.id)).toEqual(['file:src/main.ts']);
+    expect(state.activeId).toBe('file:src/main.ts');
+  });
+
+  it('prunes stale session views when the authoritative session index changes', () => {
+    let state = openWorkbenchTab({ tabs: [], recentIds: [] }, sessionTab('missing'));
+    state = openWorkbenchTab(state, teamTab('missing'));
+    state = openWorkbenchTab(state, sessionTab('existing'));
+
+    state = pruneInvalidSessionWorkbenchTabs(state, new Set(['existing']));
+
+    expect(state.tabs).toEqual([sessionTab('existing')]);
+    expect(state.activeId).toBe('session:existing');
+  });
+
+  it('leaves the workbench empty when the deleted session owns every open tab', () => {
+    let state = openWorkbenchTab({ tabs: [], recentIds: [] }, sessionTab('s1'));
+    state = openWorkbenchTab(state, teamTab('s1'));
+
+    state = closeSessionWorkbenchTabs(state, 's1');
+
+    expect(state).toEqual({ tabs: [], activeId: undefined, recentIds: [] });
   });
 });
 

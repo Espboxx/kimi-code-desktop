@@ -38,12 +38,14 @@ import { WorkbenchTabs } from './WorkbenchTabs';
 import {
   activateWorkbenchTab,
   closeWorkbenchTab,
+  closeSessionWorkbenchTabs,
   cycleWorkbenchTab,
   EMPTY_WORKBENCH,
   ensureWorkbenchTab,
   fileTab,
   openWorkbenchTab,
   patchWorkbenchTab,
+  pruneInvalidSessionWorkbenchTabs,
   restoreWorkbenchState,
   serializeWorkbenchState,
   sessionTab,
@@ -82,6 +84,7 @@ export function App() {
   const state = useDesktopState();
   const snapshot = state.snapshot;
   const activeSessionId = snapshot?.activeSessionId;
+  const sessionIndexKey = snapshot?.sessions.map((session) => session.id).join('\0') ?? '';
   const [selectedAgents, setSelectedAgents] = useState<Record<string, string>>({});
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>('system');
@@ -102,11 +105,17 @@ export function App() {
   const workbenchRef = useRef(workbench);
   const loadingTabs = useRef(new Set<string>());
   const savingPaths = useRef(new Set<string>());
-  const sessionActivation = useRef<{ desired?: string; running: boolean }>({ running: false });
+  const sessionActivation = useRef<{ desired?: string; running: boolean; target?: string }>({ running: false });
+  const validSessionIds = useRef<ReadonlySet<string>>(new Set());
+  const activeSessionIdRef = useRef<string | undefined>(undefined);
+  const deletingSessionIds = useRef(new Set<string>());
+  const suppressEmptyWorkbenchAutoOpen = useRef(false);
   const planPendingRef = useRef(new Set<string>());
   const knownTeamSessions = useRef(new Set<string>());
   const closedTeamTabs = useRef(new Set<string>());
   workbenchRef.current = workbench;
+  validSessionIds.current = new Set(snapshot?.sessions.map((session) => session.id) ?? []);
+  activeSessionIdRef.current = activeSessionId;
 
   const [swarmEntryController] = useState(() => new SwarmEntryController(
     (sessionId) => window.kimiDesktop.turn.setPermission('yolo', sessionId),
@@ -130,7 +139,13 @@ export function App() {
     agentActivity.counts.waiting > 0;
 
   const activateSessionRuntime = useCallback((sessionId: string) => {
+    if (
+      activeSessionIdRef.current === sessionId ||
+      !validSessionIds.current.has(sessionId) ||
+      deletingSessionIds.current.has(sessionId)
+    ) return;
     const activation = sessionActivation.current;
+    if (activation.desired === sessionId || activation.target === sessionId) return;
     activation.desired = sessionId;
     if (activation.running) return;
     activation.running = true;
@@ -139,12 +154,24 @@ export function App() {
         while (activation.desired !== undefined) {
           const target = activation.desired;
           activation.desired = undefined;
+          if (
+            activeSessionIdRef.current === target ||
+            !validSessionIds.current.has(target) ||
+            deletingSessionIds.current.has(target)
+          ) continue;
+          activation.target = target;
           try {
             await window.kimiDesktop.session.resume(target);
           } catch (error) {
-            if (activation.desired === undefined) {
+            if (
+              activation.desired === undefined &&
+              validSessionIds.current.has(target) &&
+              !deletingSessionIds.current.has(target)
+            ) {
               setSwarmActionError(rendererError(error, 'session.resume_failed'));
             }
+          } finally {
+            activation.target = undefined;
           }
         }
       } finally {
@@ -248,6 +275,7 @@ export function App() {
       ? openWorkbenchTab(restored, sessionTab(snapshot.activeSessionId))
       : restored;
     setWorkbench(initial);
+    suppressEmptyWorkbenchAutoOpen.current = false;
     knownTeamSessions.current = new Set(Object.keys(state.teams));
     closedTeamTabs.current.clear();
     setSeenTeamSeqs(readSeenTeamSeqs(teamSeenStorageKey(root)));
@@ -266,18 +294,51 @@ export function App() {
   }, [hydratedRoot, seenTeamSeqs, snapshot]);
 
   useEffect(() => {
+    if (snapshot === undefined || snapshot.loading || hydratedRoot !== snapshot.workspace.root) return;
+    const currentSessionIds = new Set(snapshot.sessions.map((session) => session.id));
+    setWorkbench((current) => {
+      const next = pruneInvalidSessionWorkbenchTabs(current, currentSessionIds);
+      if (current.tabs.length > 0 && next.tabs.length === 0) suppressEmptyWorkbenchAutoOpen.current = true;
+      return next;
+    });
+    setSelectedAgents((current) => pruneSessionRecord(current, currentSessionIds));
+    setSeenTeamSeqs((current) => pruneSessionRecord(current, currentSessionIds));
+    for (const sessionId of knownTeamSessions.current) {
+      if (!currentSessionIds.has(sessionId)) knownTeamSessions.current.delete(sessionId);
+    }
+    for (const sessionId of closedTeamTabs.current) {
+      if (!currentSessionIds.has(sessionId)) closedTeamTabs.current.delete(sessionId);
+    }
+    let planPendingChanged = false;
+    for (const sessionId of planPendingRef.current) {
+      if (currentSessionIds.has(sessionId)) continue;
+      planPendingRef.current.delete(sessionId);
+      planPendingChanged = true;
+    }
+    if (planPendingChanged) setPlanPendingSessions(new Set(planPendingRef.current));
+    const desired = sessionActivation.current.desired;
+    if (desired !== undefined && !currentSessionIds.has(desired)) sessionActivation.current.desired = undefined;
+  }, [hydratedRoot, sessionIndexKey, snapshot?.loading, snapshot?.workspace.root]);
+
+  useEffect(() => {
     if (snapshot === undefined || hydratedRoot !== snapshot.workspace.root) return;
     for (const sessionId of Object.keys(state.teams)) {
+      if (!validSessionIds.current.has(sessionId)) continue;
       if (knownTeamSessions.current.has(sessionId)) continue;
       knownTeamSessions.current.add(sessionId);
       if (closedTeamTabs.current.has(sessionId)) continue;
       setWorkbench((current) => ensureWorkbenchTab(current, teamTab(sessionId), current.tabs.length === 0));
     }
-  }, [hydratedRoot, snapshot, state.teamVersion, state.teams]);
+  }, [hydratedRoot, sessionIndexKey, snapshot?.workspace.root, state.teamVersion, state.teams]);
 
   useEffect(() => {
     const sessionId = snapshot?.activeSessionId;
-    if (hydratedRoot !== snapshot?.workspace.root || sessionId === undefined || workbench.tabs.length > 0) return;
+    if (
+      hydratedRoot !== snapshot?.workspace.root ||
+      sessionId === undefined ||
+      workbench.tabs.length > 0 ||
+      suppressEmptyWorkbenchAutoOpen.current
+    ) return;
     setWorkbench((current) => current.tabs.length === 0
       ? openWorkbenchTab(current, sessionTab(sessionId))
       : current);
@@ -292,9 +353,15 @@ export function App() {
   }, [hydratedRoot, loadDiff, loadFile, workbench.tabs]);
 
   useEffect(() => {
-    if (activeWorkbenchSessionId === undefined) return;
+    if (
+      activeWorkbenchSessionId === undefined ||
+      snapshot === undefined ||
+      snapshot.activeSessionId === activeWorkbenchSessionId ||
+      !validSessionIds.current.has(activeWorkbenchSessionId) ||
+      deletingSessionIds.current.has(activeWorkbenchSessionId)
+    ) return;
     activateSessionRuntime(activeWorkbenchSessionId);
-  }, [activateSessionRuntime, activeWorkbenchSessionId]);
+  }, [activateSessionRuntime, activeWorkbenchSessionId, sessionIndexKey, snapshot?.activeSessionId]);
 
   useEffect(() => {
     const changed = new Set(state.workspaceChange.paths);
@@ -368,14 +435,15 @@ export function App() {
       return;
     }
     if (tab.kind === 'team') closedTeamTabs.current.add(tab.sessionId);
-    setWorkbench((current) => closeWorkbenchTab(current, tab.id));
+    setWorkbench((current) => {
+      const next = closeWorkbenchTab(current, tab.id);
+      if (current.tabs.length > 0 && next.tabs.length === 0) suppressEmptyWorkbenchAutoOpen.current = true;
+      return next;
+    });
   }, []);
 
   const activateTab = useCallback((tab: WorkbenchTab) => {
     setWorkbench((current) => activateWorkbenchTab(current, tab.id));
-    if (tab.kind === 'session' || tab.kind === 'team') {
-      void window.kimiDesktop.session.resume(tab.sessionId).catch((error) => setSwarmActionError(rendererError(error, 'session.resume_failed')));
-    }
   }, []);
 
   useEffect(() => {
@@ -424,6 +492,30 @@ export function App() {
       setPlanPendingSessions(new Set(planPendingRef.current));
     }
   }, [activeSessionId]);
+  const deleteSession = useCallback(async (sessionId: string): Promise<void> => {
+    if (deletingSessionIds.current.has(sessionId)) return;
+    const previousAutoOpenSuppression = suppressEmptyWorkbenchAutoOpen.current;
+    suppressEmptyWorkbenchAutoOpen.current = true;
+    deletingSessionIds.current.add(sessionId);
+    if (sessionActivation.current.desired === sessionId) sessionActivation.current.desired = undefined;
+    setSwarmActionError(undefined);
+    try {
+      await window.kimiDesktop.session.delete(sessionId);
+      setWorkbench((current) => closeSessionWorkbenchTabs(current, sessionId));
+      setSelectedAgents((current) => deleteSessionRecord(current, sessionId));
+      setSeenTeamSeqs((current) => deleteSessionRecord(current, sessionId));
+      knownTeamSessions.current.delete(sessionId);
+      closedTeamTabs.current.delete(sessionId);
+      if (planPendingRef.current.delete(sessionId)) {
+        setPlanPendingSessions(new Set(planPendingRef.current));
+      }
+    } catch (error) {
+      suppressEmptyWorkbenchAutoOpen.current = previousAutoOpenSuppression;
+      throw error;
+    } finally {
+      deletingSessionIds.current.delete(sessionId);
+    }
+  }, []);
 
   if (snapshot === undefined) {
     return <div className="app-loading"><CircleDashed className="spin" size={22} /><span>正在启动 Kimi Code Desktop</span></div>;
@@ -442,21 +534,24 @@ export function App() {
   const openSessionIds = new Set(workbench.tabs.filter((tab) => tab.kind === 'session').map((tab) => tab.sessionId));
   const activeFilePath = activeTab?.kind === 'file' || activeTab?.kind === 'diff' ? activeTab.path : undefined;
 
-  const openFile = (path: string) => setWorkbench((current) => openWorkbenchTab(current, fileTab(path)));
+  const openFile = (path: string) => {
+    suppressEmptyWorkbenchAutoOpen.current = false;
+    setWorkbench((current) => openWorkbenchTab(current, fileTab(path)));
+  };
   const openSession = (sessionId: string) => {
+    suppressEmptyWorkbenchAutoOpen.current = false;
     const tab = sessionTab(sessionId);
     setWorkbench((current) => openWorkbenchTab(current, tab));
-    activateSessionRuntime(sessionId);
   };
   const openTeam = (sessionId: string) => {
+    suppressEmptyWorkbenchAutoOpen.current = false;
     closedTeamTabs.current.delete(sessionId);
     setWorkbench((current) => openWorkbenchTab(current, teamTab(sessionId)));
-    activateSessionRuntime(sessionId);
   };
   const selectTeamAgent = (sessionId: string, agentId: string) => {
+    suppressEmptyWorkbenchAutoOpen.current = false;
     setSelectedAgents((current) => ({ ...current, [sessionId]: agentId }));
     setWorkbench((current) => openWorkbenchTab(current, sessionTab(sessionId)));
-    activateSessionRuntime(sessionId);
   };
   const markTeamSeen = (sessionId: string, channelSeq: number) => {
     setSeenTeamSeqs((current) => (current[sessionId] ?? 0) >= channelSeq
@@ -503,7 +598,11 @@ export function App() {
         for (const tab of targets) await saveFile(tab.id, false);
       }
       if (dirtyPrompt.kind === 'tab') {
-        setWorkbench((current) => closeWorkbenchTab(current, dirtyPrompt.tabId));
+        setWorkbench((current) => {
+          const next = closeWorkbenchTab(current, dirtyPrompt.tabId);
+          if (current.tabs.length > 0 && next.tabs.length === 0) suppressEmptyWorkbenchAutoOpen.current = true;
+          return next;
+        });
       } else if (dirtyPrompt.kind === 'workspace') {
         await window.kimiDesktop.workspace.choose();
       } else {
@@ -670,7 +769,7 @@ export function App() {
 
       {settingsOpen && <SettingsDialog snapshot={snapshot} onClose={() => setSettingsOpen(false)} />}
       {swarmPermission !== undefined && <SwarmPermissionDialog permission={swarmPermission.permission} onChoose={chooseSwarmPermission} onCancel={cancelSwarmPermission} />}
-      {sessionDialog !== undefined && <SessionActionDialog state={sessionDialog} onClose={() => setSessionDialog(undefined)} />}
+      {sessionDialog !== undefined && <SessionActionDialog state={sessionDialog} onDelete={deleteSession} onClose={() => setSessionDialog(undefined)} />}
       {taskOutput !== undefined && <OutputDialog title={`Task · ${taskOutput.taskId}`} output={taskOutput.output} onClose={() => setTaskOutput(undefined)} />}
       {dirtyPrompt !== undefined && dirtyPromptPaths.length > 0 && (
         <DirtyFilesDialog
@@ -710,6 +809,18 @@ function readSeenTeamSeqs(key: string): Record<string, number> {
   }
 }
 
+function pruneSessionRecord<T>(value: Record<string, T>, validSessionIds: ReadonlySet<string>): Record<string, T> {
+  const entries = Object.entries(value).filter(([sessionId]) => validSessionIds.has(sessionId));
+  return entries.length === Object.keys(value).length ? value : Object.fromEntries(entries);
+}
+
+function deleteSessionRecord<T>(value: Record<string, T>, sessionId: string): Record<string, T> {
+  if (value[sessionId] === undefined) return value;
+  const next = { ...value };
+  delete next[sessionId];
+  return next;
+}
+
 function rendererError(error: unknown, fallbackCode: string): RendererError {
   if (error instanceof Error) return { code: fallbackCode, message: error.message };
   const value = record(error);
@@ -720,13 +831,23 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : text(record(error)['message'], String(error));
 }
 
-function SessionActionDialog({ state, onClose }: { readonly state: SessionDialogState; readonly onClose: () => void }) {
+function SessionActionDialog({
+  state,
+  onDelete,
+  onClose,
+}: {
+  readonly state: SessionDialogState;
+  readonly onDelete: (sessionId: string) => Promise<void>;
+  readonly onClose: () => void;
+}) {
   const [title, setTitle] = useState(state.session.title ?? '');
   const [turnIndex, setTurnIndex] = useState('');
   const [outputPath, setOutputPath] = useState('');
   const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string>();
   const run = async () => {
     setBusy(true);
+    setActionError(undefined);
     try {
       switch (state.action) {
         case 'rename': await window.kimiDesktop.session.rename(state.session.id, title.trim()); break;
@@ -738,9 +859,11 @@ function SessionActionDialog({ state, onClose }: { readonly state: SessionDialog
           break;
         }
         case 'close': await window.kimiDesktop.session.close(state.session.id); break;
-        case 'delete': await window.kimiDesktop.session.delete(state.session.id); break;
+        case 'delete': await onDelete(state.session.id); break;
       }
       onClose();
+    } catch (error) {
+      setActionError(errorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -759,6 +882,7 @@ function SessionActionDialog({ state, onClose }: { readonly state: SessionDialog
           {state.action === 'export' && <label><span>输出路径</span><input value={outputPath} onChange={(event) => setOutputPath(event.target.value)} placeholder="留空使用默认导出路径" /></label>}
           {state.action === 'close' && <div className="dialog-notice">关闭只结束当前活动 runtime，会话历史仍保留。</div>}
           {state.action === 'delete' && <div className="dialog-danger">该会话的持久化历史将被永久删除，无法撤销。</div>}
+          {actionError !== undefined && <div className="dialog-danger">{actionError}</div>}
         </div>
         <footer className="dialog-footer"><button onClick={onClose}>取消</button><button className={state.action === 'delete' ? 'button-danger' : 'button-primary'} disabled={busy || (state.action === 'rename' && title.trim().length === 0)} onClick={() => void run()}>{busy ? <CircleDashed className="spin" size={13} /> : state.action === 'delete' ? <Trash2 size={13} /> : <Check size={13} />}确认</button></footer>
       </div>
