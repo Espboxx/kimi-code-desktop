@@ -107,6 +107,10 @@ try {
   const todoPanel = page.locator('.todo-fixed-panel');
   await todoPanel.waitFor({ state: 'visible' });
   assert.match(await page.locator('.inspector-tabs').innerText(), /后台任务/);
+  assert.equal(
+    await page.locator('.inspector-tabs button').filter({ hasText: '上下文' }).count(),
+    0,
+  );
   await submitPrompt(page, 'Create a TodoList with one running and one pending desktop task.');
   await waitForAssistant(page, 'TodoList updated by Kimi.');
   await todoPanel.getByText('Inspect desktop runtime', { exact: true }).waitFor();
