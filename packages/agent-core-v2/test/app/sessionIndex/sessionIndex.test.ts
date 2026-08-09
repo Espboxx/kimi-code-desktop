@@ -666,6 +666,20 @@ describe('FileSessionIndex (read model)', () => {
     expect(mirror.pending().map((s) => s.id)).toContain('fresh');
   });
 
+  it('get returns the queued summary when the read model still has older metadata', async () => {
+    await seedSession('a', { title: 'before', createdAt: 1, updatedAt: 2 });
+    const store = build();
+    await store.prepare();
+    const hold = mirror.beginProjection();
+    try {
+      mirror.record(summary('a', { title: 'after', createdAt: 1, updatedAt: 3 }));
+
+      expect(await store.get('a')).toMatchObject({ id: 'a', title: 'after' });
+    } finally {
+      hold.dispose();
+    }
+  });
+
   it('cursor-less pages merge the mirror queue for read-your-writes', async () => {
     await seedSession('a', { title: 'a', createdAt: 1, updatedAt: 2 });
     const store = build();

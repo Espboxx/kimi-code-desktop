@@ -199,7 +199,9 @@ describe('loadMcpServers', () => {
     expect(servers['local']).toEqual({
       transport: 'stdio',
       command: 'node.exe',
-      cwd: join(repoRoot, 'tools', 'mcp server'),
+      cwd: process.platform === 'win32'
+        ? join(repoRoot, 'tools', 'mcp server')
+        : `/${join(repoRoot, 'tools', 'mcp server')}`,
     });
   });
 

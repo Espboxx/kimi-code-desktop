@@ -408,6 +408,8 @@ export class FileSessionIndex extends Disposable implements ISessionIndex {
     generation: number,
     id: string,
   ): Promise<SessionSummary | undefined> {
+    const pending = this.mirror.pending().find((summary) => summary.id === id);
+    if (pending !== undefined) return pending;
     const cached: unknown = await this.queryStore.get(sessionCollection(generation), id);
     if (isSessionSummaryShape(cached)) return stripRecencyField(generation, cached);
     // Mirror lag or a not-yet-projected session: probe the authoritative
