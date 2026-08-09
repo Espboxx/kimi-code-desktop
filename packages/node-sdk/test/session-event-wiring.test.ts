@@ -7,7 +7,7 @@
  * secondary-model derived id resolution.
  * Run: pnpm exec vitest run test/session-event-wiring.test.ts
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { Event } from '@moonshot-ai/agent-core';
 import {
@@ -17,9 +17,12 @@ import {
   IAgentUsageService,
   IEventBus,
   IModelCatalog,
+  ISessionApprovalService,
   ISessionInteractionService,
+  ISessionQuestionService,
   SECONDARY_DERIVED_MODEL_ID,
   type IAgentScopeHandle,
+  type Interaction,
   type ISessionScopeHandle,
 } from '@moonshot-ai/agent-core-v2';
 
@@ -64,7 +67,10 @@ class FakeAgentHandle {
   dispose(): void {}
 }
 
-function makeSession(agents: FakeAgentHandle[]): ISessionScopeHandle {
+function makeSession(
+  agents: FakeAgentHandle[],
+  extraServices: ReadonlyMap<unknown, unknown> = new Map(),
+): ISessionScopeHandle {
   const lifecycle = {
     list: () => agents,
     onDidCreate: () => ({ dispose: () => {} }),
@@ -77,8 +83,8 @@ function makeSession(agents: FakeAgentHandle[]): ISessionScopeHandle {
   const accessor = {
     get: (token: unknown): unknown => {
       if (token === IAgentLifecycleService) return lifecycle;
-      if (token === ISessionInteractionService) return interactions;
-      return undefined;
+      if (token === ISessionInteractionService && !extraServices.has(token)) return interactions;
+      return extraServices.get(token);
     },
   };
   return { id: 's1', kind: 1, accessor, dispose: () => {} } as unknown as ISessionScopeHandle;
@@ -195,5 +201,85 @@ describe('SessionEventWiring status snapshot fold', () => {
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ type: 'agent.status.updated', usage: USAGE });
     expect(events[0]).not.toHaveProperty('model');
+  });
+});
+
+describe('SessionEventWiring pending interaction baseline', () => {
+  it('bridges interactions that were parked before handlers were registered', async () => {
+    const pending: Interaction[] = [
+      {
+        id: 'approval-1',
+        kind: 'approval',
+        payload: {
+          turnId: 4,
+          toolCallId: 'tool-approval',
+          toolName: 'Edit',
+          action: 'Write file',
+          display: { kind: 'generic', summary: 'Write file', detail: {} },
+        },
+        origin: { agentId: 'main', turnId: 4 },
+        createdAt: 1,
+      },
+      {
+        id: 'question-1',
+        kind: 'question',
+        payload: {
+          turnId: 4,
+          toolCallId: 'tool-question',
+          questions: [{ question: 'Continue?', options: [{ label: 'yes' }] }],
+        },
+        origin: { agentId: 'sub-1', turnId: 4 },
+        createdAt: 2,
+      },
+    ];
+    const approvals: unknown[] = [];
+    const answers: unknown[] = [];
+    const interactions = {
+      onDidChangePending: () => ({ dispose: () => {} }),
+      listPending: () => pending,
+    };
+    const services = new Map<unknown, unknown>([
+      [ISessionInteractionService, interactions],
+      [ISessionApprovalService, { decide: (id: string, response: unknown) => approvals.push({ id, response }) }],
+      [ISessionQuestionService, { answer: (id: string, response: unknown) => answers.push({ id, response }), dismiss: () => {} }],
+    ]);
+    const observed: string[] = [];
+    const wiring = new SessionEventWiring(makeSession([], services), {
+      receiveEvent: () => {},
+      requestApproval: async (request) => {
+        observed.push(`approval:${request.toolCallId}`);
+        return { decision: 'approved', scope: 'session' };
+      },
+      requestQuestion: async (request) => {
+        observed.push(`question:${request.toolCallId}`);
+        return { answers: { 'Continue?': 'yes' }, method: 'enter' };
+      },
+      toolCall: async () => ({ output: 'unused' }),
+    });
+    try {
+      // Mirrors SessionRuntime.initialize(): each handler registration asks
+      // the wiring to pick up only its own already-pending interaction.
+      wiring.bridgePendingInteractions('approval');
+      wiring.bridgePendingInteractions('question');
+      await vi.waitFor(() => {
+        expect(approvals).toHaveLength(1);
+        expect(answers).toHaveLength(1);
+      });
+      expect(observed).toEqual(['approval:tool-approval', 'question:tool-question']);
+      expect(approvals).toEqual([
+        { id: 'approval-1', response: { decision: 'approved', scope: 'session' } },
+      ]);
+      expect(answers).toEqual([
+        {
+          id: 'question-1',
+          response: { answers: { 'Continue?': 'yes' }, method: 'enter' },
+        },
+      ]);
+      // The deferred baseline scan must not bridge the same ids twice.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(observed).toHaveLength(2);
+    } finally {
+      wiring.dispose();
+    }
   });
 });

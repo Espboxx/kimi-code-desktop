@@ -26,7 +26,7 @@
  *   is needed. Unlike the config domain, the v2 plugin service serializes
  *   every read behind its own initial load, so there is no ready trap here.
  * - `listSessions` / `createSession` / `renameSession` / `forkSession` /
- *   `closeSession` / `resumeSession` / `reloadSession` /
+ *   `closeSession` / `deleteSession` / `resumeSession` / `reloadSession` /
  *   `updateSessionMetadata` / `addAdditionalDir` → the session lifecycle
  *   batch: `klient.global.sessions.list` plus the `klient.session(id)`
  *   metadata mutations where the facade reaches, and the
@@ -34,9 +34,7 @@
  *   {@link engineAccessor} where it does not (explicit session ids, resume,
  *   fork ids, the workspace-level add-dir surface). The v1 `SessionSummary` / `SessionMeta`
  *   shapes are restored by the pure mapping layer in
- *   `src/v2/session-mapper.ts`. `deleteSession` stays `not_implemented` —
- *   the v2 engine has no session-deletion capability anywhere (tracked in
- *   `.tmp/v2-migration-tracker.md`). The resumed results carry the full v1
+ *   `src/v2/session-mapper.ts`. The resumed results carry the full v1
  *   per-agent snapshot: the live slices are read from the restored agent
  *   scope (profile / permission / swarm services + the klient agent facade),
  *   while `replay` and `toolStore` are folded from each agent's `wire.jsonl`
@@ -239,6 +237,7 @@ import { createKlient } from '@moonshot-ai/klient/memory';
 import { assertKimiHostIdentity, createKimiDefaultHeaders } from '@moonshot-ai/kimi-code-oauth';
 
 import { KimiAuthFacade } from '#/auth';
+import type { ApprovalHandler, QuestionHandler } from '#/events';
 import { KimiHarness } from '#/kimi-harness';
 import {
   SDKRpcClientBase,
@@ -836,6 +835,26 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     wiring.dispose();
   }
 
+  override setApprovalHandler(
+    sessionId: string,
+    handler: ApprovalHandler | undefined,
+  ): void {
+    super.setApprovalHandler(sessionId, handler);
+    if (handler !== undefined) {
+      this.sessionWirings.get(sessionId)?.bridgePendingInteractions('approval');
+    }
+  }
+
+  override setQuestionHandler(
+    sessionId: string,
+    handler: QuestionHandler | undefined,
+  ): void {
+    super.setQuestionHandler(sessionId, handler);
+    if (handler !== undefined) {
+      this.sessionWirings.get(sessionId)?.bridgePendingInteractions('question');
+    }
+  }
+
   /**
    * The v1 summary of a live session, read from its own scope services (the
    * metadata document, the context's cwd/sessionDir, the workspace context's
@@ -1121,22 +1140,8 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     }
   }
 
-  /**
-   * Through `engineAccessor` (the handler chain's `ISessionLifecycleService.fork`) because the
-   * klient facade fork takes no explicit target id. Known gaps vs v1: the
-   * engine's fork is unconditional — it never rejects an in-flight source
-   * turn (v1's SESSION_FORK_ACTIVE_TURN) — and `turnIndex` truncation has no
-   * v2 counterpart at all, so it fails loudly. The default title also differs
-   * by design (v1: "New Session", v2: "Fork: <source>") — pass an explicit
-   * title for identical results.
-   */
+  /** Through the handler chain because the klient facade has no explicit target id. */
   override async forkSession(input: ForkSessionInput): Promise<SessionSummary> {
-    if (input.turnIndex !== undefined) {
-      throw new KimiError(
-        ErrorCodes.NOT_IMPLEMENTED,
-        'forkSession turnIndex truncation is not wired to agent-core-v2 yet.',
-      );
-    }
     const forkHandler = await handlerForSession(this.engineAccessor, input.id);
     if (forkHandler === undefined) throw SDKRpcClientV2.sessionNotFound(input.id);
     const handle = await forkHandler.accessor.get(ISessionLifecycleService).fork({
@@ -1144,6 +1149,7 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
       newSessionId: input.forkId,
       title: input.title,
       metadata: input.metadata,
+      turnIndex: input.turnIndex,
     });
     this.wireSession(handle);
     return this.resumedSessionSummary(handle);
@@ -1153,6 +1159,14 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     // v1's print-steer counters die with the Session object; drop ours too.
     this.printSteerStates.delete(input.sessionId);
     await this.klient.session(input.sessionId).close();
+  }
+
+  override async deleteSession(input: SessionIdRpcInput): Promise<void> {
+    this.printSteerStates.delete(input.sessionId);
+    if ((await handlerForSession(this.engineAccessor, input.sessionId)) === undefined) {
+      throw SDKRpcClientV2.sessionNotFound(input.sessionId);
+    }
+    await this.klient.session(input.sessionId).delete();
   }
 
   /**

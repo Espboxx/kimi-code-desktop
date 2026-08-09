@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2024"],
+    "types": ["node"],
+    "rootDir": "src",
+    "outDir": "dist-electron",
+    "noEmit": false,
+    "declaration": false,
+    "sourceMap": true,
+    "strict": true
+  },
+  "include": ["src/electron/**/*.ts", "src/shared/**/*.ts"],
+  "exclude": ["src/electron/**/*.test.ts"]
+}

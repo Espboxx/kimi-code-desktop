@@ -1,5 +1,5 @@
 import { rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { describe, expect, it } from 'vitest';
@@ -8,9 +8,15 @@ import { defineKlientConformance } from './helpers/conformance.js';
 import { createKlient, serveKlientIpc, type KlientIpcHost } from '../src/transports/ipc/index.js';
 import { makeEngine, type TestEngine } from './helpers/engine.js';
 
+function ipcEndpoint(homeDir: string, name = 'klient'): string {
+  return process.platform === 'win32'
+    ? `\\\\.\\pipe\\kimi-klient-${basename(homeDir)}-${name}`
+    : join(homeDir, `${name}.sock`);
+}
+
 defineKlientConformance('ipc', async () => {
   const { homeDir, app } = await makeEngine();
-  const socketPath = join(homeDir, 'klient.sock');
+  const socketPath = ipcEndpoint(homeDir);
   const host = await serveKlientIpc({ scope: app, socketPath });
   const klient = createKlient({ socketPath });
   return {
@@ -32,7 +38,7 @@ describe('ipc transport specifics', () => {
 
   async function setup(opts: { token?: string } = {}): Promise<string> {
     ({ homeDir, app } = await makeEngine());
-    const socketPath = join(homeDir, 'klient.sock');
+    const socketPath = ipcEndpoint(homeDir);
     host = await serveKlientIpc({ scope: app, socketPath, token: opts.token });
     return socketPath;
   }
@@ -45,7 +51,7 @@ describe('ipc transport specifics', () => {
   }
 
   it('rejects calls when the socket path does not exist', async () => {
-    const klient = createKlient({ socketPath: join(tmpdir(), 'klient-no-such.sock') });
+    const klient = createKlient({ socketPath: ipcEndpoint(tmpdir(), `missing-${process.pid}`) });
     await expect(klient.global.env()).rejects.toThrow();
     await klient.close();
   });

@@ -16,7 +16,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   createKimiHarnessV2,
   ErrorCodes,
-  KimiError,
   KimiHarness,
   removeProviderFromConfig,
   SDKRpcClientV2,
@@ -278,15 +277,18 @@ describe('SDKRpcClientV2 (agent-core-v2 wiring MVP)', () => {
     }
   });
 
-  it('fails loudly with not_implemented for methods not yet migrated', async () => {
+  it('permanently deletes a v2 session and rejects a second delete', async () => {
     const { harness } = await makeHarness();
+    const workDir = await mkdtemp(join(tmpdir(), 'kimi-sdk-v2-delete-'));
+    tempDirs.push(workDir);
     try {
-      // `deleteSession` is the permanent case: the v2 engine has no
-      // session-deletion capability, so it stays not_implemented by design
-      // (tracked in `.tmp/v2-migration-tracker.md`).
-      await expect(harness.deleteSession('session_missing')).rejects.toThrowError(KimiError);
-      await expect(harness.deleteSession('session_missing')).rejects.toMatchObject({
-        code: ErrorCodes.NOT_IMPLEMENTED,
+      const session = await harness.createSession({ workDir });
+      await harness.deleteSession(session.id);
+      expect(
+        (await harness.listSessions({ workDir })).some((item) => item.id === session.id),
+      ).toBe(false);
+      await expect(harness.deleteSession(session.id)).rejects.toMatchObject({
+        code: ErrorCodes.SESSION_NOT_FOUND,
       });
     } finally {
       await harness.close();

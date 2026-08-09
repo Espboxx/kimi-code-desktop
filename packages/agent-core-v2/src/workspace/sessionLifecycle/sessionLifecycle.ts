@@ -48,6 +48,7 @@ export interface ForkSessionOptions {
   readonly newSessionId?: string;
   readonly title?: string;
   readonly metadata?: Record<string, unknown>;
+  readonly turnIndex?: number;
 }
 
 export interface ResumeSessionOptions {

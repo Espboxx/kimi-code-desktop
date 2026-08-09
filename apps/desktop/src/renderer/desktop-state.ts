@@ -1,0 +1,162 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { TranscriptStore } from '@moonshot-ai/transcript';
+
+import type {
+  DesktopSnapshot,
+  KimiDesktopError,
+  SequencedTranscriptBatch,
+  SessionStatusSnapshot,
+  TranscriptSnapshot,
+} from '../shared/desktop-api';
+
+interface WorkspaceChangeState {
+  readonly version: number;
+  readonly paths: readonly string[];
+}
+
+export interface CloseRequestState {
+  readonly requestId: string;
+  readonly dirtyPaths: readonly string[];
+}
+import { DesktopTranscriptReplica } from './transcript-replica';
+
+export interface DesktopState {
+  readonly snapshot?: DesktopSnapshot;
+  readonly transcript?: TranscriptStore;
+  readonly transcriptVersion: number;
+  readonly workspaceChange: WorkspaceChangeState;
+  readonly sessionStatuses: Readonly<Record<string, SessionStatusSnapshot>>;
+  readonly pendingInteractionCounts: Readonly<Record<string, number>>;
+  readonly closeRequest?: CloseRequestState;
+  readonly error?: KimiDesktopError;
+  readonly dismissCloseRequest: () => void;
+  readonly clearError: () => void;
+  readonly refresh: () => Promise<void>;
+}
+
+export function useDesktopState(): DesktopState {
+  const [snapshot, setSnapshot] = useState<DesktopSnapshot>();
+  const [transcript, setTranscript] = useState<TranscriptStore>();
+  const [transcriptVersion, setTranscriptVersion] = useState(0);
+  const [workspaceChange, setWorkspaceChange] = useState<WorkspaceChangeState>({ version: 0, paths: [] });
+  const [sessionStatuses, setSessionStatuses] = useState<Record<string, SessionStatusSnapshot>>({});
+  const [pendingInteractions, setPendingInteractions] = useState<Record<string, { sessionId: string }>>({});
+  const [closeRequest, setCloseRequest] = useState<CloseRequestState>();
+  const [error, setError] = useState<KimiDesktopError>();
+  const replicaRef = useRef(new DesktopTranscriptReplica());
+  const resyncing = useRef(false);
+
+  const applyBaseline = useCallback((baseline?: TranscriptSnapshot) => {
+    const next = replicaRef.current.reset(baseline);
+    setTranscript(next);
+    setTranscriptVersion((version) => version + 1);
+  }, []);
+
+  const refresh = useCallback(async () => {
+    const next = await window.kimiDesktop.host.snapshot();
+    setSnapshot(next);
+    applyBaseline(next.transcript);
+  }, [applyBaseline]);
+
+  const applyBatch = useCallback((batch: SequencedTranscriptBatch) => {
+    const result = replicaRef.current.apply(batch);
+    if (result === 'gap') {
+      if (!resyncing.current) {
+        resyncing.current = true;
+        void refresh().finally(() => { resyncing.current = false; });
+      }
+      return;
+    }
+    if (result === 'applied') setTranscriptVersion((version) => version + 1);
+  }, [refresh]);
+
+  useEffect(() => {
+    let alive = true;
+    void window.kimiDesktop.host.snapshot()
+      .then((next) => {
+        if (!alive) return;
+        setSnapshot(next);
+        applyBaseline(next.transcript);
+      })
+      .catch((reason) => {
+        if (!alive) return;
+        setError({ code: 'desktop.bootstrap', message: reason instanceof Error ? reason.message : String(reason) });
+      });
+    const unsubscribe = window.kimiDesktop.onNotification((notification) => {
+      if (!alive) return;
+      switch (notification.type) {
+        case 'snapshot.reset':
+          setSnapshot(notification.snapshot);
+          if (notification.snapshot.activeSessionId !== undefined && notification.snapshot.session.status !== undefined) {
+            setSessionStatuses((current) => ({
+              ...current,
+              [notification.snapshot.activeSessionId!]: notification.snapshot.session.status!,
+            }));
+          }
+          applyBaseline(notification.snapshot.transcript);
+          break;
+        case 'transcript.ops':
+          applyBatch(notification.batch);
+          break;
+        case 'session.status':
+          setSessionStatuses((current) => ({ ...current, [notification.sessionId]: notification.status }));
+          setSnapshot((current) => current === undefined || current.activeSessionId !== notification.sessionId
+            ? current
+            : { ...current, session: { ...current.session, status: notification.status } });
+          break;
+        case 'workspace.changed':
+          setSnapshot((current) => current === undefined ? current : {
+            ...current,
+            workspace: notification.workspace,
+            tree: notification.tree,
+            gitFiles: notification.gitFiles,
+          });
+          setWorkspaceChange((current) => ({ version: current.version + 1, paths: notification.changedPaths }));
+          break;
+        case 'host.closeRequested':
+          setCloseRequest({ requestId: notification.requestId, dirtyPaths: notification.dirtyPaths });
+          break;
+        case 'error':
+          setError(notification.error);
+          break;
+        case 'interaction.pending':
+          setPendingInteractions((current) => ({
+            ...current,
+            [`${notification.sessionId}:${notification.interactionId}`]: { sessionId: notification.sessionId },
+          }));
+          break;
+        case 'interaction.resolved': {
+          const key = `${notification.sessionId}:${notification.interactionId}`;
+          setPendingInteractions((current) => {
+            if (current[key] === undefined) return current;
+            const next = { ...current };
+            delete next[key];
+            return next;
+          });
+          break;
+        }
+      }
+    });
+    return () => {
+      alive = false;
+      unsubscribe();
+    };
+  }, [applyBaseline, applyBatch]);
+
+  return {
+    snapshot,
+    transcript,
+    transcriptVersion,
+    workspaceChange,
+    sessionStatuses,
+    pendingInteractionCounts: Object.values(pendingInteractions).reduce<Record<string, number>>((counts, interaction) => {
+      counts[interaction.sessionId] = (counts[interaction.sessionId] ?? 0) + 1;
+      return counts;
+    }, {}),
+    closeRequest,
+    error,
+    dismissCloseRequest: () => setCloseRequest(undefined),
+    clearError: () => setError(undefined),
+    refresh,
+  };
+}

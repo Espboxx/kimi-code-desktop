@@ -38,6 +38,10 @@
  * live Agent wire journals, normalizes a missing protocol envelope, and
  * appends the fork boundary before restoring the target Agent; fork is
  * confined to this handler (source and target share the workspace bucket).
+ * Historical fork truncates the main wire at a validated user-visible turn,
+ * trims subagent wires at the same time boundary, and drops later task/cron
+ * state before materialization; any failed fork removes its partial files,
+ * index entry, and duplicated cron tasks.
  * On
  * materialize, the agent-profile loaders' `ready` is awaited
  * before the handle is published — agent-file discovery is local-
@@ -81,6 +85,8 @@ import { unwrapErrorCause } from '#/_base/errors/errors';
 import { Emitter, type Event } from '#/_base/event';
 import { DEFAULT_PLAN_MODE_SECTION } from '#/features/plan/configSection';
 import { IAgentPlanService } from '#/features/plan/plan';
+import { IAgentLoopService } from '#/agent/loop/loop';
+import { promptMetadataTextFromText } from '#/agent/prompt/promptMetadataText';
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
 import { CRON_SESSION_TAG, type CronTask } from '#/app/cron/cronTask';
 import { ICronTaskPersistence } from '#/app/cron/cronTaskPersistence';
@@ -102,7 +108,10 @@ import { IAppendLogStore } from '#/persistence/interface/appendLogStore';
 import { IAtomicDocumentStore } from '#/persistence/interface/atomicDocumentStore';
 import { IAgentLifecycleService, MAIN_AGENT_ID } from '#/session/agentLifecycle/agentLifecycle';
 import { ensureMainAgent } from '#/session/agentLifecycle/mainAgent';
-import { labelsFromAgentMeta } from '#/session/agentLifecycle/subagentMetadata';
+import {
+  labelsFromAgentMeta,
+  subagentParentAgentId,
+} from '#/session/agentLifecycle/subagentMetadata';
 import { ISessionContext, sessionContextSeed } from '#/session/sessionContext/sessionContext';
 import { sessionAgentProfileCatalogSeed } from '#/session/sessionAgentProfileCatalog/agentProfileCatalogSeed';
 import { assembleSessionSeedAdapters } from '#/session/sessionSeed/sessionSeedAdapters';
@@ -111,7 +120,11 @@ import {
   sessionLifecycleHooksSeed,
   type SessionLifecycleHookSlots,
 } from '#/session/sessionLifecycleHooks/sessionLifecycleHooks';
-import { ISessionMetadata, type SessionMeta } from '#/session/sessionMetadata/sessionMetadata';
+import {
+  ISessionMetadata,
+  type AgentMeta,
+  type SessionMeta,
+} from '#/session/sessionMetadata/sessionMetadata';
 import { drainSessionMetadataWrites } from '#/session/sessionMetadata/sessionMetadataService';
 import { ISessionProcessRunner } from '#/session/process/processRunner';
 import { ISessionToolPolicy } from '#/session/sessionToolPolicy/sessionToolPolicy';
@@ -488,6 +501,7 @@ export class SessionLifecycleService extends Disposable implements ISessionLifec
   }
 
   async fork(opts: ForkSessionOptions): Promise<ISessionScopeHandle> {
+    assertForkTurnIndex(opts.turnIndex);
     const sourceId = opts.sourceSessionId;
 
     const sourceHandle = this.sessions.get(sourceId);
@@ -502,6 +516,8 @@ export class SessionLifecycleService extends Disposable implements ISessionLifec
     let targetId: string | undefined;
     let target: ISessionScopeHandle | undefined;
     let targetSessionDir: string | undefined;
+    let targetIndexAttempted = false;
+    const duplicatedCronTaskIds: string[] = [];
     try {
       // A turn that just ended may still have its outcome write queued;
       // settle pending metadata writes before reading the source for
@@ -511,6 +527,7 @@ export class SessionLifecycleService extends Disposable implements ISessionLifec
         sourceHandle !== undefined
           ? await sourceHandle.accessor.get(ISessionMetadata).read()
           : await this.readMetaFromDisk(sourceId);
+      this.assertForkSourceIdle(sourceId, sourceHandle);
 
       targetId = opts.newSessionId ?? createSessionId();
       if (this.sessions.has(targetId) || (await this.index.get(targetId)) !== undefined) {
@@ -526,23 +543,54 @@ export class SessionLifecycleService extends Disposable implements ISessionLifec
         targetSessionDir,
       );
 
+      const sourceAgents = sourceMeta?.agents ?? {};
+      const agentIds = Object.keys(sourceAgents);
+      const retainedAgentIds = new Set(agentIds);
+      let historical: HistoricalMainSlice | undefined;
+      if (opts.turnIndex === undefined) {
+        for (const agentId of agentIds) {
+          await this.copyAgentWire({
+            sourceHandle,
+            sourceSessionId: sourceId,
+            agentId,
+            targetSessionId: targetId,
+          });
+        }
+      } else {
+        if (sourceAgents[MAIN_AGENT_ID] === undefined) {
+          throw new Error2(
+            ErrorCodes.REQUEST_INVALID,
+            `Session "${sourceId}" has no main agent metadata`,
+          );
+        }
+        historical = await this.copyMainAgentWireAtTurn({
+          sourceHandle,
+          sourceSessionId: sourceId,
+          targetSessionId: targetId,
+          turnIndex: opts.turnIndex,
+        });
+        retainedAgentIds.clear();
+        retainedAgentIds.add(MAIN_AGENT_ID);
+        for (const agentId of agentIds) {
+          if (agentId === MAIN_AGENT_ID) continue;
+          const retained = await this.copySubagentWireAtTime({
+            sourceHandle,
+            sourceSessionId: sourceId,
+            agentId,
+            targetSessionId: targetId,
+            cutoffTime: historical.cutoffTime,
+          });
+          if (retained) retainedAgentIds.add(agentId);
+        }
+        dropAgentsWithMissingParents(retainedAgentIds, sourceAgents);
+        await this.pruneHistoricalSessionFiles(targetSessionDir, agentIds, retainedAgentIds);
+      }
+
       target = await this.materializeSession({
         sessionId: targetId,
         workDir: this.workspaceContext.cwd,
       });
-      const targetCtx = target.accessor.get(ISessionContext);
       const targetMeta = target.accessor.get(ISessionMetadata);
-
-      const sourceAgents = sourceMeta?.agents ?? {};
-      const agentIds = Object.keys(sourceAgents);
-      for (const agentId of agentIds) {
-        await this.copyAgentWire({
-          sourceHandle,
-          sourceSessionId: sourceId,
-          agentId,
-          targetSessionId: targetCtx.sessionId,
-        });
-      }
 
       const title = opts.title ?? `Fork: ${sourceMeta?.title || sourceId}`;
       await targetMeta.update({
@@ -550,17 +598,20 @@ export class SessionLifecycleService extends Disposable implements ISessionLifec
         isCustomTitle: opts.title !== undefined ? true : sourceMeta?.isCustomTitle === true,
         forkedFrom: sourceId,
         archived: false,
-        lastPrompt: sourceMeta?.lastPrompt,
+        lastPrompt: opts.turnIndex === undefined ? sourceMeta?.lastPrompt : historical?.lastPrompt,
         // The fork continues the source's conversation, so it inherits the
         // last turn's outcome too — otherwise a restart would drop a failure
         // the warm fork was still reporting.
-        lastTurnReason: sourceMeta?.lastTurnReason,
+        lastTurnReason:
+          opts.turnIndex === undefined ? sourceMeta?.lastTurnReason : historical?.lastTurnReason,
         custom: forkCustomMetadata(sourceMeta?.custom, opts.metadata),
       });
 
-      await this.duplicateCronTasks(sourceId, targetId);
+      if (opts.turnIndex === undefined) {
+        duplicatedCronTaskIds.push(...await this.duplicateCronTasks(sourceId, targetId));
+      }
 
-      for (const agentId of agentIds) {
+      for (const agentId of retainedAgentIds) {
         const sourceAgent = sourceAgents[agentId]!;
         await target.accessor.get(IAgentLifecycleService).create({
           agentId,
@@ -569,6 +620,7 @@ export class SessionLifecycleService extends Disposable implements ISessionLifec
         });
       }
 
+      targetIndexAttempted = true;
       await this.appendSessionIndexEntry(targetId, this.workspaceContext.cwd);
       this._onDidForkSession.fire({
         sourceSessionId: sourceId,
@@ -587,10 +639,43 @@ export class SessionLifecycleService extends Disposable implements ISessionLifec
         } catch {
         }
       }
+      await drainSessionMetadataWrites().catch(() => {});
       if (targetSessionDir !== undefined) {
         await this.hostFs.remove(targetSessionDir).catch(() => {});
       }
+      if (targetIndexAttempted && targetId !== undefined) {
+        await this.index.remove(targetId).catch(() => {});
+        this.appendLogStore.append('', 'session_index.jsonl', { sessionId: targetId, deleted: true });
+        await this.appendLogStore.flush().catch(() => {});
+      }
+      await Promise.all(
+        duplicatedCronTaskIds.map((taskId) =>
+          this.cronStore.delete(this.workspaceId, taskId).catch(() => {}),
+        ),
+      );
       throw error;
+    }
+  }
+
+  private assertForkSourceIdle(
+    sourceSessionId: string,
+    sourceHandle: ISessionScopeHandle | undefined,
+  ): void {
+    if (sourceHandle === undefined) return;
+    for (const agent of sourceHandle.accessor.get(IAgentLifecycleService).list()) {
+      const status = agent.accessor.get(IAgentLoopService).status();
+      if (
+        status.state === 'idle' &&
+        status.pendingTurnIds.length === 0 &&
+        !status.hasPendingRequests
+      ) {
+        continue;
+      }
+      throw new Error2(
+        ErrorCodes.SESSION_FORK_ACTIVE_TURN,
+        `Session "${sourceSessionId}" cannot be forked while a turn is running`,
+        { details: { sessionId: sourceSessionId, agentId: agent.id } },
+      );
     }
   }
 
@@ -654,6 +739,83 @@ export class SessionLifecycleService extends Disposable implements ISessionLifec
     );
   }
 
+  private async copyMainAgentWireAtTurn(args: {
+    readonly sourceHandle: ISessionScopeHandle | undefined;
+    readonly sourceSessionId: string;
+    readonly targetSessionId: string;
+    readonly turnIndex: number;
+  }): Promise<HistoricalMainSlice> {
+    await this.flushLiveAgent(args.sourceHandle, MAIN_AGENT_ID);
+    const records = await this.readAgentWire(args.sourceSessionId, MAIN_AGENT_ID);
+    const slice = sliceMainWireRecordsAtTurn(records, args.sourceSessionId, args.turnIndex);
+    await this.rewriteAgentWire(args.targetSessionId, MAIN_AGENT_ID, [...slice.records, forkedRecord()]);
+    return slice;
+  }
+
+  private async copySubagentWireAtTime(args: {
+    readonly sourceHandle: ISessionScopeHandle | undefined;
+    readonly sourceSessionId: string;
+    readonly agentId: string;
+    readonly targetSessionId: string;
+    readonly cutoffTime: number | undefined;
+  }): Promise<boolean> {
+    if (args.cutoffTime === undefined) return false;
+    await this.flushLiveAgent(args.sourceHandle, args.agentId);
+    const records = await this.readAgentWire(args.sourceSessionId, args.agentId);
+    const retained = sliceWireRecordsAtTime(records, args.cutoffTime);
+    if (retained.length === 0) return false;
+    await this.rewriteAgentWire(args.targetSessionId, args.agentId, [
+      ...retained,
+      forkedRecord(),
+    ]);
+    return true;
+  }
+
+  private async flushLiveAgent(
+    sourceHandle: ISessionScopeHandle | undefined,
+    agentId: string,
+  ): Promise<void> {
+    const agent = sourceHandle?.accessor.get(IAgentLifecycleService).get(agentId);
+    if (agent !== undefined) await agent.accessor.get(IWireService).flush();
+  }
+
+  private async readAgentWire(sessionId: string, agentId: string): Promise<WireRecord[]> {
+    return collect(
+      this.appendLogStore.read<WireRecord>(
+        agentScopeOf(sessionScopeOf(this.handlerScope, sessionId), agentId),
+        AGENT_WIRE_RECORD_KEY,
+      ),
+    );
+  }
+
+  private async rewriteAgentWire(
+    sessionId: string,
+    agentId: string,
+    records: readonly WireRecord[],
+  ): Promise<void> {
+    await this.appendLogStore.rewrite(
+      agentScopeOf(sessionScopeOf(this.handlerScope, sessionId), agentId),
+      AGENT_WIRE_RECORD_KEY,
+      records,
+    );
+  }
+
+  private async pruneHistoricalSessionFiles(
+    targetSessionDir: string,
+    sourceAgentIds: readonly string[],
+    retainedAgentIds: ReadonlySet<string>,
+  ): Promise<void> {
+    for (const agentId of sourceAgentIds) {
+      const agentDir = join(targetSessionDir, 'agents', agentId);
+      if (!retainedAgentIds.has(agentId)) {
+        await this.hostFs.remove(agentDir).catch(() => {});
+        continue;
+      }
+      await this.hostFs.remove(join(agentDir, 'tasks')).catch(() => {});
+      await this.hostFs.remove(join(agentDir, 'cron')).catch(() => {});
+    }
+  }
+
   private async copySessionFiles(sourceDir: string, targetDir: string): Promise<void> {
     let entries: readonly HostDirEntry[];
     try {
@@ -697,8 +859,9 @@ export class SessionLifecycleService extends Disposable implements ISessionLifec
     }
   }
 
-  private async duplicateCronTasks(sourceId: string, targetId: string): Promise<void> {
+  private async duplicateCronTasks(sourceId: string, targetId: string): Promise<readonly string[]> {
     const tasks = await this.cronStore.list({ workspaceId: this.workspaceId });
+    const created: string[] = [];
     for (const task of tasks) {
       if (task.tags?.[CRON_SESSION_TAG] !== sourceId) continue;
       const clone: CronTask = {
@@ -706,8 +869,10 @@ export class SessionLifecycleService extends Disposable implements ISessionLifec
         id: ulid(),
         tags: { ...task.tags, [CRON_SESSION_TAG]: targetId },
       };
+      created.push(clone.id);
       await this.cronStore.save(this.workspaceId, clone);
     }
+    return created;
   }
 
   private async readMetaFromDisk(sessionId: string): Promise<SessionMeta | undefined> {
@@ -727,6 +892,236 @@ async function collect<T>(iterable: AsyncIterable<T>): Promise<T[]> {
   const items: T[] = [];
   for await (const item of iterable) items.push(item);
   return items;
+}
+
+interface HistoricalMainSlice {
+  readonly records: readonly WireRecord[];
+  readonly cutoffTime?: number;
+  readonly lastPrompt?: string;
+  readonly lastTurnReason?: 'completed' | 'cancelled' | 'failed';
+}
+
+function assertForkTurnIndex(turnIndex: number | undefined): void {
+  if (turnIndex === undefined) return;
+  if (Number.isSafeInteger(turnIndex) && turnIndex >= 0) return;
+  throw new Error2(
+    ErrorCodes.REQUEST_INVALID,
+    'forkSession turnIndex must be a non-negative safe integer',
+    { details: { turnIndex } },
+  );
+}
+
+function sliceMainWireRecordsAtTurn(
+  input: readonly WireRecord[],
+  sourceSessionId: string,
+  turnIndex: number,
+): HistoricalMainSlice {
+  const records = ensureWireMetadata(input);
+  const turnStarts: number[] = [];
+  for (let index = 0; index < records.length; index += 1) {
+    if (isUserVisibleTurnRecord(records[index]!)) turnStarts.push(index);
+  }
+  const start = turnStarts[turnIndex];
+  if (start === undefined) {
+    throw new Error2(
+      ErrorCodes.REQUEST_INVALID,
+      `Turn ${String(turnIndex)} was not found in session "${sourceSessionId}"`,
+      { details: { turnIndex, availableTurns: turnStarts.length } },
+    );
+  }
+
+  const end = turnStarts[turnIndex + 1] ?? records.length;
+  const retainedInputs = turnInputIndicesThrough(records, turnIndex);
+  const retained = records
+    .slice(0, end)
+    .filter(
+      (record, index) => !isUserVisibleTurnInputRecord(record) || retainedInputs.has(index),
+    );
+  const times = retained.map(recordTime).filter((time): time is number => time !== undefined);
+  return {
+    records: retained,
+    cutoffTime: times.length === 0 ? undefined : Math.max(...times),
+    lastPrompt: promptMetadataFromTurnRecord(records[start]!),
+    lastTurnReason: lastTurnReasonFromRecords(retained),
+  };
+}
+
+function sliceWireRecordsAtTime(
+  records: readonly WireRecord[],
+  cutoffTime: number,
+): readonly WireRecord[] {
+  let end = records.length;
+  for (let index = 0; index < records.length; index += 1) {
+    const time = recordTime(records[index]!);
+    if (time !== undefined && time > cutoffTime) {
+      end = index;
+      break;
+    }
+  }
+  const retained = records.slice(0, end);
+  return retained.length === 0 ? retained : ensureWireMetadata(retained);
+}
+
+function ensureWireMetadata(records: readonly WireRecord[]): WireRecord[] {
+  if (records[0]?.type === 'metadata') return [...records];
+  const createdAt = records.map(recordTime).find((time) => time !== undefined) ?? Date.now();
+  return [createWireMetadataRecord(createdAt), ...records];
+}
+
+function recordTime(record: WireRecord): number | undefined {
+  if (typeof record.time === 'number' && Number.isFinite(record.time)) return record.time;
+  const createdAt = record['created_at'];
+  return typeof createdAt === 'number' && Number.isFinite(createdAt) ? createdAt : undefined;
+}
+
+function isUserVisibleTurnRecord(record: WireRecord): boolean {
+  if (record.type !== 'context.append_message') return false;
+  const message = asRecord(record['message']);
+  if (message?.['role'] !== 'user') return false;
+  return isUserVisibleOrigin(asRecord(message['origin']));
+}
+
+function isUserVisibleTurnInputRecord(record: WireRecord): boolean {
+  if (record.type !== 'turn.prompt' && record.type !== 'turn.steer') return false;
+  return isUserVisibleOrigin(asRecord(record['origin']));
+}
+
+function isUserVisibleOrigin(origin: Readonly<Record<string, unknown>> | undefined): boolean {
+  const kind = origin?.['kind'];
+  if (kind === undefined || kind === 'user') return true;
+  if (kind === 'skill_activation' || kind === 'plugin_command') {
+    return origin?.['trigger'] === 'user-slash';
+  }
+  return kind === 'shell_command' && origin?.['phase'] === 'input';
+}
+
+function turnInputIndicesThrough(
+  records: readonly WireRecord[],
+  turnIndex: number,
+): ReadonlySet<number> {
+  const pending: number[] = [];
+  const retained = new Set<number>();
+  let visibleTurnIndex = 0;
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index]!;
+    if (isUserVisibleTurnInputRecord(record)) {
+      pending.push(index);
+      continue;
+    }
+    if (!isUserVisibleTurnRecord(record)) continue;
+    const matchAt = findMatchingTurnInput(records, pending, record);
+    if (matchAt !== -1) {
+      const [inputIndex] = pending.splice(matchAt, 1);
+      if (visibleTurnIndex <= turnIndex && inputIndex !== undefined) retained.add(inputIndex);
+    }
+    visibleTurnIndex += 1;
+  }
+  return retained;
+}
+
+function findMatchingTurnInput(
+  records: readonly WireRecord[],
+  pending: readonly number[],
+  turnRecord: WireRecord,
+): number {
+  const exact = pending.findIndex((index) =>
+    turnInputMatchesRecord(records[index]!, turnRecord, true),
+  );
+  if (exact !== -1) return exact;
+  return pending.findIndex((index) =>
+    turnInputMatchesRecord(records[index]!, turnRecord, false),
+  );
+}
+
+function turnInputMatchesRecord(
+  inputRecord: WireRecord,
+  turnRecord: WireRecord,
+  compareContent: boolean,
+): boolean {
+  if (
+    (inputRecord.type !== 'turn.prompt' && inputRecord.type !== 'turn.steer') ||
+    turnRecord.type !== 'context.append_message'
+  ) {
+    return false;
+  }
+  const message = asRecord(turnRecord['message']);
+  if (message?.['role'] !== 'user') return false;
+  const inputOrigin = asRecord(inputRecord['origin'])?.['kind'];
+  const messageOrigin = asRecord(message['origin'])?.['kind'];
+  if (inputOrigin === 'user' ? messageOrigin !== undefined && messageOrigin !== 'user' : inputOrigin !== messageOrigin) {
+    return false;
+  }
+  return !compareContent || JSON.stringify(inputRecord['input']) === JSON.stringify(message['content']);
+}
+
+function promptMetadataFromTurnRecord(record: WireRecord): string | undefined {
+  const message = asRecord(record['message']);
+  if (record.type !== 'context.append_message' || message?.['role'] !== 'user') return undefined;
+  const origin = asRecord(message['origin']);
+  if (origin?.['kind'] === 'skill_activation') {
+    return slashPrompt(typeof origin['skillName'] === 'string' ? origin['skillName'] : '', origin['skillArgs']);
+  }
+  if (origin?.['kind'] === 'plugin_command') {
+    const pluginId = typeof origin['pluginId'] === 'string' ? origin['pluginId'] : '';
+    const commandName = typeof origin['commandName'] === 'string' ? origin['commandName'] : '';
+    const name = `${pluginId}:${commandName}`;
+    return slashPrompt(name, origin['commandArgs']);
+  }
+  const content = message['content'];
+  if (!Array.isArray(content)) return undefined;
+  const text = content
+    .map((part) => {
+      const item = asRecord(part);
+      if (item?.['type'] === 'text' && typeof item['text'] === 'string') return item['text'];
+      if (item?.['type'] === 'image_url') return '[image]';
+      if (item?.['type'] === 'audio_url') return '[audio]';
+      if (item?.['type'] === 'video_url') return '[video]';
+      return '';
+    })
+    .filter((part) => part.length > 0)
+    .join('\n');
+  return promptMetadataTextFromText(text);
+}
+
+function slashPrompt(name: string, rawArgs: unknown): string | undefined {
+  const args = typeof rawArgs === 'string' ? rawArgs.trim() : '';
+  return promptMetadataTextFromText(args.length === 0 ? `/${name}` : `/${name} ${args}`);
+}
+
+function lastTurnReasonFromRecords(
+  records: readonly WireRecord[],
+): 'completed' | 'cancelled' | 'failed' | undefined {
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    const record = records[index]!;
+    if (record.type !== 'turn.ended') continue;
+    const reason = record['reason'];
+    if (reason === 'completed' || reason === 'cancelled') return reason;
+    if (reason === 'failed' || reason === 'blocked') return 'failed';
+  }
+  return undefined;
+}
+
+function dropAgentsWithMissingParents(
+  retained: Set<string>,
+  agents: Readonly<Record<string, AgentMeta>>,
+): void {
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const agentId of retained) {
+      if (agentId === MAIN_AGENT_ID) continue;
+      const parentId = subagentParentAgentId(agents[agentId]);
+      if (parentId === undefined || parentId === MAIN_AGENT_ID || retained.has(parentId)) continue;
+      retained.delete(agentId);
+      changed = true;
+    }
+  }
+}
+
+function asRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : undefined;
 }
 
 function isMissingFileError(error: unknown): boolean {

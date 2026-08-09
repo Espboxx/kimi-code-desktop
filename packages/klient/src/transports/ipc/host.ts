@@ -1,5 +1,5 @@
 /**
- * IPC host — serves one engine scope over a unix domain socket. Incoming
+ * IPC host — serves one engine scope over a Unix socket or Windows named pipe. Incoming
  * frames are bridged to the shared in-process dispatcher (the same code the
  * memory transport uses), so ipc and in-memory behavior are identical by
  * construction; only serialization separates them.
@@ -19,7 +19,7 @@ const UNAUTHORIZED = 40100;
 export interface ServeKlientIpcOptions {
   /** A bootstrapped engine app scope (same value `createKlient({ scope })` takes). */
   readonly scope: ScopeLike;
-  /** Unix socket path to listen on. A stale file at the path is removed first. */
+  /** Unix socket path or Windows named pipe to listen on. */
   readonly socketPath: string;
   /** Optional token; when set, the client's `hello` must carry the same token. */
   readonly token?: string;

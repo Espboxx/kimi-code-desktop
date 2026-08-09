@@ -106,6 +106,7 @@ export class SessionEventWiring {
   private readonly agentSubscriptions = new Map<string, IDisposable>();
   /** Pending interactions already handed to the sink (the kernel re-fires the full pending set on every change). */
   private readonly bridgedInteractionIds = new Set<string>();
+  private initialPendingBridge?: ReturnType<typeof setTimeout>;
   private disposed = false;
 
   constructor(
@@ -115,7 +116,7 @@ export class SessionEventWiring {
     const interactions = session.accessor.get(ISessionInteractionService);
     this.disposables.push(
       interactions.onDidChangePending(() => {
-        this.bridgeNewPendingInteractions();
+        this.bridgePendingInteractions();
       }),
     );
     const lifecycle = session.accessor.get(IAgentLifecycleService);
@@ -130,11 +131,23 @@ export class SessionEventWiring {
     for (const agent of lifecycle.list()) {
       this.attachAgent(agent);
     }
+    // A materialized session may already contain parked interactions before
+    // this wiring is attached, so no onDidChangePending edge exists for that
+    // baseline. Defer its scan until the create/resume call returns, giving
+    // hosts a chance to install handlers synchronously on the Session first.
+    this.initialPendingBridge = setTimeout(() => {
+      this.initialPendingBridge = undefined;
+      this.bridgePendingInteractions();
+    }, 0);
   }
 
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    if (this.initialPendingBridge !== undefined) {
+      clearTimeout(this.initialPendingBridge);
+      this.initialPendingBridge = undefined;
+    }
     for (const disposable of this.disposables) {
       disposable.dispose();
     }
@@ -166,10 +179,11 @@ export class SessionEventWiring {
     subscription.dispose();
   }
 
-  private bridgeNewPendingInteractions(): void {
+  bridgePendingInteractions(kind?: Interaction['kind']): void {
     if (this.disposed) return;
     const pending = this.session.accessor.get(ISessionInteractionService).listPending();
     for (const interaction of pending) {
+      if (kind !== undefined && interaction.kind !== kind) continue;
       if (this.bridgedInteractionIds.has(interaction.id)) continue;
       this.bridgedInteractionIds.add(interaction.id);
       switch (interaction.kind) {

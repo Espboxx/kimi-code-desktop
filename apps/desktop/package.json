@@ -1,0 +1,45 @@
+{
+  "name": "@moonshot-ai/kimi-code-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kimi Code Desktop for Windows, macOS, and Linux",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist-electron/main.cjs",
+  "scripts": {
+    "build": "pnpm run build:renderer && pnpm run build:main",
+    "build:main": "tsdown --config tsdown.main.config.ts && tsdown --config tsdown.preload.config.ts",
+    "build:renderer": "vite build",
+    "dev:renderer": "vite",
+    "e2e": "node e2e/desktop.e2e.mjs",
+    "start": "electron .",
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.renderer.json --noEmit"
+  },
+  "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "@moonshot-ai/kimi-code-sdk": "workspace:^",
+    "@moonshot-ai/transcript": "workspace:^",
+    "@tanstack/react-virtual": "^3.13.24",
+    "chokidar": "^4.0.3",
+    "lucide-react": "^1.30.0",
+    "monaco-editor": "^0.56.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@vitejs/plugin-react": "^4.4.1",
+    "electron": "^43.3.0",
+    "playwright": "^1.55.0",
+    "tsdown": "0.22.0",
+    "vite": "^6.3.3",
+    "vitest": "4.1.4",
+    "ws": "^8.20.0"
+  }
+}

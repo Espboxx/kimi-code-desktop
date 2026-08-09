@@ -97,7 +97,11 @@ export interface SessionFacade {
   restore(opts?: SessionRestoreOptions): Promise<boolean>;
   /** Permanently delete the session and its persisted data; throws when missing. */
   delete(): Promise<void>;
-  fork(input?: { title?: string; metadata?: Record<string, unknown> }): Promise<SessionMeta>;
+  fork(input?: {
+    title?: string;
+    metadata?: Record<string, unknown>;
+    turnIndex?: number;
+  }): Promise<SessionMeta>;
   createChild(input?: { title?: string; metadata?: Record<string, unknown> }): Promise<SessionMeta>;
   readonly approvals: SessionApprovalsFacade;
   readonly questions: SessionQuestionsFacade;
@@ -121,14 +125,23 @@ export function createSessionFacade(call: ScopedCaller, sessionId: string): Sess
   };
   const spawn = async (
     method: 'fork' | 'createChild',
-    input: { title?: string; metadata?: Record<string, unknown> } = {},
+    input: {
+      title?: string;
+      metadata?: Record<string, unknown>;
+      turnIndex?: number;
+    } = {},
   ): Promise<SessionMeta> => {
     const workspaceId = await resolveWorkspaceId();
     if (workspaceId === undefined) {
       throw new RPCError(NOT_FOUND, `session not found: ${sessionId}`);
     }
     const handle = (await call({ workspaceId }, 'sessionLifecycleService', method, [
-      { sourceSessionId: sessionId, title: input.title, metadata: input.metadata },
+      {
+        sourceSessionId: sessionId,
+        title: input.title,
+        metadata: input.metadata,
+        turnIndex: method === 'fork' ? input.turnIndex : undefined,
+      },
     ])) as HandleWire;
     return call({ sessionId: handle.id }, 'sessionMetadata', 'read', []) as Promise<SessionMeta>;
   };

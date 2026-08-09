@@ -44,6 +44,7 @@ function getWorkspaceGlobs() {
  */
 function expandGlobsSafe(globs) {
   const dirs = [];
+  const normalizeWorkspacePath = (value) => value.replaceAll("\\", "/");
   for (const g of globs) {
     if (g.endsWith("/*")) {
       const base = g.slice(0, -2);
@@ -51,13 +52,13 @@ function expandGlobsSafe(globs) {
       if (!existsSync(basePath)) continue;
       for (const entry of readdirSync(basePath, { withFileTypes: true })) {
         if (entry.isDirectory()) {
-          dirs.push(join(base, entry.name));
+          dirs.push(normalizeWorkspacePath(join(base, entry.name)));
         }
       }
     } else {
       const p = join(ROOT, g);
       if (existsSync(p)) {
-        dirs.push(g);
+        dirs.push(normalizeWorkspacePath(g));
       }
     }
   }
