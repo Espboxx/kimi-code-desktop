@@ -660,7 +660,7 @@ describe('sessionExport', () => {
     await expect(readdir(tmp)).resolves.toEqual([]);
   });
 
-  it('does not follow an output symlink swapped during compression', async () => {
+  it.skipIf(process.platform === 'win32')('does not follow an output symlink swapped during compression', async () => {
     const tmp = await mkdtemp(join(tmpdir(), 'session-export-test-'));
     const statePath = join(tmp, 'state.json');
     const safeTarget = join(tmp, 'safe-output');

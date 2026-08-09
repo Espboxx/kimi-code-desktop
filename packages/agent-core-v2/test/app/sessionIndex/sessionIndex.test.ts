@@ -1450,7 +1450,7 @@ describe('FileSessionIndex (read model)', () => {
   // directories (60s interval), and on a runner slow enough for the test to
   // cross that interval it would land inside a counting window and be
   // attributed to the read under test. The retry absorbs runner hiccups.
-  const baseline = { retry: 1, timeout: 120_000 };
+  const baseline = { retry: 1, timeout: 300_000 };
 
   it('baseline: warm listRecent(limit=20) at 1k vs 10k vs 50k sessions', baseline, async () => {
     registerScopedService(

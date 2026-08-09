@@ -2703,7 +2703,7 @@ function hookPayloadLoggerCommand(logPath: string): string {
     '});',
   ].join('');
   writeFileSync(scriptPath, script);
-  return `${process.execPath} ${scriptPath}`;
+  return `"${process.execPath}" "${scriptPath}"`;
 }
 
 function readHookPayloads(logPath: string): Array<Record<string, unknown>> {

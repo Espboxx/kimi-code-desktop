@@ -1,4 +1,4 @@
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -20,7 +20,7 @@ import { IWorkspaceContext } from '#/workspace/workspaceContext/workspaceContext
 import { IWorkspaceDirs } from '#/workspace/workspaceDirs/workspaceDirs';
 import { IWorkspaceGitService } from '#/workspace/workspaceGit/workspaceGit';
 
-const WORK_DIR = '/repo';
+const WORK_DIR = resolve('/repo');
 
 function stubWorkspaceContext(): IWorkspaceContext {
   return {
@@ -141,7 +141,6 @@ function fakeFs(
     },
     readdir: async (p) => {
       if (!isDir(p)) throw enoent(p);
-      const prefix = `${p}/`;
       const children = new Map<string, HostDirEntry>();
       const addDir = (name: string): void => {
         if (!children.has(name)) {
@@ -159,11 +158,12 @@ function fakeFs(
         }
       };
       const visit = (key: string, kind: 'file' | 'dir' | 'symlink'): void => {
-        if (key === p || !key.startsWith(prefix)) return;
-        const rest = key.slice(prefix.length);
-        const first = rest.split('/')[0];
+        const rest = relative(p, key);
+        if (rest === '' || rest.startsWith('..') || isAbsolute(rest)) return;
+        const parts = rest.split(sep);
+        const first = parts[0];
         if (first === undefined || first.length === 0) return;
-        if (rest.includes('/')) addDir(first);
+        if (parts.length > 1) addDir(first);
         else if (kind === 'symlink') addSymlink(first);
         else if (kind === 'file') addFile(first);
         else addDir(first);
@@ -180,7 +180,7 @@ function fakeFs(
         let current = p;
         while (current !== WORK_DIR && current.length > WORK_DIR.length) {
           dirSet.add(current);
-          const next = current.slice(0, current.lastIndexOf('/'));
+          const next = dirname(current);
           if (next === current || next === '') break;
           current = next;
         }
@@ -192,7 +192,7 @@ function fakeFs(
         err.code = 'EEXIST';
         throw err;
       }
-      const parent = p.slice(0, p.lastIndexOf('/'));
+      const parent = dirname(p);
       if (parent !== '' && parent !== WORK_DIR && !isDir(parent)) {
         const err = new Error(`ENOENT: ${p}`) as NodeJS.ErrnoException;
         err.code = 'ENOENT';
@@ -207,7 +207,7 @@ function fakeFs(
         let longest: string | undefined;
         for (const linkPath of symlinkTargetMap.keys()) {
           if (
-            (current === linkPath || current.startsWith(`${linkPath}/`)) &&
+            (current === linkPath || current.startsWith(`${linkPath}${sep}`)) &&
             (longest === undefined || linkPath.length > longest.length)
           ) {
             longest = linkPath;
@@ -838,7 +838,7 @@ describe('WorkspaceFsService.resolvePath', () => {
     const res = await fs.resolvePath('src/a.ts');
     expect(res.relative).toBe('src/a.ts');
     expect(res.isDirectory).toBe(false);
-    expect(res.absolute).toContain('src/a.ts');
+    expect(res.absolute.replaceAll('\\', '/')).toContain('src/a.ts');
   });
 });
 

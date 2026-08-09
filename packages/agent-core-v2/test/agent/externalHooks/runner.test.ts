@@ -13,7 +13,7 @@ describe('runHook process runner', () => {
   it('returns allow when the hook exits 0 and captures stdout', async () => {
     const result = await runHook(
       hostProcess,
-      nodeCommand('process.stdout.write("ok\\n");'),
+      nodeCommand('process.stdout.write("ok");'),
       { tool_name: 'Bash' },
       { timeout: 5 },
     );

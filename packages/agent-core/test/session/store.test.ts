@@ -18,6 +18,10 @@ import {
 } from '../../src/session/store/session-index';
 import { encodeWorkDirKey, normalizeWorkDir, workspaceRootKey } from '../../src/session/store/workdir-key';
 
+function canonicalSessionPath(value: string): string {
+  return value.replaceAll('\\', '/');
+}
+
 async function makeWorkDir(label: string): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), `kimi-store-wd-${label}-`));
   // realpath so a symlinked tmpdir (e.g. /tmp -> /private/tmp on macOS) agrees
@@ -180,7 +184,7 @@ describe('SessionStore', () => {
       expect(stats).toEqual({ scanned: 1, added: 0, repaired: 1 });
 
       const index = await readSessionIndex(homeDir, store.sessionsDir);
-      expect(index.get(sessionId)?.sessionDir).toBe(realDir);
+      expect(index.get(sessionId)?.sessionDir).toBe(canonicalSessionPath(realDir));
     });
 
     it('repairs an index entry whose sessionDir is correct but workDir is stale', async () => {
@@ -270,7 +274,10 @@ describe('SessionStore', () => {
 
       await appendSessionIndexEntry(homeDir, entry);
 
-      expect((await readSessionIndex(homeDir, store.sessionsDir)).get(sessionId)).toEqual(entry);
+      expect((await readSessionIndex(homeDir, store.sessionsDir)).get(sessionId)).toEqual({
+        ...entry,
+        sessionDir: canonicalSessionPath(sessionDir),
+      });
     });
   });
 });
@@ -345,7 +352,9 @@ describe('SessionStore resolveWorkspaceId option', () => {
     const resolved = storeResolving({ [workDir]: registeredId });
     const summary = await resolved.create({ id: 'sess_resolved', workDir });
 
-    expect(summary.sessionDir).toBe(join(homeDir, 'sessions', registeredId, 'sess_resolved'));
+    expect(summary.sessionDir).toBe(
+      canonicalSessionPath(join(homeDir, 'sessions', registeredId, 'sess_resolved')),
+    );
     // Listing by workDir reads the same resolved bucket, so the session is
     // visible through the registered workspace's id.
     const listed = await resolved.list({ workDir });
@@ -365,7 +374,9 @@ describe('SessionStore resolveWorkspaceId option', () => {
 
     const forked = await resolved.fork({ sourceId: 'sess_src', targetId: 'sess_fork' });
 
-    expect(forked.sessionDir).toBe(join(homeDir, 'sessions', registeredId, 'sess_fork'));
+    expect(forked.sessionDir).toBe(
+      canonicalSessionPath(join(homeDir, 'sessions', registeredId, 'sess_fork')),
+    );
   });
 
   it('finds a session by (sessionId, workDir) inside the resolved bucket', async () => {
@@ -383,7 +394,7 @@ describe('SessionStore resolveWorkspaceId option', () => {
     const summary = await resolved.create({ id: 'sess_minted', workDir });
 
     expect(summary.sessionDir).toBe(
-      join(homeDir, 'sessions', encodeWorkDirKey(workDir), 'sess_minted'),
+      canonicalSessionPath(join(homeDir, 'sessions', encodeWorkDirKey(workDir), 'sess_minted')),
     );
   });
 
@@ -395,7 +406,7 @@ describe('SessionStore resolveWorkspaceId option', () => {
     const summary = await resolved.create({ id: 'sess_unsafe', workDir });
 
     expect(summary.sessionDir).toBe(
-      join(homeDir, 'sessions', encodeWorkDirKey(workDir), 'sess_unsafe'),
+      canonicalSessionPath(join(homeDir, 'sessions', encodeWorkDirKey(workDir), 'sess_unsafe')),
     );
   });
 
@@ -409,7 +420,7 @@ describe('SessionStore resolveWorkspaceId option', () => {
     const summary = await resolved.create({ id: 'sess_throw', workDir });
 
     expect(summary.sessionDir).toBe(
-      join(homeDir, 'sessions', encodeWorkDirKey(workDir), 'sess_throw'),
+      canonicalSessionPath(join(homeDir, 'sessions', encodeWorkDirKey(workDir), 'sess_throw')),
     );
   });
 

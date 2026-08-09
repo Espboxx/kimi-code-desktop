@@ -120,17 +120,10 @@ async function copyBackupAtomic(deps: BackupDeps, destDir: string): Promise<void
     for (const name of files) if (await copyIfExists(deps.dir(), name, tmp)) copied.push(name);
     // Fsync every copied file BEFORE the manifest: the manifest is the
     // commit marker, so a durable manifest must imply durable payloads.
-    for (const name of copied) {
-      const h = await fs.open(path.join(tmp, name), 'r');
-      try {
-        await h.sync();
-      } finally {
-        await h.close();
-      }
-    }
+    for (const name of copied) await fsyncBackupEntry(path.join(tmp, name), deps);
     const manifest = path.join(tmp, 'backup.manifest.json');
     await fs.writeFile(manifest, JSON.stringify({ version: 1, createdAt: Date.now(), files: copied }, null, 2), 'utf8');
-    const mh = await fs.open(manifest, 'r');
+    const mh = await fs.open(manifest, process.platform === 'win32' ? 'r+' : 'r');
     try {
       await mh.sync();
     } finally {
@@ -158,6 +151,24 @@ async function copyBackupAtomic(deps: BackupDeps, destDir: string): Promise<void
     // A successful rename already moved the temp dir away (this rm is a
     // no-op); a failed copy must not strand it (review #22: no half backup).
     await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function fsyncBackupEntry(target: string, deps: BackupDeps): Promise<void> {
+  const st = await fs.stat(target);
+  if (st.isDirectory()) {
+    for (const name of await fs.readdir(target)) {
+      await fsyncBackupEntry(path.join(target, name), deps);
+    }
+    await fsyncDir(target, { strict: true, stats: deps.stats });
+    return;
+  }
+
+  const handle = await fs.open(target, process.platform === 'win32' ? 'r+' : 'r');
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
   }
 }
 

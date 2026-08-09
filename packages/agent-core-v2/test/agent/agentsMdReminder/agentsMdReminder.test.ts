@@ -687,7 +687,7 @@ describe('agentsMdReminder probing boundaries', () => {
     }
   });
 
-  it('discovers a symlinked directory through the link at its lexical address', async () => {
+  it.skipIf(process.platform === 'win32')('discovers a symlinked directory through the link at its lexical address', async () => {
     const h = createHarness();
     const target = await mkdtemp(join(tmpdir(), 'kimi-reminder-target-'));
     const targetAgentsMd = await writeAgentsMd(target, 'target instructions');

@@ -1101,7 +1101,7 @@ describe("VS Code Kimi harness integration (shares one in-process SDK home)", ()
     await rig.runtime.detachView("view-1");
     const resumed = await openRuntimeSession(rig, sessionId);
 
-    expect(resumed.session.summary?.additionalDirs).toContain(additionalDir);
+    expect(resumed.session.summary?.additionalDirs).toContain(additionalDir.replaceAll("\\", "/"));
   });
 
   it("rejects an invalid plan subcommand without leaving the runtime busy", async () => {

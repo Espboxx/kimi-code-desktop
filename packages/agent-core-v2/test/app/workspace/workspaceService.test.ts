@@ -377,7 +377,7 @@ describe('WorkspaceService (file-backed)', () => {
     expect(await build().list()).toEqual([]);
   });
 
-  it('accepts createOrTouch when the root is given through a symlink', async () => {
+  it.skipIf(process.platform === 'win32')('accepts createOrTouch when the root is given through a symlink', async () => {
     const real = join(homeDir, 'real-root');
     await fsp.mkdir(real, { recursive: true });
     const link = join(homeDir, 'link-root');

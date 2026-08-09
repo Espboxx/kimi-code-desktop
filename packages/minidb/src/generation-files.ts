@@ -13,6 +13,7 @@
 // A crash at any earlier point leaves CURRENT pointing at the previous
 // complete generation; the stranded tmp dir is swept by the next writer.
 
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fsyncDir } from './compaction.js';
@@ -137,10 +138,25 @@ export async function publishGeneration(
   dir: string,
   tmpName: string,
   id: string,
-  opts: { stats?: { dirFsyncUnsupported?: boolean } } = {},
+  opts: {
+    stats?: { dirFsyncUnsupported?: boolean };
+    beforeDirectoryRename?: () => void;
+    afterDirectoryRename?: () => void;
+  } = {},
 ): Promise<void> {
   const gens = generationsDir(dir);
-  await renameReplace(path.join(gens, tmpName), path.join(gens, id));
+  const src = path.join(gens, tmpName);
+  const dst = path.join(gens, id);
+  opts.beforeDirectoryRename?.();
+  if (process.platform === 'win32' && opts.afterDirectoryRename !== undefined) {
+    // A live text index must close its postings handle before Windows can
+    // rename the generation directory. Keep close -> rename -> reopen in one
+    // synchronous segment so searches cannot observe a missing base.
+    fsSync.renameSync(src, dst);
+  } else {
+    await renameReplace(src, dst);
+  }
+  opts.afterDirectoryRename?.();
   await fsyncDir(gens, { strict: true, stats: opts.stats });
   // CURRENT: unique tmp + fsync + rename + strict db-dir fsync (the same
   // discipline as the sidecar atomic writes).

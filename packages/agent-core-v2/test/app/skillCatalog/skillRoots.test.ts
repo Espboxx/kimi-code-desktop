@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { configuredRoots, projectRoots, userRoots } from '#/app/skillCatalog/skillRoots';
 
+const normalizePath = (value: string): string => value.replaceAll('\\', '/');
+
 describe('skillRoots', () => {
   let root: string;
 
@@ -104,13 +106,13 @@ describe('skillRoots', () => {
       await mkdir(join(root, 'relative'), { recursive: true });
 
       const roots = await configuredRoots(['~', '~/notes', absDir, 'relative'], root, homeDir, 'extra');
-      const paths = roots.map((root) => root.path);
+      const paths = roots.map((root) => normalizePath(root.path));
 
       expect(roots.every((root) => root.source === 'extra')).toBe(true);
-      expect(paths).toContain(await realpath(homeDir));
-      expect(paths).toContain(await realpath(join(homeDir, 'notes')));
-      expect(paths).toContain(await realpath(absDir));
-      expect(paths).toContain(await realpath(join(root, 'relative')));
+      expect(paths).toContain(normalizePath(await realpath(homeDir)));
+      expect(paths).toContain(normalizePath(await realpath(join(homeDir, 'notes'))));
+      expect(paths).toContain(normalizePath(await realpath(absDir)));
+      expect(paths).toContain(normalizePath(await realpath(join(root, 'relative'))));
     });
   });
 });

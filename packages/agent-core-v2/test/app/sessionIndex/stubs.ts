@@ -20,6 +20,7 @@ export function stubSessionIndexMirror(): ISessionIndexMirror & {
     record: (summary) => {
       recorded.push(summary);
     },
+    beginProjection: () => ({ dispose: () => {} }),
     pending: () => recorded,
     evict: async () => {},
     drain: async () => {},

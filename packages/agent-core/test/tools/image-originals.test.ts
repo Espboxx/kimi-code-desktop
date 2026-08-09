@@ -108,7 +108,7 @@ describe('originalImageCacheDir', () => {
 describe('sessionMediaOriginalsDir', () => {
   it('nests the originals dir inside the session dir', () => {
     expect(sessionMediaOriginalsDir('/home/u/.kimi-code/sessions/ws/abc')).toBe(
-      '/home/u/.kimi-code/sessions/ws/abc/media-originals',
+      join('/home/u/.kimi-code/sessions/ws/abc', 'media-originals'),
     );
   });
 });

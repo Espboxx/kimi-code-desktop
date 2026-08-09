@@ -434,7 +434,7 @@ describe('FileMentionProvider', () => {
 
   it('filesystem fallback does not recurse into symlinked directories', async () => {
     writeFileSync(join(workDir, 'target.txt'), 'target');
-    symlinkSync('.', join(workDir, 'current'), 'dir');
+    symlinkSync(workDir, join(workDir, 'current'), process.platform === 'win32' ? 'junction' : 'dir');
     const provider = new FileMentionProvider([], workDir, NO_FD);
 
     const result = await provider.getSuggestions(['@target'], 0, 7, { signal: ctrl() });
@@ -486,7 +486,7 @@ describe('FileMentionProvider', () => {
       writeFileSync(join(workDir, 'normal.txt'), '');
 
       const provider = new FileMentionProvider([], workDir, NO_FD, [], () => 'bash');
-      const text = `cd ${workDir}/`;
+      const text = 'cd ./';
       const result = await provider.getSuggestions([text], 0, text.length, {
         signal: ctrl(),
         force: true,
@@ -505,7 +505,7 @@ describe('FileMentionProvider', () => {
       writeFileSync(join(workDir, '.dotfile'), '');
 
       const provider = new FileMentionProvider([], workDir, NO_FD, [], () => 'prompt');
-      const text = `cd ${workDir}/`;
+      const text = 'cd ./';
       const result = await provider.getSuggestions([text], 0, text.length, {
         signal: ctrl(),
         force: true,

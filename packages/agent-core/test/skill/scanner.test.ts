@@ -928,7 +928,7 @@ describe('resolveSkillRoots extra dirs', () => {
     const real = path.join(repoDir, 'real');
     await mkdir(real, { recursive: true });
     const link = path.join(repoDir, 'link');
-    await symlink(real, link);
+    await symlink(real, link, process.platform === 'win32' ? 'junction' : 'dir');
 
     const roots = await resolveSkillRoots({
       paths: { userHomeDir: homeDir, workDir },
@@ -959,7 +959,7 @@ describe('resolveSkillRoots extra dirs', () => {
     const real = path.join(repoDir, 'real');
     await mkdir(real, { recursive: true });
     const link = path.join(repoDir, 'link');
-    await symlink(real, link);
+    await symlink(real, link, process.platform === 'win32' ? 'junction' : 'dir');
 
     const roots = await resolveSkillRoots({
       paths: { userHomeDir: homeDir, workDir },
@@ -976,7 +976,7 @@ describe('resolveSkillRoots extra dirs', () => {
     const real = path.join(repoDir, 'real');
     await mkdir(real, { recursive: true });
     const link = path.join(repoDir, 'link');
-    await symlink(real, link);
+    await symlink(real, link, process.platform === 'win32' ? 'junction' : 'dir');
 
     const roots = await resolveSkillRoots({
       paths: { userHomeDir: homeDir, workDir },

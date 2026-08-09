@@ -244,9 +244,8 @@ export async function attachImageAsync(
  *  across the rename). A reopen failure degrades reads to delta-only until
  *  the next build, exactly like commitBuild's reopen failure. */
 export function repointPostings(s: Pick<TextIndexImageState, 'pf'>, newPath: string): void {
-  if (!s.pf) return;
   if (process.platform === 'win32') {
-    s.pf.close();
+    s.pf?.close();
     s.pf = null;
     try {
       s.pf = PostingsFile.open(newPath);
@@ -255,5 +254,6 @@ export function repointPostings(s: Pick<TextIndexImageState, 'pf'>, newPath: str
     }
     return;
   }
+  if (!s.pf) return;
   s.pf.path = newPath;
 }

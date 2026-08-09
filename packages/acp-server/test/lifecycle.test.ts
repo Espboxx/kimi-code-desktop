@@ -73,7 +73,7 @@ describe('acp-server session lifecycle', () => {
       client = undefined;
     }
     if (homeDir !== undefined) {
-      await rm(homeDir, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
       homeDir = undefined;
     }
   });
@@ -360,7 +360,7 @@ describe('acp-server session lifecycle', () => {
         .handlerFor({ root: homeDir! });
       const dirs = handler.accessor.get(IWorkspaceDirs);
       await dirs.ready;
-      expect(dirs.additionalDirs).toContain(extraDir);
+      expect(dirs.additionalDirs).toContain(extraDir.replaceAll('\\', '/'));
     },
     30_000,
   );

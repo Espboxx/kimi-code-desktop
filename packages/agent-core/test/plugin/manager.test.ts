@@ -150,7 +150,7 @@ describe('PluginManager', () => {
     const home = await makeKimiHome();
     const pluginRoot = await makePlugin('demo');
     const link = path.join(await mkdtemp(path.join(tmpdir(), 'plugin-link-')), 'demo-link');
-    await symlink(pluginRoot, link);
+    await symlink(pluginRoot, link, process.platform === 'win32' ? 'junction' : 'dir');
     const manager = new PluginManager({ kimiHomeDir: home });
     await manager.load();
 

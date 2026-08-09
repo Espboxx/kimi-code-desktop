@@ -398,7 +398,9 @@ describe('workspace add-dir (handler chain)', () => {
   }
 
   function dirsOf(handle: ISessionScopeHandle): readonly string[] {
-    return handle.accessor.get(ISessionWorkspaceContext).additionalDirs;
+    return handle.accessor
+      .get(ISessionWorkspaceContext)
+      .additionalDirs.map((dir) => dir.replaceAll('\\', '/'));
   }
 
   it('persists addDir to local.toml and every session of the workspace sees the dir', async () => {

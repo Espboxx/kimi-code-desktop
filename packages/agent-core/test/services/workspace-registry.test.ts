@@ -179,7 +179,7 @@ describe('WorkspaceRegistryService', () => {
     const linkParent = await mkdtemp(join(tmpdir(), 'kimi-ws-link-'));
     tempRoots.push(linkParent);
     const linkDir = join(linkParent, 'link');
-    await symlink(realDir, linkDir);
+    await symlink(realDir, linkDir, process.platform === 'win32' ? 'junction' : 'dir');
 
     // Seed a session bucket keyed by the SYMLINK path (resolve, not realpath),
     // matching how SessionStore keys cwd-only sessions created from a symlinked cwd.

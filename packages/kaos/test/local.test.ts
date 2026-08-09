@@ -557,7 +557,7 @@ describe('LocalKaos', () => {
       const ring = join(tempDir, 'ring');
       await mkdir(ring);
       await writeFile(join(ring, 'leaf.txt'), 'real');
-      await symlink(ring, join(ring, 'self'));
+      await symlink(ring, join(ring, 'self'), process.platform === 'win32' ? 'junction' : 'dir');
 
       const matches: string[] = [];
       for await (const m of kaos.glob(tempDir, '**/*.txt')) {
@@ -581,8 +581,8 @@ describe('LocalKaos', () => {
       await mkdir(b);
       await writeFile(join(a, 'aleaf.txt'), 'a');
       await writeFile(join(b, 'bleaf.txt'), 'b');
-      await symlink(b, join(a, 'to_b'));
-      await symlink(a, join(b, 'to_a'));
+      await symlink(b, join(a, 'to_b'), process.platform === 'win32' ? 'junction' : 'dir');
+      await symlink(a, join(b, 'to_a'), process.platform === 'win32' ? 'junction' : 'dir');
 
       const matches: string[] = [];
       for await (const m of kaos.glob(tempDir, '**/*.txt')) {
@@ -611,7 +611,11 @@ describe('LocalKaos', () => {
       await mkdir(root);
       await mkdir(target);
       await writeFile(join(target, 'reachable.txt'), 'hi');
-      await symlink(target, join(root, 'shortcut'));
+      await symlink(
+        target,
+        join(root, 'shortcut'),
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
 
       const matches: string[] = [];
       for await (const m of kaos.glob(root, '**/*.txt')) {
@@ -628,7 +632,11 @@ describe('LocalKaos', () => {
       await mkdir(root);
       await writeFile(join(root, 'real.txt'), 'r');
       // Points at a path that doesn't exist.
-      await symlink(join(tempDir, 'does-not-exist'), join(root, 'dangling'));
+      await symlink(
+        join(tempDir, 'does-not-exist'),
+        join(root, 'dangling'),
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
 
       const matches: string[] = [];
       // Pattern must not match "dangling" (no .txt); we want the real
@@ -665,8 +673,8 @@ describe('LocalKaos', () => {
       await mkdir(root);
       await mkdir(target);
       await writeFile(join(target, 'shared.txt'), 'x');
-      await symlink(target, join(root, 'a'));
-      await symlink(target, join(root, 'b'));
+      await symlink(target, join(root, 'a'), process.platform === 'win32' ? 'junction' : 'dir');
+      await symlink(target, join(root, 'b'), process.platform === 'win32' ? 'junction' : 'dir');
 
       const matches: string[] = [];
       for await (const m of kaos.glob(root, '**/*.txt')) {
@@ -780,7 +788,7 @@ describe('LocalKaos', () => {
 
   describe('exec timeout', () => {
     it('dispose destroys process stdio without killing the process', async () => {
-      const proc = await kaos.exec(...nodeArgs('setTimeout(() => {}, 10000);'));
+      const proc = await kaos.exec(...nodeArgs('setInterval(() => {}, 60000);'));
 
       await proc.dispose();
       await proc.dispose();
@@ -791,10 +799,10 @@ describe('LocalKaos', () => {
 
       await proc.kill('SIGKILL');
       await proc.wait();
-    });
+    }, 30_000);
 
     it('should allow killing a long-running process', async () => {
-      const code = `setTimeout(() => {}, 10000);`;
+      const code = `setInterval(() => {}, 60000);`;
       const proc = await kaos.exec(...nodeArgs(code));
 
       expect(proc.pid).toBeGreaterThan(0);
@@ -816,7 +824,7 @@ describe('LocalKaos', () => {
       const exitCode = await proc.wait();
       // On Unix, killed processes typically have negative exit or 137
       expect(exitCode).not.toBe(0);
-    });
+    }, 30_000);
   });
 
   describe('withEnv', () => {

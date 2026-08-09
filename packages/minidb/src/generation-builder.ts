@@ -774,32 +774,31 @@ export class GenerationBuilder<V> {
       // section (stage 6): a shutdown waits for it instead of cancelling a
       // half-published generation. Everything before this line is discardable.
       ctx.markPublishing();
-      // Windows cannot rename a directory with open files inside: the
-      // committed bases' live handles sit in the tmp dir, so close them first
-      // (repointPostings reopens at the final path below). POSIX keeps the
-      // handles valid across the rename — no close needed there.
-      if (process.platform === 'win32') {
+      const closePublishedTextBases = (): void => {
         for (const [, tb] of textBuilds) tb.ti.close();
         for (const [, { ti }] of workerTargets) ti.close();
-      }
-      await publishGeneration(this.deps.dir(), tmpName, id, { stats: this.deps.stats });
-      // Repoint EVERY live base this build (re)published into the CURRENT
-      // generation: staged commits still read the (now renamed) tmp path, and
-      // clean re-publishes still read their OLD location (the root file — or
-      // a previous generation's — both about to be reclaimed below). Without
-      // this the next clean fast path links from a deleted path and fails
-      // ENOENT forever. The invariant after publish: every live text base
-      // reads from inside the CURRENT generation. POSIX: same inode (the
-      // hard link), just update the path string; win32: close + reopen there.
-      for (const [name, tb] of textBuilds) {
-        tb.ti.repointPostings(path.join(generationDir(this.deps.dir(), id), textPostingsFile(name)));
-      }
-      for (const [name, { ti }] of workerTargets) {
-        ti.repointPostings(path.join(generationDir(this.deps.dir(), id), textPostingsFile(name)));
-      }
-      for (const [name, ti] of textClean) {
-        if (cleanPostings.has(name)) ti.repointPostings(path.join(generationDir(this.deps.dir(), id), textPostingsFile(name)));
-      }
+      };
+      const repointPublishedTextBases = (): void => {
+        // Repoint EVERY live base this build (re)published into the CURRENT
+        // generation: staged commits still read the (now renamed) tmp path,
+        // and clean re-publishes still read their old location.
+        for (const [name, tb] of textBuilds) {
+          tb.ti.repointPostings(path.join(generationDir(this.deps.dir(), id), textPostingsFile(name)));
+        }
+        for (const [name, { ti }] of workerTargets) {
+          ti.repointPostings(path.join(generationDir(this.deps.dir(), id), textPostingsFile(name)));
+        }
+        for (const [name, ti] of textClean) {
+          if (cleanPostings.has(name)) ti.repointPostings(path.join(generationDir(this.deps.dir(), id), textPostingsFile(name)));
+        }
+      };
+      const windowsPublish = process.platform === 'win32';
+      await publishGeneration(this.deps.dir(), tmpName, id, {
+        stats: this.deps.stats,
+        beforeDirectoryRename: windowsPublish ? closePublishedTextBases : undefined,
+        afterDirectoryRename: windowsPublish ? repointPublishedTextBases : undefined,
+      });
+      if (!windowsPublish) repointPublishedTextBases();
 
       this.generationInfo = { id, createdAt: manifest.createdAt, walCheckpoint: sealedOffset, records: imageRecords.size };
       this.deps.stats.generationBuilds++;

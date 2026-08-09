@@ -127,7 +127,7 @@ describe('e2e: process lifecycle', () => {
 
       // SIGKILL cannot be caught - process is terminated
       expect(exitCode).not.toBe(0);
-    });
+    }, 30_000);
 
     it('multiple wait() calls return same exit code', async () => {
       const proc = await kaos.exec('node', '-e', 'process.exit(7)');

@@ -92,7 +92,7 @@ describe('e2e: exec edge cases', () => {
 
       // Killing an already-exited process must not throw.
       await expect(proc.kill('SIGTERM')).resolves.toBeUndefined();
-    });
+    }, 30_000);
   });
 
   describe('stdin lifecycle', () => {

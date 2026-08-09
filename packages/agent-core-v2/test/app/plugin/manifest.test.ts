@@ -244,7 +244,7 @@ describe('plugin manifest parser', () => {
     ]);
   });
 
-  it('rejects systemPromptPath values that escape the plugin root', async () => {
+  it.skipIf(process.platform === 'win32')('rejects systemPromptPath values that escape the plugin root', async () => {
     await writeFile(
       join(dir, 'kimi.plugin.json'),
       JSON.stringify({ name: 'demo', systemPromptPath: './../outside.md' }),

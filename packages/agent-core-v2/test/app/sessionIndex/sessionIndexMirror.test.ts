@@ -188,6 +188,21 @@ describe('SessionIndexMirror', () => {
     expect(mirror.pending().map((s) => s.id)).toEqual(['a']);
   });
 
+  it('keeps entries queued until an in-flight projection publishes', async () => {
+    build();
+    await publishGeneration();
+    const lease = mirror.beginProjection();
+
+    mirror.record(summary('a'));
+    await mirror.drain();
+    expect(mirror.pending().map((s) => s.id)).toEqual(['a']);
+
+    lease.dispose();
+    await mirror.drain();
+    expect(mirror.pending()).toEqual([]);
+    expect(await queryStore.get(sessionCollection(GENERATION), 'a')).toMatchObject({ id: 'a' });
+  });
+
   it('retries a failed flush instead of dropping entries', async () => {
     build();
     await publishGeneration();

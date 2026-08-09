@@ -19,7 +19,7 @@ afterEach(async () => {
 });
 
 describe('HostFileSystem stat / lstat', () => {
-  it('stat follows a symlink to a regular file while lstat stats the link', async () => {
+  it.skipIf(process.platform === 'win32')('stat follows a symlink to a regular file while lstat stats the link', async () => {
     const target = join(dir, 'target.txt');
     await writeFile(target, 'hello', 'utf-8');
     const link = join(dir, 'link.txt');
@@ -34,7 +34,7 @@ describe('HostFileSystem stat / lstat', () => {
     expect(lst.isFile).toBe(false);
   });
 
-  it('stat follows a symlink to a directory', async () => {
+  it.skipIf(process.platform === 'win32')('stat follows a symlink to a directory', async () => {
     const target = join(dir, 'subdir');
     await mkdir(target);
     const link = join(dir, 'dirlink');
@@ -44,7 +44,7 @@ describe('HostFileSystem stat / lstat', () => {
     expect((await fs.lstat(link)).isDirectory).toBe(false);
   });
 
-  it('stat rejects a dangling symlink while lstat still stats the link', async () => {
+  it.skipIf(process.platform === 'win32')('stat rejects a dangling symlink while lstat still stats the link', async () => {
     const link = join(dir, 'dangling');
     await symlink(join(dir, 'missing'), link);
 

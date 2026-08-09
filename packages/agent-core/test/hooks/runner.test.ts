@@ -78,9 +78,28 @@ describe('runHook process runner', () => {
 
   it('returns allow with timedOut=true when the command exceeds the timeout', async () => {
     const runHook = await importRunHook();
-    const result = await runHook('sleep 10', { tool_name: 'Shell' }, { timeout: 0.05 });
+    const result = await runHook(
+      'node -e "process.stdout.write(String(process.pid));setInterval(() => {}, 60000)"',
+      { tool_name: 'Shell' },
+      { timeout: process.platform === 'win32' ? 2 : 0.05 },
+    );
     expect(result.action).toBe('allow');
     expect(result.timedOut).toBe(true);
+    if (process.platform === 'win32') {
+      const pid = Number(result.stdout);
+      expect(pid).toBeGreaterThan(0);
+      let running = true;
+      const deadline = Date.now() + 2_000;
+      while (running && Date.now() < deadline) {
+        try {
+          process.kill(pid, 0);
+        } catch (error) {
+          running = (error as NodeJS.ErrnoException).code !== 'ESRCH';
+        }
+        if (running) await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(running).toBe(false);
+    }
   });
 
   it('parses stdout JSON permissionDecision=deny into a block result with the supplied reason', async () => {

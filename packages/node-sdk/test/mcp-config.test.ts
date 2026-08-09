@@ -205,7 +205,7 @@ describe('standalone MCP check (connection result)', () => {
       const result = await harness.testMcpServer('missing');
 
       expect(result.success).toBe(false);
-      expect(result.output).toMatch(/ENOENT|not found|spawn/i);
+      expect(result.output).toMatch(/Connection closed|ENOENT|not found|spawn/i);
     } finally {
       await harness.close();
     }

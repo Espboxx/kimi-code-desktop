@@ -217,6 +217,7 @@ export class FileSessionIndex extends Disposable implements ISessionIndex {
   }
 
   private async runProjection(): Promise<void> {
+    const mirrorLease = this.mirror.beginProjection();
     try {
       const manifest = await this.queryStore.getCheckpoint(SESSION_INDEX_MANIFEST);
       const next = (manifest?.seq ?? 0) + 1;
@@ -240,6 +241,8 @@ export class FileSessionIndex extends Disposable implements ISessionIndex {
       } else {
         this.markDegraded('projection failed', error);
       }
+    } finally {
+      mirrorLease.dispose();
     }
   }
 
@@ -476,30 +479,18 @@ export class FileSessionIndex extends Disposable implements ISessionIndex {
     generation: number,
     query: SessionCountQuery,
   ): Promise<number> {
-    const counters = sessionCountersCollection(generation);
     const restricted = query.workspaceIds;
+    const pending = this.mirror
+      .pending()
+      .filter((summary) => restricted === undefined || restricted.includes(summary.workspaceId));
+    if (pending.length > 0) return this.countLegacy(query);
+
+    const counters = sessionCountersCollection(generation);
     const workspaceIds = restricted ?? (await this.queryStore.listKeys(counters));
     const counts = await this.queryStore.getMany<SessionWorkspaceCounts>(counters, workspaceIds);
     let total = 0;
     for (const entry of counts.values()) {
       total += query.includeArchived === true ? entry.active + entry.archived : entry.active;
-    }
-    // Fold in the mirror queue (read-your-writes): queued creations count
-    // immediately, queued archive flips re-bucket, and queued updates to an
-    // already-counted session are a no-op.
-    const pending = this.mirror
-      .pending()
-      .filter((summary) => restricted === undefined || restricted.includes(summary.workspaceId));
-    if (pending.length === 0) return total;
-    const stored = await this.queryStore.getMany<SessionSummary>(
-      sessionCollection(generation),
-      pending.map((summary) => summary.id),
-    );
-    const weight = (archived: boolean): number =>
-      query.includeArchived === true || !archived ? 1 : 0;
-    for (const summary of pending) {
-      const old = stored.get(summary.id);
-      total += weight(summary.archived) - (old === undefined ? 0 : weight(old.archived));
     }
     return total;
   }

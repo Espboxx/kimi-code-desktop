@@ -6,7 +6,6 @@
  * Run: pnpm --filter @moonshot-ai/agent-core-v2 exec vitest run test/app/plugin/manager.test.ts
  */
 
-import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -15,6 +14,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PluginManager } from '#/app/plugin/manager';
+import { zipDirectory } from './zip-fixture';
 
 describe('PluginManager', () => {
   let home: string;
@@ -102,13 +102,13 @@ describe('PluginManager', () => {
 
   it('installs a zip-url plugin', async () => {
     const sourceRoot = await mkdtemp(join(tmpdir(), 'plugin-zip-source-'));
-    const zipPath = join(tmpdir(), `plugin-${Date.now()}.zip`);
+    let zip: Buffer<ArrayBufferLike> = Buffer.alloc(0);
     const server = createServer((_req, res) => {
-      void readFile(zipPath).then((data) => res.end(data));
+      res.end(zip);
     });
     try {
       await writeFile(join(sourceRoot, 'kimi.plugin.json'), JSON.stringify({ name: 'zip-plugin' }), 'utf8');
-      execFileSync('zip', ['-qr', zipPath, '.'], { cwd: sourceRoot });
+      zip = await zipDirectory(sourceRoot);
       await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
       const address = server.address();
       if (address === null || typeof address === 'string') throw new Error('bad server address');
@@ -122,17 +122,14 @@ describe('PluginManager', () => {
     } finally {
       await new Promise<void>((resolve, reject) => server.close((err) => (err === undefined ? resolve() : reject(err))));
       await rm(sourceRoot, { recursive: true, force: true });
-      await rm(zipPath, { force: true });
     }
   });
 
   it('installs a github plugin through codeload', async () => {
     const sourceRoot = await mkdtemp(join(tmpdir(), 'plugin-github-source-'));
-    const zipPath = join(tmpdir(), `plugin-github-${Date.now()}.zip`);
     try {
       await writeFile(join(sourceRoot, 'kimi.plugin.json'), JSON.stringify({ name: 'github-plugin' }), 'utf8');
-      execFileSync('zip', ['-qr', zipPath, '.'], { cwd: sourceRoot });
-      const zip = await readFile(zipPath);
+      const zip = await zipDirectory(sourceRoot);
       const fetchMock = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
         const url =
           typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -168,7 +165,6 @@ describe('PluginManager', () => {
       expect(manager.get('github-plugin')?.manifest?.name).toBe('github-plugin');
     } finally {
       await rm(sourceRoot, { recursive: true, force: true });
-      await rm(zipPath, { force: true });
     }
   });
 

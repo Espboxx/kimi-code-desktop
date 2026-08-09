@@ -26,7 +26,7 @@
  * Bound at App scope.
  */
 
-import { Disposable, toDisposable } from '#/_base/di/lifecycle';
+import { Disposable, toDisposable, type IDisposable } from '#/_base/di/lifecycle';
 import { LifecycleScope } from '#/app/scopes';
 import { ScopeActivation, registerScopedService } from '#/_base/di/scope';
 import { ILogService } from '#/_base/log/log';
@@ -72,6 +72,7 @@ export class SessionIndexMirror extends Disposable implements ISessionIndexMirro
   private consecutiveFailures = 0;
   private disposed = false;
   private overflowLogged = false;
+  private projectionHolds = 0;
 
   constructor(
     @IQueryStore private readonly queryStore: IQueryStore,
@@ -102,11 +103,26 @@ export class SessionIndexMirror extends Disposable implements ISessionIndexMirro
     }
     this.overflowLogged = false;
     this.pendingMap.set(summary.id, summary);
+    if (this.projectionHolds > 0) return;
     if (this.pendingMap.size >= FLUSH_BATCH_SIZE) {
       void this.flush();
     } else if (!this.timer.isSet()) {
       this.timer.cancelAndSet(() => void this.flush(), FLUSH_INTERVAL_MS);
     }
+  }
+
+  beginProjection(): IDisposable {
+    this.projectionHolds += 1;
+    this.timer.cancel();
+    let released = false;
+    return toDisposable(() => {
+      if (released) return;
+      released = true;
+      this.projectionHolds -= 1;
+      if (this.projectionHolds === 0 && this.pendingMap.size > 0 && !this.disposed) {
+        void this.flush();
+      }
+    });
   }
 
   pending(): readonly SessionSummary[] {
@@ -137,9 +153,14 @@ export class SessionIndexMirror extends Disposable implements ISessionIndexMirro
   }
 
   private flush(): Promise<void> {
+    if (this.projectionHolds > 0) return Promise.resolve();
     this.flushing ??= this.flushChunk().finally(() => {
       this.flushing = undefined;
-      if (this.pendingMap.size > 0 && this.consecutiveFailures < MAX_CONSECUTIVE_FAILURES) {
+      if (
+        this.projectionHolds === 0 &&
+        this.pendingMap.size > 0 &&
+        this.consecutiveFailures < MAX_CONSECUTIVE_FAILURES
+      ) {
         this.timer.cancelAndSet(() => void this.flush(), FLUSH_INTERVAL_MS);
       }
     });

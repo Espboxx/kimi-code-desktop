@@ -376,7 +376,9 @@ function swapWalInodeSync(real: FsSyncModule, walPath: string): void {
   real.renameSync(`${walPath}.swap`, walPath);
 }
 
-test('generation pairing: a rotation-like WAL inode swap at the post-scan forensics is retried to a consistent read-only open', async () => {
+test.skipIf(process.platform === 'win32')(
+  'generation pairing: a rotation-like WAL inode swap at the post-scan forensics is retried to a consistent read-only open',
+  async () => {
   const dir = await tmpDir();
   try {
     const writer = await MiniDb.open<string>({ dir, valueCodec: 'string', fsyncPolicy: 'no', autoCompact: false, indexGenerations: false });
@@ -408,7 +410,8 @@ test('generation pairing: a rotation-like WAL inode swap at the post-scan forens
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
-});
+  },
+);
 
 test('generation pairing: churn beyond the retry budget throws RECOVERY_GENERATION_CHURN and leaves no partial state', async () => {
   const dir = await tmpDir();

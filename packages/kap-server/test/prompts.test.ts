@@ -328,7 +328,7 @@ describe('server-v2 /api/v1 prompts', () => {
     expect(caption.text).toContain('3600x1800');
     const pathMatch = /saved at "([^"]+)"/.exec(caption.text);
     expect(pathMatch).not.toBeNull();
-    expect(pathMatch![1]!).toContain('/media-originals/');
+    expect(pathMatch![1]!.replaceAll('\\', '/')).toContain('/media-originals/');
     expect(await readFile(pathMatch![1]!)).toEqual(bigPng);
 
     const image = content[1];
@@ -367,7 +367,7 @@ describe('server-v2 /api/v1 prompts', () => {
     if (caption?.type !== 'text') throw new Error('expected compression caption');
     const pathMatch = /saved at "([^"]+)"/.exec(caption.text);
     expect(pathMatch).not.toBeNull();
-    expect(pathMatch![1]!).toContain('/media-originals/');
+    expect(pathMatch![1]!.replaceAll('\\', '/')).toContain('/media-originals/');
     expect((await realpath(pathMatch![1]!)).startsWith(await realpath(home as string))).toBe(true);
     expect(await readFile(pathMatch![1]!)).toEqual(bigPng);
 
@@ -512,7 +512,7 @@ describe('server-v2 /api/v1 prompts', () => {
     expect(notice?.text).toContain('application/pdf');
     expect(notice?.text).toContain(`${pdfBytes.length} bytes`);
     const attachedPath = attachedPathFrom(notice?.text ?? '');
-    expect(attachedPath).toContain('/attachments/');
+    expect(attachedPath.replaceAll('\\', '/')).toContain('/attachments/');
     expect(attachedPath.endsWith(`${uploaded.id}-report.pdf`)).toBe(true);
     expect((await realpath(attachedPath)).startsWith(await realpath(home as string))).toBe(true);
     expect(await readFile(attachedPath)).toEqual(pdfBytes);
@@ -540,7 +540,7 @@ describe('server-v2 /api/v1 prompts', () => {
     expect(notice?.text).toContain('"vector.svg"');
     expect(notice?.text).toContain('image/svg+xml');
     const attachedPath = attachedPathFrom(notice?.text ?? '');
-    expect(attachedPath).toContain('/attachments/');
+    expect(attachedPath.replaceAll('\\', '/')).toContain('/attachments/');
     expect(attachedPath.endsWith(`${uploaded.id}-vector.svg`)).toBe(true);
     expect(await readFile(attachedPath)).toEqual(svgBytes);
   });
@@ -574,7 +574,7 @@ describe('server-v2 /api/v1 prompts', () => {
     expect(notice?.text).toContain('"image.avif"');
     expect(notice?.text).toContain('image/avif');
     const attachedPath = attachedPathFrom(notice?.text ?? '');
-    expect(attachedPath).toContain('/attachments/');
+    expect(attachedPath.replaceAll('\\', '/')).toContain('/attachments/');
     expect(attachedPath.endsWith('-image.avif')).toBe(true);
     expect(await readFile(attachedPath)).toEqual(data);
   });
@@ -597,7 +597,7 @@ describe('server-v2 /api/v1 prompts', () => {
     const attachedPath = attachedPathFrom(content[0]?.text ?? '');
     // The materialized file must stay inside the session's attachments dir —
     // the `../` segments in the original name can never escape it.
-    expect(dirname(attachedPath).endsWith('/attachments')).toBe(true);
+    expect(dirname(attachedPath).replaceAll('\\', '/').endsWith('/attachments')).toBe(true);
     expect((await realpath(attachedPath)).startsWith(await realpath(home as string))).toBe(true);
     expect(await readFile(attachedPath)).toEqual(scriptBytes);
   });

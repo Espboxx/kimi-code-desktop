@@ -73,10 +73,10 @@ describe('HostProcessService', () => {
 
   it('terminates a running process with kill()', async () => {
     const svc = ix.get(IHostProcessService);
-    const proc = await svc.spawn('node', ['-e', 'setTimeout(() => {}, 30000)']);
+    const proc = await svc.spawn('node', ['-e', 'setInterval(() => {}, 60000)']);
     expect(proc.pid).toBeGreaterThan(0);
     await proc.kill('SIGTERM');
     const code = await proc.wait();
     expect(code).not.toBe(0);
-  });
+  }, 60_000);
 });

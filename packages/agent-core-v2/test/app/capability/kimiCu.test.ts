@@ -1080,7 +1080,7 @@ describe('kimi-cu entry', () => {
     expect(detected.steps.find((s) => s.id === 'app')?.state).toBe('missing');
   });
 
-  it('reads a non-executable leftover app binary as a broken install', async () => {
+  it.skipIf(process.platform === 'win32')('reads a non-executable leftover app binary as a broken install', async () => {
     const applicationsDir = await fakeAppBundle();
     // An interrupted ditto leaves the binary present but not executable.
     await chmod(path.join(applicationsDir, 'KimiCU.app', 'Contents', 'MacOS', 'kimi-cu'), 0o644);

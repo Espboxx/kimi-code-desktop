@@ -80,6 +80,7 @@ function stubSessionChain(ix: TestInstantiationService, session: ISessionScopeHa
   ix.stub(ISessionIndexMirror, {
     _serviceBrand: undefined,
     record: () => {},
+    beginProjection: () => ({ dispose: () => {} }),
     pending: () => [],
     evict: () => Promise.resolve(),
     drain: () => Promise.resolve(),

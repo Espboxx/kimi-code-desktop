@@ -46,6 +46,9 @@ export function runStatusLineCommand(
       child = spawn(isWin ? (process.env['ComSpec'] ?? 'cmd.exe') : 'sh', isWin ? ['/d', '/s', '/c', command] : ['-c', command], {
         stdio: ['pipe', 'pipe', 'ignore'],
         env: { ...process.env, KIMI_CODE_STATUS_LINE: '1' },
+        // The final cmd.exe argument is already a complete command line.
+        // Let cmd parse its quotes instead of escaping them a second time.
+        windowsVerbatimArguments: isWin,
         // Own process group on POSIX so a timeout can drop the whole tree,
         // not just the shell wrapper.
         detached: !isWin,
@@ -130,6 +133,7 @@ export class StatusLineCommandRunner {
   constructor(
     readonly command: string,
     private readonly onUpdate: () => void,
+    private readonly execute: typeof runStatusLineCommand = runStatusLineCommand,
   ) {}
 
   current(): string | null {
@@ -171,7 +175,7 @@ export class StatusLineCommandRunner {
   private startRun(payload: StatusLinePayload, now: number): void {
     this.inFlight = true;
     this.lastRunAt = now;
-    void runStatusLineCommand(this.command, payload).then((line) => {
+    void this.execute(this.command, payload).then((line) => {
       this.inFlight = false;
       if (line !== null) {
         this.cached = line;

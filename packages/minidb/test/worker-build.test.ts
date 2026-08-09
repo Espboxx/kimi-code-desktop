@@ -448,7 +448,9 @@ describe('build core (segmented external merge)', () => {
     await seedTextDb(db, 100);
     const tmp = await openTmp('anchor-tmp');
     const spec = await specForLiveDb(db, dir, tmp);
-    spec.walIno += 1;
+    // Windows inode numbers exceed Number.MAX_SAFE_INTEGER, so adding one can
+    // round back to the same value. Use an unmistakably invalid anchor.
+    spec.walIno = -1;
     await expect(buildTextArtifacts(spec)).rejects.toThrow('anchor mismatch');
     await db.close();
   });

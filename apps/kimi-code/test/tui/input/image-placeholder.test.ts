@@ -358,9 +358,9 @@ describe('rewriteMediaPlaceholders', () => {
     const srcDir = makeTempDir();
     try {
       // The video label keeps the original filename, and sanitizeVideoLabel
-      // allows `<>&"`; skill args are XML-escaped, so the plain reference
+      // allows `&`; skill args are XML-escaped, so the plain reference
       // would point at a path that no longer matches the file on disk.
-      const srcVideo = join(srcDir, 'clip<1>&.mov');
+      const srcVideo = join(srcDir, 'clip&1.mov');
       writeFileSync(srcVideo, 'video-bytes');
       const store = new ImageAttachmentStore();
       const att = store.addVideo('video/quicktime', srcVideo);

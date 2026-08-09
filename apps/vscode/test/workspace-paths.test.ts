@@ -222,7 +222,11 @@ describe("Webview workspace paths (selected-directory containment)", () => {
     const outside = join(root, "outside");
     await Promise.all([mkdir(workDir), mkdir(outside)]);
     await writeFile(join(outside, "secret.txt"), "secret");
-    await symlink(outside, join(workDir, "outside-link"));
+    await symlink(
+      outside,
+      join(workDir, "outside-link"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
 
     const files = await getProjectFiles(workDir, { directory: "." });
 
@@ -266,7 +270,9 @@ describe("Webview workspace paths (selected-directory containment)", () => {
     expect(files).toEqual([{ path: "remote.ts", name: "remote.ts", isDirectory: false }]);
   });
 
-  it("refuses to open a symlink whose target lies outside the selected working directory", async () => {
+  it.skipIf(process.platform === "win32")(
+    "refuses to open a symlink whose target lies outside the selected working directory",
+    async () => {
     const workDir = join(root, "project");
     const outside = join(root, "outside.txt");
     await mkdir(workDir);
@@ -278,9 +284,12 @@ describe("Webview workspace paths (selected-directory containment)", () => {
 
     expect(result).toEqual({ ok: false });
     expect(vscodeHost.executeCommand).not.toHaveBeenCalled();
-  });
+    },
+  );
 
-  it("omits an outside symlink when an SDK Write event requests baseline capture", async () => {
+  it.skipIf(process.platform === "win32")(
+    "omits an outside symlink when an SDK Write event requests baseline capture",
+    async () => {
     const workDir = join(root, "project");
     const outsideRoot = await mkdtemp(join(tmpdir(), "kimi-vscode-baseline-outside-"));
     extraRoots.push(outsideRoot);
@@ -325,7 +334,8 @@ describe("Webview workspace paths (selected-directory containment)", () => {
     });
 
     await expect(bridge.baselineManager.getChanges({ id: "session-1", workDir })).resolves.toEqual([]);
-  });
+    },
+  );
 
   it("builds an editor mention relative to the selected working directory", async () => {
     const workDir = join(root, "project", "subproject");
@@ -427,7 +437,7 @@ describe("Webview workspace paths (selected-directory containment)", () => {
     const outside = await mkdtemp(join(tmpdir(), "kimi-vscode-outside-"));
     extraRoots.push(outside);
     const linkedWorkDir = join(root, "linked-project");
-    await symlink(outside, linkedWorkDir);
+    await symlink(outside, linkedWorkDir, process.platform === "win32" ? "junction" : "dir");
     const bridge = createBridge();
 
     const result = await bridge.handle(

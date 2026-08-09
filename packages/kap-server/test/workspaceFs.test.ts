@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, parse, resolve } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -147,7 +147,7 @@ describe('server-v2 /api/v1 fs folder picker', () => {
   it('returns parent=null for the filesystem root', async () => {
     const { body } = await getJson<BrowseWire>('/api/v1/fs:browse?path=%2F');
     expect(body.code).toBe(0);
-    expect(body.data.path).toBe('/');
+    expect(body.data.path).toBe(parse(resolve('/')).root);
     expect(body.data.parent).toBeNull();
   });
 

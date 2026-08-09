@@ -168,7 +168,11 @@ describe('parseManifest', () => {
       'kimi.plugin.json': JSON.stringify({ name: 'demo', skills: './sym' }),
     });
     const outside = await mkdtemp(path.join(tmpdir(), 'kimi-plugin-outside-'));
-    await symlink(outside, path.join(root, 'sym'));
+    await symlink(
+      outside,
+      path.join(root, 'sym'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     const result = await parseManifest(root);
     expect(result.diagnostics).toContainEqual(
       expect.objectContaining({
@@ -651,7 +655,9 @@ describe('parseManifest', () => {
     );
   });
 
-  it('rejects systemPromptPath values that escape the plugin root', async () => {
+  it.skipIf(process.platform === 'win32')(
+    'rejects systemPromptPath values that escape the plugin root',
+    async () => {
     const traversal = await makePlugin({
       'kimi.plugin.json': JSON.stringify({ name: 'demo', systemPromptPath: './../outside.md' }),
     });
@@ -678,7 +684,8 @@ describe('parseManifest', () => {
         message: '"systemPromptPath" path resolves outside the plugin (./linked.md)',
       }),
     );
-  });
+    },
+  );
 
   it('ignores an oversized inline systemPrompt with a warning', async () => {
     const oversized = 'x'.repeat(PLUGIN_SYSTEM_PROMPT_MAX_BYTES + 1);

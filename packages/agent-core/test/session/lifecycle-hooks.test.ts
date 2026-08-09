@@ -22,7 +22,7 @@ afterEach(async () => {
   for (const dir of tempDirs.splice(0)) {
     await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
-});
+}, 60_000);
 
 describe('Session lifecycle hooks', () => {
   it('fires SessionStart on startup and SessionEnd on close', async () => {
@@ -630,7 +630,7 @@ describe('Session lifecycle hooks', () => {
       hooks: [
         {
           event: 'UserPromptSubmit',
-          command: `node ${JSON.stringify(hookScriptPath)} ${JSON.stringify(hookStartedPath)}`,
+          command: `"${process.execPath}" "${hookScriptPath}" "${hookStartedPath}"`,
           timeout: 30,
         },
       ],
@@ -654,7 +654,7 @@ describe('Session lifecycle hooks', () => {
         reason: 'failed',
       }),
     );
-  });
+  }, 30_000);
 
   it('keeps background tasks alive and skips SessionEnd hooks when closing for reload', async () => {
     const { command, logPath, sessionDir, workDir } = await hookFixture();
@@ -718,7 +718,7 @@ async function hookFixture(): Promise<{
     'utf-8',
   );
   return {
-    command: `node ${JSON.stringify(scriptPath)} ${JSON.stringify(logPath)}`,
+    command: `"${process.execPath}" "${scriptPath}" "${logPath}"`,
     logPath,
     sessionDir,
     workDir,

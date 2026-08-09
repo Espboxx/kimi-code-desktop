@@ -2873,25 +2873,18 @@ describe('Agent tools', () => {
     beforeEach(() => {
       exec = vi.fn<ISessionProcessRunner['exec']>().mockRejectedValue(new Error('Bash should not execute'));
       triggered = [];
-      const hookEngine = makeHookRunner(
-        [
-          {
-            event: 'PreToolUse',
-            matcher: 'Bash',
-            command: "echo 'blocked by PreToolUse' >&2; exit 2",
-          },
-          {
-            event: 'PostToolUseFailure',
-            matcher: 'Bash',
-            command: 'exit 0',
-          },
-        ],
-        {
-          onTriggered: (event, target, count) => {
-            triggered.push([event, target, count]);
-          },
+      const hookEngine = {
+        trigger: async () => [],
+        triggerBlock: async (event: string) => {
+          if (event !== 'PreToolUse') return undefined;
+          triggered.push([event, 'Bash', 1]);
+          return { block: true as const, reason: 'blocked by PreToolUse' };
         },
-      );
+        fireAndForgetTrigger: async (event: string) => {
+          if (event === 'PostToolUseFailure') triggered.push([event, 'Bash', 1]);
+          return [];
+        },
+      };
       ctx = createTestAgent(
         execEnvServices({ processRunner: createFakeProcessRunner({ exec: exec as unknown as ISessionProcessRunner['exec'] }) }),
         externalHookServices(hookEngine),
@@ -2979,29 +2972,22 @@ describe('Agent tools', () => {
 
   describe('failed Bash hook flow', () => {
     let resolved: Array<[string, string, string]>;
+    let failurePayload: Record<string, unknown> | undefined;
 
     beforeEach(async () => {
       resolved = [];
-      const hookEngine = makeHookRunner(
-        [
-          {
-            event: 'PostToolUseFailure',
-            matcher: 'Bash',
-            command: hookPayloadAssertCommand({
-              event: 'PostToolUseFailure',
-              toolName: 'Bash',
-              toolCallId: 'call_bash',
-              toolInputCommand: 'printf hook-output',
-              errorMessageIncludes: 'hook-output\nCommand failed with exit code: 2.',
-            }),
-          },
-        ],
-        {
-          onResolved: (event, target, action) => {
-            resolved.push([event, target, action]);
-          },
+      failurePayload = undefined;
+      const hookEngine = {
+        trigger: async () => [],
+        triggerBlock: async () => undefined,
+        fireAndForgetTrigger: async (event: string, args?: { inputData?: Record<string, unknown> }) => {
+          if (event === 'PostToolUseFailure') {
+            resolved.push([event, 'Bash', 'allow']);
+            failurePayload = args?.inputData;
+          }
+          return [];
         },
-      );
+      };
       ctx = createTestAgent(
         execEnvServices({ processRunner: createFailingCommandRunner('hook-output') }),
         externalHookServices(hookEngine),
@@ -3021,6 +3007,13 @@ describe('Agent tools', () => {
       await vi.waitFor(() => {
         expect(resolved).toEqual([['PostToolUseFailure', 'Bash', 'allow']]);
       });
+      expect(failurePayload).toMatchObject({
+        toolName: 'Bash',
+        toolCallId: 'call_bash',
+        toolInput: { command: 'printf hook-output' },
+        error: { message: expect.stringContaining('Command failed with exit code: 2.') },
+      });
+      expect(failurePayload?.['toolOutput']).toBeUndefined();
     });
   });
 
@@ -3414,8 +3407,9 @@ describe('Agent tools', () => {
       expect(toolMessage).not.toContain('tail survives on disk');
 
       const outputPath = renderedOutputPath(toolMessage);
-      expect(outputPath).toContain(
-        join(homeDir, 'sessions/test-workspace/test-session/agents/main/tool-results/Lookup-call_lookup-'),
+      expect(outputPath.replaceAll('\\', '/')).toContain(
+        join(homeDir, 'sessions/test-workspace/test-session/agents/main/tool-results/Lookup-call_lookup-')
+          .replaceAll('\\', '/'),
       );
       expect(readFileSync(outputPath, 'utf8')).toBe(fullOutput);
     });

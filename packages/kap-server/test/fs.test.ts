@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -149,9 +149,9 @@ describe('server-v2 /api/v1 fs routes', () => {
     expect(body.code).toBe(ErrorCode.FS_IS_DIRECTORY);
   });
 
-  it('fs:read maps a permission-denied host error to FS_PERMISSION_DENIED', async () => {
-    // Root bypasses permission checks, so EACCES never triggers there.
-    if (process.getuid?.() === 0) return;
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'fs:read maps a permission-denied host error to FS_PERMISSION_DENIED',
+    async () => {
     const file = join(work!, 'locked.txt');
     await writeFile(file, 'secret');
     await chmod(file, 0o000);
@@ -162,7 +162,8 @@ describe('server-v2 /api/v1 fs routes', () => {
     } finally {
       await chmod(file, 0o644);
     }
-  });
+    },
+  );
 
   it('fs:list returns items', async () => {
     await writeFile(join(work!, 'a.txt'), '');
@@ -286,7 +287,7 @@ describe('server-v2 /api/v1 fs routes', () => {
     const outside = await mkdtemp(join(tmpdir(), 'kimi-server-v2-fs-outside-'));
     try {
       await writeFile(join(outside, 'secret.txt'), 'top-secret');
-      await symlink(outside, join(work!, 'docs'), 'dir');
+      await symlink(outside, join(work!, 'docs'), process.platform === 'win32' ? 'junction' : 'dir');
       const id = await createSession();
 
       const body = await postFs<null>(id, 'read', { path: 'docs/secret.txt' });
@@ -304,7 +305,7 @@ describe('server-v2 /api/v1 fs routes', () => {
 
   it('serves fs actions when the session cwd itself goes through a symlink', async () => {
     const link = join(tmpdir(), `kimi-server-v2-fs-cwd-link-${process.pid}`);
-    await symlink(work!, link, 'dir');
+    await symlink(work!, link, process.platform === 'win32' ? 'junction' : 'dir');
     try {
       const res = await fetch(`${base}/api/v1/sessions`, {
         method: 'POST',
@@ -321,9 +322,9 @@ describe('server-v2 /api/v1 fs routes', () => {
       expect(read.code).toBe(0);
       expect(read.data.content).toBe('through-link');
     } finally {
-      await rm(link, { force: true });
+      await unlink(link);
     }
-  });
+  }, 30_000);
 
   it('GET fs/{path}:download streams the file and honors If-None-Match', async () => {
     await writeFile(join(work!, 'a.txt'), 'download-me');

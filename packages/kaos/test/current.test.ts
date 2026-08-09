@@ -68,12 +68,14 @@ describe('module-level proxy functions', () => {
   });
 
   it('execWithEnv proxies to the current kaos', async () => {
-    // Use the real LocalKaos to run `env | grep CUSTOM_VAR`
-    const proc = await execWithEnv(['sh', '-c', 'echo "$CUSTOM_VAR"'], {
+    // Use the real LocalKaos without depending on a platform shell.
+    const proc = await execWithEnv(
+      [process.execPath, '-e', 'process.stdout.write(process.env.CUSTOM_VAR ?? "")'],
+      {
       CUSTOM_VAR: 'proxy_test_value',
-      // Preserve PATH so sh can be found
-      PATH: process.env['PATH'] ?? '/usr/bin:/bin',
-    });
+      PATH: process.env['PATH'] ?? '',
+      },
+    );
 
     const chunks: Buffer[] = [];
     for await (const chunk of proc.stdout) {

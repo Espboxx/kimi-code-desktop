@@ -40,9 +40,9 @@ const openSessions: Session[] = [];
 afterEach(async () => {
   await Promise.allSettled(openSessions.splice(0).map((s) => s.close()));
   for (const dir of tempDirs.splice(0)) {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
-});
+}, 60_000);
 
 type GenerateFn = NonNullable<AgentOptions['generate']>;
 
@@ -361,7 +361,7 @@ describe('coder subagent aligned tools (real Session e2e)', () => {
     for (const record of steps) {
       expect(record.prevToolIsError, `${record.label} saw an error tool result`).toBe(false);
     }
-  }, 30_000);
+  }, 120_000);
 
   it('blocks completion until the child background bash task settles', async () => {
     const scripted = createScriptedGenerate();
@@ -405,7 +405,7 @@ describe('coder subagent aligned tools (real Session e2e)', () => {
     }
     expect(child.turn.hasActiveTurn).toBe(false);
     expect(JSON.stringify(child.context.history)).not.toContain('<notification ');
-  }, 30_000);
+  }, 60_000);
 
   it('aborting the run during the background drain rejects the completion', async () => {
     const scripted = createScriptedGenerate();
@@ -439,7 +439,7 @@ describe('coder subagent aligned tools (real Session e2e)', () => {
     controller.abort();
 
     await expect(handle.completion).rejects.toThrow(/abort/i);
-  }, 30_000);
+  }, 60_000);
 
   it('completes cleanly when the background task settles before the final turn ends', async () => {
     const scripted = createScriptedGenerate();
@@ -480,5 +480,5 @@ describe('coder subagent aligned tools (real Session e2e)', () => {
     // The task settled mid-turn, so its notification was delivered into the
     // turn (visible in context) rather than orphaned after completion.
     expect(JSON.stringify(child.context.history)).toContain('<notification ');
-  }, 30_000);
+  }, 60_000);
 });

@@ -62,11 +62,11 @@ describe('ToolResultTruncationService', () => {
     expect(rendered).not.toContain('tail survives on disk');
 
     const outputPath = renderedOutputPath(rendered);
-    expect(outputPath).toContain(
+    expect(outputPath.replaceAll('\\', '/')).toContain(
       join(
         homeDir,
         'sessions/workspace/session/agents/main/tool-results/Lookup_Tool-call_lookup-',
-      ),
+      ).replaceAll('\\', '/'),
     );
     await expect(readFile(outputPath, 'utf8')).resolves.toBe(fullOutput);
   });

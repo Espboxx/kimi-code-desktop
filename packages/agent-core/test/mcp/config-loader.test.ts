@@ -1,6 +1,7 @@
 import { mkdtempSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { win32 } from 'node:path';
 import { join } from 'pathe';
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -172,7 +173,7 @@ describe('loadMcpServers', () => {
     expect(servers['absolute']).toEqual({
       transport: 'stdio',
       command: 'node',
-      cwd: '/tmp/mcp-workdir',
+      cwd: win32.resolve(repoRoot, '/tmp/mcp-workdir').replaceAll('\\', '/'),
     });
     expect(servers['remote']).toEqual({
       transport: 'http',
@@ -198,7 +199,7 @@ describe('loadMcpServers', () => {
     expect(servers['local']).toEqual({
       transport: 'stdio',
       command: 'node.exe',
-      cwd: `/${join(repoRoot, 'tools', 'mcp server')}`,
+      cwd: join(repoRoot, 'tools', 'mcp server'),
     });
   });
 

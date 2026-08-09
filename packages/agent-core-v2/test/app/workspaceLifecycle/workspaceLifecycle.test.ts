@@ -105,6 +105,7 @@ function sessionIndexMirrorStub(): ISessionIndexMirror {
   return {
     _serviceBrand: undefined,
     record: () => {},
+    beginProjection: () => ({ dispose: () => {} }),
     pending: () => [],
     evict: () => Promise.resolve(),
     drain: () => Promise.resolve(),

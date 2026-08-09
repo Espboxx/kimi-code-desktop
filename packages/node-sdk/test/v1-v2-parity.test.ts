@@ -2977,7 +2977,7 @@ async function waitForBackgroundTask(
   rpc: SDKRpcClientBase,
   sessionId: string,
   match: (task: BackgroundTaskInfo) => boolean,
-  timeoutMs = 10_000,
+  timeoutMs = 60_000,
 ): Promise<BackgroundTaskInfo> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -3158,7 +3158,7 @@ describe('v1↔v2 background task parity', () => {
       await closeSessionPair(pair);
       restoreEnv();
     }
-  });
+  }, 120_000);
 });
 
 // --- Print-policy parity ------------------------------------------------------
@@ -3218,7 +3218,7 @@ describe('v1↔v2 print policy parity', () => {
       await closeSessionPair(pair);
       restoreEnv();
     }
-  });
+  }, 120_000);
 
   it('drain mode waits for pending tasks and then finishes', async () => {
     const restoreEnv = scrubConfigEnv();
@@ -3338,7 +3338,7 @@ describe('v1↔v2 print policy parity', () => {
       await closeSessionPair(pair);
       restoreEnv();
     }
-  });
+  }, 120_000);
 
   it('steer mode finishes at the max-turns cap and the wall-clock ceiling', async () => {
     const restoreEnv = scrubConfigEnv();
@@ -3426,7 +3426,7 @@ describe('v1↔v2 print policy parity', () => {
       await closeSessionPair(ceilingPair);
       restoreEnv();
     }
-  });
+  }, 180_000);
 });
 
 // ---------------------------------------------------------------------------

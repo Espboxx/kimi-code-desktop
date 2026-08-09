@@ -49,8 +49,8 @@ interface TextFileScan {
  * is weakened on those filesystems, but normal walking works instead
  * of every directory colliding on the shared key `"<dev>:0"`.
  */
-function cycleKey(s: { dev: number; ino: number }): string | null {
-  if (s.ino === 0) return null;
+function cycleKey(s: { dev: number | bigint; ino: number | bigint }): string | null {
+  if (s.ino === 0 || s.ino === 0n) return null;
   return `${String(s.dev)}:${String(s.ino)}`;
 }
 
@@ -128,13 +128,32 @@ class LocalProcess implements KaosProcess {
     if (isWindows) {
       const taskkillArgs = ['/T', '/F', '/PID', String(this.pid)];
       return new Promise<void>((resolve) => {
+        let settled = false;
         const killer = spawn('taskkill', taskkillArgs, {
           stdio: 'ignore',
           windowsHide: true,
         });
         const done = (): void => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(fallbackTimer);
+          // taskkill may fail or race with process teardown. Always signal the
+          // direct child as a final fallback so wait() cannot remain pending.
+          try {
+            this._child.kill('SIGKILL');
+          } catch {
+            // The taskkill tree operation already removed the process.
+          }
           resolve();
         };
+        const fallbackTimer = setTimeout(() => {
+          try {
+            killer.kill('SIGKILL');
+          } catch {
+            // The taskkill helper already exited.
+          }
+          done();
+        }, 5_000);
         killer.once('error', done);
         killer.once('close', done);
       });
@@ -312,7 +331,7 @@ export class LocalKaos implements Kaos {
     // hit the same error via readdir and return empty.
     const initVisited = new Set<string>();
     try {
-      const rootStat = await stat(resolved);
+      const rootStat = await stat(resolved, { bigint: true });
       const rootKey = cycleKey(rootStat);
       if (rootKey !== null) initVisited.add(rootKey);
     } catch {
@@ -388,7 +407,7 @@ export class LocalKaos implements Kaos {
         const fullPath = join(basePath, entry);
         let entryStat;
         try {
-          entryStat = await stat(fullPath);
+          entryStat = await stat(fullPath, { bigint: true });
         } catch {
           continue;
         }
@@ -430,7 +449,7 @@ export class LocalKaos implements Kaos {
         } else {
           let entryStat;
           try {
-            entryStat = await stat(fullPath);
+            entryStat = await stat(fullPath, { bigint: true });
           } catch {
             continue;
           }

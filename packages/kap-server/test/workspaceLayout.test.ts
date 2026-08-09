@@ -105,7 +105,11 @@ describe('local/local on-disk layout (byte compatibility)', () => {
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line) as { sessionId: string; sessionDir: string; workDir: string });
-    expect(indexLines).toEqual([{ sessionId, sessionDir, workDir }]);
+    expect(indexLines).toEqual([{
+      sessionId,
+      sessionDir: sessionDir.replaceAll('\\', '/'),
+      workDir,
+    }]);
 
     // state.json — the session metadata document at the v1 path.
     const metaRaw = JSON.parse(await readFile(join(sessionDir, 'state.json'), 'utf8')) as {
@@ -125,7 +129,9 @@ describe('local/local on-disk layout (byte compatibility)', () => {
     const metaWithAgent = JSON.parse(await readFile(join(sessionDir, 'state.json'), 'utf8')) as {
       agents: Record<string, { homedir: string }>;
     };
-    expect(metaWithAgent.agents['main']?.homedir).toBe(join(sessionDir, 'agents', 'main'));
+    expect(metaWithAgent.agents['main']?.homedir).toBe(
+      join(sessionDir, 'agents', 'main').replaceAll('\\', '/'),
+    );
 
     // The snapshot reader serves the layout straight from disk (auto mode).
     const snapshot = await fetch(`${base}/api/v1/sessions/${sessionId}/snapshot`, {

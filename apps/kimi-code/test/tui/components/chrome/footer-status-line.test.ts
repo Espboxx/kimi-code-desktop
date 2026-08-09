@@ -1,8 +1,8 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FooterComponent } from '#/tui/components/chrome/footer';
 import {
@@ -57,6 +57,27 @@ const payload: StatusLinePayload = {
 function plain(text: string): string {
   // eslint-disable-next-line no-control-regex
   return text.replaceAll(/\u001B\[[0-9;]*m/g, '');
+}
+
+const commandDirs: string[] = [];
+
+afterEach(() => {
+  for (const dir of commandDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function nodeCommand(source: string, ...args: string[]): string {
+  const dir = mkdtempSync(join(tmpdir(), 'kimi-status-line-'));
+  commandDirs.push(dir);
+  const script = join(dir, 'command.cjs');
+  writeFileSync(script, source);
+  const quote = (value: string): string => `"${value.replaceAll('\\', '/')}"`;
+  return ['node', quote(script), ...args.map(quote)].join(' ');
+}
+
+function shellCommand(posix: string, win32: string): string {
+  return process.platform === 'win32' ? win32 : posix;
 }
 
 describe('FooterComponent status_line items', () => {
@@ -135,7 +156,7 @@ describe('FooterComponent status_line items', () => {
 
 describe('runStatusLineCommand', () => {
   it('passes the payload as JSON on stdin and returns the first stdout line', async () => {
-    const line = await runStatusLineCommand('cat', payload);
+    const line = await runStatusLineCommand(shellCommand('cat', 'more'), payload);
 
     expect(line).not.toBeNull();
     const parsed = JSON.parse(line!);
@@ -145,19 +166,24 @@ describe('runStatusLineCommand', () => {
   });
 
   it('returns null on a nonzero exit', async () => {
-    expect(await runStatusLineCommand('exit 3', payload)).toBeNull();
+    expect(await runStatusLineCommand(shellCommand('exit 3', 'exit /b 3'), payload)).toBeNull();
   });
 
   it('returns null on empty output', async () => {
-    expect(await runStatusLineCommand('true', payload)).toBeNull();
+    expect(await runStatusLineCommand(shellCommand('true', 'ver >nul'), payload)).toBeNull();
   });
 
   it('returns null when the command overruns the timeout', async () => {
-    expect(await runStatusLineCommand('sleep 2', payload, 100)).toBeNull();
+    expect(
+      await runStatusLineCommand(nodeCommand('setTimeout(() => {}, 2_000);'), payload, 100),
+    ).toBeNull();
   });
 
   it('trims the line and ignores later lines', async () => {
-    const line = await runStatusLineCommand('printf "first\\nsecond\\n"', payload);
+    const line = await runStatusLineCommand(
+      shellCommand('printf "first\\nsecond\\n"', 'echo first&echo second'),
+      payload,
+    );
 
     expect(line).toBe('first');
   });
@@ -165,8 +191,9 @@ describe('runStatusLineCommand', () => {
   it('caps the captured output instead of accumulating an unending stream', async () => {
     // 200 KB on a single line, then exit: only the capped prefix is kept.
     const line = await runStatusLineCommand(
-      'head -c 200000 /dev/zero | tr "\\0" "a"',
+      nodeCommand("process.stdout.write('a'.repeat(200_000));"),
       payload,
+      2_000,
     );
 
     expect(line).not.toBeNull();
@@ -178,7 +205,10 @@ describe('FooterComponent status_line command', () => {
   it('swaps line 1 to the command output once it lands', async () => {
     const state: AppState = {
       ...baseState,
-      statusLine: { items: null, command: 'printf "my-custom-status"' },
+      statusLine: {
+        items: null,
+        command: shellCommand('printf "my-custom-status"', 'echo my-custom-status'),
+      },
     };
     const footer = new FooterComponent(state);
 
@@ -193,7 +223,7 @@ describe('FooterComponent status_line command', () => {
   it('keeps the built-in layout when the command fails', async () => {
     const state: AppState = {
       ...baseState,
-      statusLine: { items: null, command: 'exit 1' },
+      statusLine: { items: null, command: shellCommand('exit 1', 'exit /b 1') },
     };
     const footer = new FooterComponent(state);
 
@@ -205,53 +235,56 @@ describe('FooterComponent status_line command', () => {
 
 describe('StatusLineCommandRunner', () => {
   it('caches the last good line and coalesces refreshes in the same interval', async () => {
-    const runner = new StatusLineCommandRunner('printf "x"', () => {});
+    const execute = vi.fn().mockResolvedValue('x');
+    const runner = new StatusLineCommandRunner('command', () => {}, execute);
 
     runner.maybeRefresh(payload);
     runner.maybeRefresh(payload);
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await vi.waitFor(() => expect(runner.current()).toBe('x'));
 
     expect(runner.current()).toBe('x');
+    expect(execute).toHaveBeenCalledTimes(1);
+    runner.dispose();
   });
 
   it('runs a deferred refresh after the throttle interval instead of dropping it', async () => {
-    const dir = join(tmpdir(), `sl-trailing-${process.pid}-${Math.random().toString(36).slice(2)}`);
-    mkdirSync(dir, { recursive: true });
+    vi.useFakeTimers();
+    let runCount = 0;
+    const execute = vi.fn(async () => `run-${runCount++}`);
+    const runner = new StatusLineCommandRunner(
+      'command',
+      () => {},
+      execute,
+    );
     try {
-      const counterFile = join(dir, 'count');
-      const scriptFile = join(dir, 'count.sh');
-      writeFileSync(counterFile, '0');
-      writeFileSync(
-        scriptFile,
-        '#!/bin/sh\nn=$(cat "$1")\necho $((n+1)) > "$1"\nprintf "run-%s" "$n"\n',
-      );
-      const runner = new StatusLineCommandRunner(`sh ${scriptFile} ${counterFile}`, () => {});
-
       runner.maybeRefresh(payload);
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      await Promise.resolve();
       runner.maybeRefresh(payload); // throttled: must defer, not drop
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      expect(readFileSync(counterFile, 'utf-8').trim()).toBe('1');
+      expect(execute).toHaveBeenCalledTimes(1);
 
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      expect(readFileSync(counterFile, 'utf-8').trim()).toBe('2');
-      runner.dispose();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(execute).toHaveBeenCalledTimes(2);
+      expect(runner.current()).toBe('run-1');
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      runner.dispose();
+      vi.useRealTimers();
     }
   });
 
   it('recreates the runner when the command changes', async () => {
     const state: AppState = {
       ...baseState,
-      statusLine: { items: null, command: 'printf "aaa"' },
+      statusLine: { items: null, command: shellCommand('printf "aaa"', 'echo aaa') },
     };
     const footer = new FooterComponent(state);
     footer.render(120); // kicks the first run
     await new Promise((resolve) => setTimeout(resolve, 450));
     expect(plain(footer.render(120)[0]!)).toContain('aaa');
 
-    footer.setState({ ...state, statusLine: { items: null, command: 'printf "bbb"' } });
+    footer.setState({
+      ...state,
+      statusLine: { items: null, command: shellCommand('printf "bbb"', 'echo bbb') },
+    });
     footer.render(120); // kicks the replacement run
     await new Promise((resolve) => setTimeout(resolve, 450));
 

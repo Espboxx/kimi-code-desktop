@@ -261,6 +261,14 @@ describe('workspace resource sharing (handler chain)', () => {
   });
 
   afterEach(async () => {
+    if (host !== undefined) {
+      const lifecycle = host.app.accessor.get(IWorkspaceLifecycleService);
+      await Promise.all(
+        lifecycle.handlers.list().map((handler) =>
+          handler.accessor.get(IWorkspaceMcpService).connectionManager().shutdown(),
+        ),
+      );
+    }
     host?.dispose();
     host = undefined;
     await Promise.all(tmpRoots.map((root) => rm(root, { recursive: true, force: true })));

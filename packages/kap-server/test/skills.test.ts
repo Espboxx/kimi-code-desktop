@@ -300,10 +300,18 @@ describe('server-v2 /api/v1 skills', () => {
       // The activation's user message carries the rendered skill prompt
       // followed by the materialized attachment's path notice — the same
       // pipeline a prompt submission runs through.
-      const messages = await getJson<{
-        items: Array<{ role: string; content: Array<{ type: string; text?: string }> }>;
-      }>(`/api/v1/sessions/${id}/messages`);
-      const userMsg = messages.body.data.items.find((m) => m.role === 'user');
+      type MessageWire = { role: string; content: Array<{ type: string; text?: string }> };
+      let userMsg: MessageWire | undefined;
+      const deadline = Date.now() + 10_000;
+      while (userMsg === undefined && Date.now() < deadline) {
+        const messages = await getJson<{ items: MessageWire[] }>(
+          `/api/v1/sessions/${id}/messages`,
+        );
+        userMsg = messages.body.data.items.find((message) => message.role === 'user');
+        if (userMsg === undefined) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+      }
       expect(userMsg).toBeDefined();
       expect(userMsg!.content[0]?.type).toBe('text');
       expect(userMsg!.content[0]?.text).toContain('User activated the skill "update-config"');
@@ -313,9 +321,9 @@ describe('server-v2 /api/v1 skills', () => {
       expect(notice?.text).toContain(`${noteBytes.length} bytes`);
       const attachedPath = /bytes\): (.+) — open it with the Read tool$/.exec(notice?.text ?? '')?.[1];
       expect(attachedPath).toBeDefined();
-      expect(attachedPath).toContain('/attachments/');
+      expect(attachedPath!.replaceAll('\\', '/')).toContain('/attachments/');
       expect(await readFile(attachedPath!)).toEqual(noteBytes);
-    });
+    }, 15_000);
 
     it('rejects an activation with a stale attachment file_id (40407)', async () => {
       const id = await createSession();

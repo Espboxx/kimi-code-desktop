@@ -198,7 +198,7 @@ function appendHookLogCommand(path: string): string {
     '    reason: parsed.reason,',
     '    sessionId: parsed.session_id,',
     '    cwd: parsed.cwd,',
-    '  }) + "\\n",',
+    '  }) + String.fromCharCode(10),',
     ');',
   ].join('\n'));
 }
@@ -1063,7 +1063,7 @@ describe('IExternalHooksRunnerService integration', () => {
         '    profile: parsed.profile,',
         '    sessionTitle: parsed.session_title,',
         '    clientType: parsed.client_type,',
-        '  }) + "\\n",',
+        '  }) + String.fromCharCode(10),',
         ');',
       ].join('\n'));
 

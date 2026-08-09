@@ -203,7 +203,7 @@ describe("VS Code replay from a public Node SDK resume state", () => {
           return_value: expect.objectContaining({
             display: [{
               type: "diff",
-              path: join(rig.workDir, "created.txt"),
+              path: join(rig.workDir, "created.txt").replaceAll("\\", "/"),
               old_text: "",
               new_text: "created content\n",
             }],
@@ -217,7 +217,12 @@ describe("VS Code replay from a public Node SDK resume state", () => {
         payload: expect.objectContaining({
           tool_call_id: "edit-call-1",
           return_value: expect.objectContaining({
-            display: [{ type: "diff", path: filePath, old_text: "before", new_text: "after" }],
+            display: [{
+              type: "diff",
+              path: filePath.replaceAll("\\", "/"),
+              old_text: "before",
+              new_text: "after",
+            }],
           }),
         }),
       }),

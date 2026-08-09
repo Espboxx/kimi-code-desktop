@@ -32,6 +32,7 @@
  */
 
 import { createDecorator, type ServiceIdentifier } from '#/_base/di/instantiation';
+import type { IDisposable } from '#/_base/di/lifecycle';
 import type { Page } from '#/persistence/interface/queryStore';
 
 export const PARENT_SESSION_ID_KEY = 'parent_session_id';
@@ -126,6 +127,7 @@ export interface ISessionIndexMirror {
    * reconciliation.
    */
   record(summary: SessionSummary): void;
+  beginProjection(): IDisposable;
   /** Summaries accepted but not yet flushed (read-your-writes window). */
   pending(): readonly SessionSummary[];
   /**

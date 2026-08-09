@@ -73,6 +73,7 @@ export async function runHook(
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let terminating = false;
     const timeoutMs = timeoutSeconds(options.timeout) * 1000;
 
     const cleanup = () => {
@@ -87,14 +88,18 @@ export async function runHook(
       resolve(result);
     };
 
+    const terminate = (result: HookResult): void => {
+      if (terminating || settled) return;
+      terminating = true;
+      void killProcess(child).then(() => settle(result));
+    };
+
     const timeout = setTimeout(() => {
-      killProcess(child);
-      settle(allowResult({ stdout, stderr, timedOut: true }));
+      terminate(allowResult({ stdout, stderr, timedOut: true }));
     }, timeoutMs);
 
     const onAbort = (): void => {
-      killProcess(child);
-      settle(allowResult({ stdout, stderr }));
+      terminate(allowResult({ stdout, stderr }));
     };
 
     options.signal?.addEventListener('abort', onAbort, { once: true });
@@ -115,6 +120,7 @@ export async function runHook(
       settle(allowResult({ stdout, stderr: stderr + errorMessage(error) }));
     });
     child.on('close', (code) => {
+      if (terminating) return;
       settle(resultFromExitCode(code ?? 0, stdout, stderr));
     });
 
@@ -211,22 +217,22 @@ function allowResult(input: {
   };
 }
 
-function killProcess(child: ChildProcessWithoutNullStreams): void {
+function killProcess(child: ChildProcessWithoutNullStreams): Promise<void> {
+  if (process.platform === 'win32') {
+    // A non-forced taskkill can terminate the shell before its descendants,
+    // leaving the actual hook orphaned. Windows has no graceful signal for
+    // console process trees, so terminate the complete tree in one operation.
+    return killProcessTreeWindows(child, true);
+  }
   tryKillProcess(child, 'SIGTERM');
   const killTimer = setTimeout(() => {
     tryKillProcess(child, 'SIGKILL');
   }, KILL_GRACE_MS);
   killTimer.unref();
+  return Promise.resolve();
 }
 
 function tryKillProcess(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): void {
-  if (process.platform === 'win32') {
-    // On Windows, `ChildProcess.kill()` only signals the shell spawned by
-    // `shell: true`, leaving grandchildren (the actual hook command) alive
-    // and holding the cwd. `taskkill /T` terminates the whole process tree.
-    killProcessTreeWindows(child, signal === 'SIGKILL');
-    return;
-  }
   try {
     if (child.pid !== undefined) {
       process.kill(-child.pid, signal);
@@ -240,19 +246,29 @@ function tryKillProcess(child: ChildProcessWithoutNullStreams, signal: NodeJS.Si
   }
 }
 
-function killProcessTreeWindows(child: ChildProcessWithoutNullStreams, force: boolean): void {
-  if (child.pid === undefined) return;
+function killProcessTreeWindows(child: ChildProcessWithoutNullStreams, force: boolean): Promise<void> {
+  if (child.pid === undefined) return Promise.resolve();
   const args = force
     ? ['/T', '/F', '/PID', String(child.pid)]
     : ['/T', '/PID', String(child.pid)];
-  try {
-    const killer = spawn('taskkill', args, { stdio: 'ignore', windowsHide: true });
-    killer.once('error', () => {});
-  } catch {
+  return new Promise((resolve) => {
     try {
-      child.kill('SIGTERM');
-    } catch {}
-  }
+      const killer = spawn('taskkill', args, { stdio: 'ignore', windowsHide: true });
+      const done = (): void => resolve();
+      killer.once('error', () => {
+        try {
+          child.kill('SIGTERM');
+        } catch {}
+        done();
+      });
+      killer.once('close', done);
+    } catch {
+      try {
+        child.kill('SIGTERM');
+      } catch {}
+      resolve();
+    }
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

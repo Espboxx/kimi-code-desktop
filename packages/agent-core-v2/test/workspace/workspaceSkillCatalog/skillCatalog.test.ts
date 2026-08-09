@@ -539,7 +539,9 @@ describe('WorkspaceSkillCatalogService', () => {
         const catalog = workspace.accessor.get(IWorkspaceSkillCatalog);
         await catalog.load();
 
-        expect(catalog.catalog.getSkillRoots()).toEqual([skillRoot]);
+        expect(catalog.catalog.getSkillRoots().map((root) => root.replaceAll('\\', '/'))).toEqual([
+          skillRoot.replaceAll('\\', '/'),
+        ]);
       } finally {
         host.dispose();
       }
