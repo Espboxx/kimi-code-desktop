@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 
 import type { DesktopSnapshot, JsonRecord } from '../shared/desktop-api';
+import { experimentalFeatureSourceLabel, localizeExperimentalFeature } from './experimental-features';
 import { array, bool, classNames, formatJson, number, record, text } from './ui-utils';
 
 type SettingsTab = 'account' | 'models' | 'mcp' | 'extensions' | 'workspace' | 'diagnostics';
@@ -350,17 +351,19 @@ function DiagnosticsSettings({ snapshot }: { readonly snapshot: DesktopSnapshot 
             const enabled = bool(feature['enabled']);
             const source = text(feature['source']);
             const locked = source === 'env' || source === 'master-env';
+            const copy = localizeExperimentalFeature(id);
+            const sourceLabel = experimentalFeatureSourceLabel(source);
             return (
               <div className="feature-row" key={id}>
                 <div>
-                  <strong>{text(feature['title'], id)}</strong>
-                  <small>{text(feature['description'], source)}</small>
+                  <strong>{copy.title}</strong>
+                  <small>{copy.description}</small>
                 </div>
                 <button
                   className={classNames('toggle', enabled && 'on')}
                   disabled={locked || updatingFeature === id}
-                  aria-label={`${enabled ? '禁用' : '启用'} ${id}`}
-                  title={locked ? `由 ${source} 控制` : `${id} · ${source}`}
+                  aria-label={`${enabled ? '禁用' : '启用'}${copy.title}`}
+                  title={locked ? `由${sourceLabel}控制 · 技术标识：${id}` : `技术标识：${id} · 来源：${sourceLabel}`}
                   onClick={() => void setFeatureEnabled(id, !enabled)}
                 ><span /></button>
               </div>

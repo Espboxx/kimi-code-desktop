@@ -31,7 +31,7 @@ import { InlineAgentActivity } from './AgentActivity';
 import type { AgentActivityForest } from './agent-activity';
 import { InteractionPanel } from './InteractionPanel';
 import { decideTimelineAutoFollow } from './timeline-scroll';
-import { classNames, formatJson, record, text } from './ui-utils';
+import { classNames, formatJson, formatTime, record, text } from './ui-utils';
 
 interface TimelineProps {
   readonly transcript?: AgentTranscript;
@@ -184,14 +184,23 @@ function TimelineItem({
   if (item.kind === 'marker') {
     const payload = record(item.payload);
     const isNotice = item.marker === 'notice';
+    const timestamp = formatTime(item.at);
     return (
-      <div className={classNames('timeline-marker', isNotice && `marker-${text(payload['level'], 'info')}`)}>
-        {isNotice && text(payload['level']) === 'error' ? <AlertCircle size={14} /> : <Clock3 size={13} />}
-        <span>{markerTitle(item.marker, item.payload)}</span>
-        {Object.keys(payload).length > 1 && (
-          <details><summary>详情</summary><pre>{formatJson(item.payload)}</pre></details>
-        )}
-      </div>
+      <article className={classNames('timeline-system-message', isNotice && `marker-${text(payload['level'], 'info')}`)}>
+        <div className="message-role system-role">系统</div>
+        <div className="system-message-content">
+          <div className="system-message-bubble">
+            <span className="system-message-icon">
+              {isNotice && text(payload['level']) === 'error' ? <AlertCircle size={14} /> : <Clock3 size={13} />}
+            </span>
+            <span className="system-message-title">{markerTitle(item.marker, item.payload)}</span>
+            {timestamp.length > 0 && <time>{timestamp}</time>}
+            {Object.keys(payload).length > 1 && (
+              <details><summary>详情</summary><pre>{formatJson(item.payload)}</pre></details>
+            )}
+          </div>
+        </div>
+      </article>
     );
   }
   if (item.kind === 'taskref') {

@@ -4500,8 +4500,8 @@ describe('v1↔v2 residual surface parity', () => {
       const historyOnBoth = () =>
         Promise.all([pair.v1.getContext(input), pair.v2.getContext(input)]);
 
-      // Enter with the manual trigger: active on both, and the (byte-identical)
-      // enter reminder lands in the context on both.
+      // Enter with the manual trigger: active on both, and each engine's enter
+      // reminder lands once. v2 additionally teaches TeamStatus-based reuse.
       await Promise.all([
         pair.v1.setSwarmMode({ ...input, enabled: true, trigger: 'manual' }),
         pair.v2.setSwarmMode({ ...input, enabled: true, trigger: 'manual' }),
@@ -4511,9 +4511,11 @@ describe('v1↔v2 residual surface parity', () => {
       expect(v2Active.swarmMode).toBe(true);
       const project = KNOWN_DIFFS.getContext;
       const [v1Entered, v2Entered] = await historyOnBoth();
-      expect(project(v2Entered)).toEqual(project(v1Entered));
       expect(v1Entered.history).toHaveLength(1);
+      expect(v2Entered.history).toHaveLength(1);
       expect(JSON.stringify(v1Entered.history[0])).toContain('<system-reminder>');
+      expect(JSON.stringify(v2Entered.history[0])).toContain('<system-reminder>');
+      expect(JSON.stringify(v2Entered.history[0])).toContain('resume_agent_ids');
 
       // Enter is idempotent on both: still one reminder, still active.
       await Promise.all([

@@ -51,7 +51,7 @@ export const AgentSwarmToolInputSchema = z
       .record(z.string().trim().min(1), z.string().trim().min(1))
       .optional()
       .describe(
-        'Map of existing subagent agent_id to the prompt used to resume that subagent. These resumed subagents are launched before new item-based subagents.',
+        'Map of reusable existing subagent agent_id to its continuation prompt. Prefer this when new work is clearly related to that agent\'s previous assignment; resumed subagents keep their context and launch before new item-based subagents.',
       ),
     model: z
       .enum(['secondary', 'primary'])

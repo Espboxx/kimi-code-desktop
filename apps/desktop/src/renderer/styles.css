@@ -1136,7 +1136,6 @@ progress {
   color: var(--red);
 }
 
-.timeline-marker,
 .task-strip {
   display: flex;
   min-height: 30px;
@@ -1150,25 +1149,75 @@ progress {
   font-size: 11px;
 }
 
-.timeline-marker.marker-error {
-  border-left-color: var(--red);
+.timeline-system-message {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 0;
+}
+
+.system-role {
+  color: var(--muted);
+}
+
+.system-message-content {
+  min-width: 0;
+}
+
+.system-message-bubble {
+  display: flex;
+  width: fit-content;
+  max-width: min(86%, 680px);
+  min-height: 32px;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.system-message-icon {
+  display: grid;
+  flex: none;
+  color: var(--muted);
+  place-items: center;
+}
+
+.system-message-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.system-message-bubble time {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.timeline-system-message.marker-error .system-message-bubble,
+.timeline-system-message.marker-error .system-message-icon {
+  border-color: color-mix(in srgb, var(--red) 40%, var(--border));
   color: var(--red);
 }
 
-.timeline-marker.marker-warning {
-  border-left-color: var(--amber);
+.timeline-system-message.marker-warning .system-message-bubble,
+.timeline-system-message.marker-warning .system-message-icon {
+  border-color: color-mix(in srgb, var(--amber) 40%, var(--border));
   color: var(--amber);
 }
 
-.timeline-marker details {
-  margin-left: auto;
+.timeline-system-message details {
+  width: 100%;
 }
 
-.timeline-marker details summary {
+.timeline-system-message details summary {
   cursor: pointer;
 }
 
-.timeline-marker details pre {
+.timeline-system-message details pre {
   max-width: 560px;
   max-height: 180px;
   margin-top: 5px;
@@ -1860,9 +1909,9 @@ progress {
 .todo-panel-heading,
 .todo-panel-heading > span,
 .todo-add-row,
-.todo-group-heading,
 .todo-item,
-.todo-item-actions {
+.todo-item-actions,
+.todo-card > header {
   display: flex;
   align-items: center;
 }
@@ -1880,9 +1929,9 @@ progress {
 }
 
 .todo-panel-heading small,
-.todo-group-heading small,
 .todo-readonly-note,
-.todo-group-empty,
+.todo-card > header small,
+.todo-card-empty,
 .todo-empty {
   color: var(--muted);
   font-size: 10px;
@@ -1909,65 +1958,111 @@ progress {
   font-size: 10px;
 }
 
-.todo-groups {
+.todo-lists {
+  display: flex;
   min-height: 0;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 8px 8px;
   overflow: auto;
   scrollbar-width: thin;
 }
 
-.todo-group {
-  border-top: 1px solid var(--border-soft);
+.todo-card {
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  overflow: hidden;
 }
 
-.todo-group-heading {
-  width: 100%;
+.todo-card > header {
   min-height: 29px;
-  gap: 4px;
+  justify-content: space-between;
   padding: 0 8px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--panel-2);
   color: var(--text-soft);
-  text-align: left;
+  font-size: 11px;
 }
 
-.todo-group-heading span {
-  flex: 1;
-}
-
-.todo-group-items {
+.todo-card-items {
   display: flex;
   flex-direction: column;
 }
 
-.todo-group-empty,
+.todo-card-empty,
 .todo-empty {
   padding: 8px 10px;
 }
 
 .todo-item {
   min-width: 0;
-  gap: 5px;
-  padding: 4px 6px 4px 9px;
+  gap: 4px;
+  min-height: 34px;
+  padding: 4px 5px;
+}
+
+.todo-item + .todo-item {
   border-top: 1px solid var(--border-soft);
 }
 
-.todo-item select {
-  width: 75px;
-  min-width: 75px;
-  height: 25px;
-  padding: 0 4px;
-  font-size: 10px;
+.todo-status-toggle,
+.todo-title-button {
+  border: 0;
+  background: transparent;
 }
 
-.todo-title {
+.todo-status-toggle {
+  display: grid;
+  width: 27px;
+  height: 27px;
+  min-height: 27px;
+  flex: none;
+  padding: 0;
+  color: var(--text-soft);
+  place-items: center;
+}
+
+.todo-status-toggle:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+
+.todo-status-in_progress {
+  color: var(--amber);
+}
+
+.todo-status-done {
+  color: var(--accent);
+}
+
+.todo-title-button {
   min-width: 0;
   flex: 1;
+  height: 27px;
+  min-height: 27px;
+  padding: 0 4px;
   overflow: hidden;
   color: var(--text);
   font-size: 11px;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.todo-title-button:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+
+.todo-title-button:disabled,
+.todo-status-toggle:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.todo-item-done .todo-title-button {
+  color: var(--muted);
+  text-decoration: line-through;
 }
 
 .todo-item-actions {

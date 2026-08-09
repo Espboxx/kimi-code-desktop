@@ -114,20 +114,21 @@ try {
   await submitPrompt(page, 'Create a TodoList with one running and one pending desktop task.');
   await waitForAssistant(page, 'TodoList updated by Kimi.');
   await todoPanel.getByText('Inspect desktop runtime', { exact: true }).waitFor();
-  assert.match(await todoPanel.locator('.todo-group-in_progress .todo-group-heading').innerText(), /1/);
-  assert.match(await todoPanel.locator('.todo-group-pending .todo-group-heading').innerText(), /1/);
+  assert.match(await todoPanel.locator('.todo-card-active > header').innerText(), /2/);
+  assert.match(await todoPanel.locator('.todo-card-completed > header').innerText(), /0/);
 
   const pendingTodo = todoPanel.locator('.todo-item').filter({ hasText: 'Run desktop tests' });
-  await pendingTodo.locator('select').selectOption('in_progress');
-  await page.waitForFunction(() =>
-    [...document.querySelectorAll('.todo-group-in_progress .todo-title')]
-      .some((element) => element.textContent === 'Run desktop tests'));
+  await pendingTodo.getByRole('button', { name: /Run desktop tests：未完成/ }).click();
+  await todoPanel.locator('.todo-item-in_progress').filter({ hasText: 'Run desktop tests' }).waitFor();
   const editableTodo = todoPanel.locator('.todo-item').filter({ hasText: 'Run desktop tests' });
-  await editableTodo.getByTitle('修改名称').click();
+  await editableTodo.getByRole('button', { name: 'Run desktop tests', exact: true }).click();
   const todoTitleInput = todoPanel.locator('.todo-title-input');
   await todoTitleInput.fill('Run complete desktop suite');
   await todoPanel.getByTitle('保存名称').click();
   await todoPanel.getByText('Run complete desktop suite', { exact: true }).waitFor();
+  const renamedTodo = todoPanel.locator('.todo-item').filter({ hasText: 'Run complete desktop suite' });
+  await renamedTodo.getByRole('button', { name: /Run complete desktop suite：正在进行/ }).click();
+  await todoPanel.locator('.todo-card-completed .todo-item-done').filter({ hasText: 'Run complete desktop suite' }).waitFor();
 
   await todoPanel.locator('.todo-add-row input').fill('Delete temporary task');
   await todoPanel.getByTitle('新增任务').click();
@@ -529,6 +530,10 @@ try {
   await submitPrompt(page, 'Hold this turn until I cancel it.');
   const cancelButton = page.locator('.composer .cancel-button');
   await cancelButton.waitFor({ state: 'visible', timeout: 30_000 });
+  await timeline.locator('.timeline-system-message').first().waitFor({ state: 'visible' });
+  assert.equal(await page.locator('.timeline-system-message').evaluateAll((elements) =>
+    elements.every((element) => element.closest('.timeline-scroll') !== null)), true,
+    'system messages must remain ordinary timeline entries');
   assert.equal(await todoPanel.locator('.todo-add-row input').isDisabled(), true, 'TodoList should be read-only while an Agent runs');
   assert.ok(await timeline.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight) < 120,
     'user submission did not restore timeline auto-follow');
@@ -1123,7 +1128,7 @@ async function openSettingsAndVerify(page) {
   await dialog.locator('.settings-nav button').nth(3).click();
   await dialog.getByText('desktop-fixture', { exact: false }).waitFor();
   await dialog.locator('.settings-nav button').last().click();
-  await dialog.getByLabel('禁用 team_collaboration').waitFor();
+  await dialog.getByLabel('禁用团队协作').waitFor();
   await dialog.locator('.settings-nav button').first().click();
   await dialog.getByText('未登录', { exact: true }).waitFor();
   await dialog.locator('.dialog-header .icon-button').click();

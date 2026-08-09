@@ -1,7 +1,7 @@
 /**
  * Scenario: durable Team collaboration state and messaging.
  * Responsibility: verify the session service's append ordering, idempotency,
- * live wakeups, limits, and restart fold through its DI contract.
+ * live wakeups, limits, restart fold, and reusable-member summary through its DI contract.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -15,6 +15,7 @@ import { ISessionCollaborationService } from '#/features/collaboration/collabora
 import { SessionCollaborationService } from '#/features/collaboration/collaborationService';
 import { CollaborationDeliveryModel, teamDeliveryAdvance } from '#/features/collaboration/deliveryOps';
 import { TEAM_COLLABORATION_FLAG_ID } from '#/features/collaboration/flag';
+import { TeamStatusTool } from '#/features/collaboration/tools/teamStatus';
 import { AppendLogStore } from '#/persistence/backends/node-fs/appendLogStore';
 import { InMemoryStorageService } from '#/persistence/backends/memory/inMemoryStorageService';
 import { IAppendLogStore } from '#/persistence/interface/appendLogStore';
@@ -247,5 +248,44 @@ describe('SessionCollaborationService', () => {
     wire.dispatch(teamDeliveryAdvance({ teamId: 'team-1', toSeq: 7 }));
     wire.dispatch(contextClear({}));
     expect(wire.getModel(CollaborationDeliveryModel)).toEqual({ 'team-1': 7 });
+  });
+});
+
+describe('TeamStatus tool', () => {
+  it('returns only idle terminal members as reusable follow-up candidates', async () => {
+    const { service } = buildService();
+    await service.prepareSwarmBatch({
+      callerAgentId: 'main',
+      assignments: [
+        { assignmentId: 'a-complete', profileName: 'explore', description: 'Inspect renderer', item: 'renderer' },
+        { assignmentId: 'a-running', profileName: 'coder', description: 'Implement runtime', item: 'runtime' },
+      ],
+    });
+    await service.bindAssignment({ assignmentId: 'a-complete', agentId: 'agent-1', parentAgentId: 'main' });
+    await service.bindAssignment({ assignmentId: 'a-running', agentId: 'agent-2', parentAgentId: 'main' });
+    await service.settleAssignment({ assignmentId: 'a-complete', status: 'completed' });
+
+    const execution = new TeamStatusTool(service).resolveExecution({});
+    if (execution.isError === true) throw new Error(JSON.stringify(execution.output));
+    const result = await execution.execute({
+      turnId: 1,
+      toolCallId: 'team-status-1',
+      signal: new AbortController().signal,
+    });
+    if (typeof result.output !== 'string') throw new Error('TeamStatus must return JSON text');
+    const output = JSON.parse(result.output) as {
+      readonly reusableMembers: readonly unknown[];
+    };
+
+    expect(output.reusableMembers).toEqual([expect.objectContaining({
+      agentId: 'agent-1',
+      availability: 'reusable',
+      latestAssignment: expect.objectContaining({
+        profileName: 'explore',
+        description: 'Inspect renderer',
+        item: 'renderer',
+        status: 'completed',
+      }),
+    })]);
   });
 });

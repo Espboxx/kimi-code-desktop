@@ -43,7 +43,7 @@ import { EventBusService } from '#/app/event/eventBusService';
 import type { ISessionCollaborationService } from '#/features/collaboration/collaboration';
 import { TEAM_COLLABORATION_FLAG_ID } from '#/features/collaboration/flag';
 
-import { stubContextMemory } from '../contextMemory/stubs';
+import { stubContextMemory, type StubContextMemory } from '../contextMemory/stubs';
 import { executeTool } from '../../tools/fixtures/execute-tool';
 import { registerTestAgentWire, restoreTestAgentWire, testWireScope } from '../../wire/stubs';
 import { stubLoopWithHooks } from '../loop/stubs';
@@ -180,11 +180,13 @@ describe('AgentSwarmService', () => {
   let executorEvents: ToolExecutorEventStubs;
   let permissionGateRan: boolean;
   let formatDenyMessage: Mock<(message: string) => string>;
+  let contextMemory: StubContextMemory;
 
   beforeEach(() => {
     disposables = new DisposableStore();
     ix = disposables.add(new TestInstantiationService());
-    ix.stub(IAgentContextMemoryService, stubContextMemory());
+    contextMemory = stubContextMemory();
+    ix.stub(IAgentContextMemoryService, contextMemory);
     ix.stub(IFileSystemStorageService, new InMemoryStorageService());
     ix.set(IAppendLogStore, new SyncDescriptor(AppendLogStore));
     ix.set(IEventBus, new SyncDescriptor(EventBusService));
@@ -238,6 +240,16 @@ describe('AgentSwarmService', () => {
       { type: 'agent.status.updated', swarmMode: false },
       { type: 'context.spliced', start: 0, deleteCount: 1, messages: [] },
     ]);
+  });
+
+  it('reminds the orchestrator to reuse only related idle team members', () => {
+    ix.get(IAgentSwarmService).enter('manual');
+
+    const reminder = contextMemory.messages[0]?.content[0];
+    expect(reminder?.type).toBe('text');
+    expect(reminder?.type === 'text' ? reminder.text : '').toContain('inspect TeamStatus');
+    expect(reminder?.type === 'text' ? reminder.text : '').toContain('resume_agent_ids');
+    expect(reminder?.type === 'text' ? reminder.text : '').toContain('never resume a busy member');
   });
 
   it('dispatch persists enter/exit records and replay rebuilds the trigger (silent)', async () => {
@@ -586,6 +598,8 @@ describe('AgentSwarmTool', () => {
     expect(tool.description).toContain('at least 2');
     expect(tool.description).toContain('{{item}}');
     expect(tool.description.toLowerCase()).toContain('distinct');
+    expect(tool.description).toContain('reusableMembers');
+    expect(tool.description).toContain('genuinely relevant');
   });
 
   it('uses the persisted caller allowlist instead of the current catalog profile', async () => {

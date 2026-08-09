@@ -181,7 +181,8 @@ describe('HookEngine', () => {
       signal: abortController.signal,
     });
 
-    expect(Date.now() - startedAt).toBeLessThan(1000);
+    // Windows waits for taskkill /T /F to finish tearing down the shell tree.
+    expect(Date.now() - startedAt).toBeLessThan(process.platform === 'win32' ? 2_500 : 1_000);
     expect(results).toHaveLength(1);
     expect(results[0]?.action).toBe('allow');
     expect(results[0]?.timedOut).toBeUndefined();
