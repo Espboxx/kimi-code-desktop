@@ -83,12 +83,22 @@ const EMPTY_EXTENSIONS: ExtensionSnapshot = {
   workspaceSkills: [],
 };
 
+export function isCurrentWorkspace(
+  root: string,
+  generation: number,
+  currentRoot: string | undefined,
+  currentGeneration: number,
+): boolean {
+  return root === currentRoot && generation === currentGeneration;
+}
+
 export class KimiDesktopRuntime {
   readonly harness: KimiHarness;
 
   private readonly host: KimiDesktopRuntimeHost;
   private readonly sessionRuntimes = new Map<string, SessionRuntime>();
   private workspaceRoot?: string;
+  private workspaceGeneration = 0;
   private workspace = EMPTY_WORKSPACE;
   private tree: DesktopSnapshot['tree'] = [];
   private gitFiles: DesktopSnapshot['gitFiles'] = [];
@@ -718,12 +728,18 @@ export class KimiDesktopRuntime {
     }
   }
 
-  private async refreshWorkspace(changedPaths: readonly string[] = []): Promise<void> {
-    const root = this.requireWorkspaceRoot();
+  private async refreshWorkspace(
+    changedPaths: readonly string[] = [],
+    expectedRoot = this.requireWorkspaceRoot(),
+    expectedGeneration = this.workspaceGeneration,
+  ): Promise<void> {
+    const root = expectedRoot;
+    const generation = expectedGeneration;
     const [refreshed, trust] = await Promise.all([
       refreshWorkspace(root),
       this.harness.getWorkspaceTrustInfo(root),
     ]);
+    if (!isCurrentWorkspace(root, generation, this.workspaceRoot, this.workspaceGeneration)) return;
     this.workspace = {
       ...refreshed.workspace,
       isRepo: refreshed.isRepo,
@@ -776,8 +792,8 @@ export class KimiDesktopRuntime {
     this.auth = redactSecrets(await this.harness.auth.status());
   }
 
-  private async refreshExtensions(): Promise<void> {
-    const root = this.workspaceRoot;
+  private async refreshExtensions(expectedRoot?: string, expectedGeneration?: number): Promise<void> {
+    const root = expectedRoot ?? this.workspaceRoot;
     const [pluginSummaries, capabilities, workspaceSkills] = await Promise.all([
       this.harness.listPlugins(),
       this.harness.listCapabilities(),
@@ -790,6 +806,10 @@ export class KimiDesktopRuntime {
         return plugin;
       }
     }));
+    if (
+      expectedRoot !== undefined &&
+      !isCurrentWorkspace(expectedRoot, expectedGeneration!, this.workspaceRoot, this.workspaceGeneration)
+    ) return;
     this.extensions = {
       plugins: redactSecrets(plugins) as readonly unknown[],
       capabilities: redactSecrets(capabilities) as readonly unknown[],
@@ -824,13 +844,20 @@ export class KimiDesktopRuntime {
       });
     }
 
+    let generation = ++this.workspaceGeneration;
     const [refreshed, trust, sessions] = await Promise.all([
       refreshWorkspace(root),
       this.harness.getWorkspaceTrustInfo(root),
       this.harness.listSessions({ workDir: root }),
     ]);
+    if (generation !== this.workspaceGeneration) return;
+
     const switchingWorkspace = this.workspaceRoot !== undefined && this.workspaceRoot !== root;
-    if (switchingWorkspace) await this.clearWorkspaceState();
+    if (switchingWorkspace) {
+      await this.clearWorkspaceState();
+      if (this.workspaceRoot !== undefined || this.workspaceGeneration !== generation + 1) return;
+      generation = this.workspaceGeneration;
+    }
 
     this.workspaceRoot = root;
     this.workspace = {
@@ -850,40 +877,63 @@ export class KimiDesktopRuntime {
       changedPaths: [],
     });
 
+    if (!isCurrentWorkspace(root, generation, this.workspaceRoot, this.workspaceGeneration)) return;
     try {
-      await this.refreshExtensions();
+      await this.refreshExtensions(root, generation);
     } catch (error) {
-      this.publishError(error, 'extension.list');
+      if (isCurrentWorkspace(root, generation, this.workspaceRoot, this.workspaceGeneration)) {
+        this.publishError(error, 'extension.list');
+      }
+      return;
     }
-    await this.restartWorkspaceWatcher();
+    if (!isCurrentWorkspace(root, generation, this.workspaceRoot, this.workspaceGeneration)) return;
+    await this.restartWorkspaceWatcher(root, generation);
+    if (!isCurrentWorkspace(root, generation, this.workspaceRoot, this.workspaceGeneration)) return;
     if (this.activeSessionId === undefined || !this.sessions.some((session) => session.id === this.activeSessionId)) {
       this.activeSessionId = undefined;
       const latest = this.sessions[0];
-      if (latest !== undefined) {
+      if (latest !== undefined && isCurrentWorkspace(root, generation, this.workspaceRoot, this.workspaceGeneration)) {
         try {
           await this.resumeSession(latest.id);
         } catch (error) {
-          this.publishError(error, 'session.resume');
+          if (isCurrentWorkspace(root, generation, this.workspaceRoot, this.workspaceGeneration)) {
+            this.publishError(error, 'session.resume');
+          }
+          return;
         }
+        if (!isCurrentWorkspace(root, generation, this.workspaceRoot, this.workspaceGeneration)) return;
       }
     }
-    if (options.remember !== false) {
+    if (options.remember !== false && isCurrentWorkspace(root, generation, this.workspaceRoot, this.workspaceGeneration)) {
       try {
         await this.host.rememberWorkspace(root);
       } catch (error) {
-        this.publishError(Object.assign(new Error('无法记住当前工作区'), {
-          code: 'workspace.remember_failed',
-          details: { path: root, reason: error instanceof Error ? error.message : String(error) },
-        }), 'workspace.remember');
+        if (isCurrentWorkspace(root, generation, this.workspaceRoot, this.workspaceGeneration)) {
+          this.publishError(Object.assign(new Error('无法记住当前工作区'), {
+            code: 'workspace.remember_failed',
+            details: { path: root, reason: error instanceof Error ? error.message : String(error) },
+          }), 'workspace.remember');
+        }
       }
     }
-    if (options.publish !== false) this.publishSnapshot();
+    if (options.publish !== false && isCurrentWorkspace(root, generation, this.workspaceRoot, this.workspaceGeneration)) {
+      this.publishSnapshot();
+    }
   }
 
-  private async restartWorkspaceWatcher(): Promise<void> {
-    await this.workspaceWatcher?.close();
-    const root = this.workspaceRoot;
+  private async restartWorkspaceWatcher(expectedRoot?: string, expectedGeneration?: number): Promise<void> {
+    const root = expectedRoot ?? this.workspaceRoot;
+    const generation = expectedGeneration ?? this.workspaceGeneration;
     if (this.closing || root === undefined) return;
+    if (!isCurrentWorkspace(root, generation, this.workspaceRoot, this.workspaceGeneration)) return;
+
+    const watcher = this.workspaceWatcher;
+    await watcher?.close();
+    if (
+      this.workspaceWatcher !== watcher ||
+      !isCurrentWorkspace(root, generation, this.workspaceRoot, this.workspaceGeneration)
+    ) return;
+
     this.workspaceWatcher = watch(root, {
       ignoreInitial: true,
       followSymlinks: false,
@@ -902,6 +952,7 @@ export class KimiDesktopRuntime {
 
   private scheduleWorkspaceRefresh(root: string, path: string): void {
     if (this.workspaceRoot !== root) return;
+    const generation = this.workspaceGeneration;
     const relativePath = relative(root, path).split('\\').join('/');
     if (relativePath.length > 0 && !relativePath.startsWith('.git/')) {
       this.pendingWorkspacePaths.add(relativePath);
@@ -909,14 +960,19 @@ export class KimiDesktopRuntime {
     if (this.workspaceRefreshTimer !== undefined) clearTimeout(this.workspaceRefreshTimer);
     this.workspaceRefreshTimer = setTimeout(() => {
       this.workspaceRefreshTimer = undefined;
-      if (this.workspaceRoot !== root) return;
+      if (!isCurrentWorkspace(root, generation, this.workspaceRoot, this.workspaceGeneration)) return;
       const changedPaths = [...this.pendingWorkspacePaths].toSorted();
       this.pendingWorkspacePaths.clear();
-      void this.refreshWorkspace(changedPaths).catch((error) => this.publishError(error, 'workspace.watch'));
+      void this.refreshWorkspace(changedPaths, root, generation).catch((error) => {
+        if (isCurrentWorkspace(root, generation, this.workspaceRoot, this.workspaceGeneration)) {
+          this.publishError(error, 'workspace.watch');
+        }
+      });
     }, 180);
   }
 
   private async clearWorkspaceState(): Promise<void> {
+    this.workspaceGeneration += 1;
     if (this.workspaceRefreshTimer !== undefined) clearTimeout(this.workspaceRefreshTimer);
     if (this.sessionIndexRefreshTimer !== undefined) clearTimeout(this.sessionIndexRefreshTimer);
     this.workspaceRefreshTimer = undefined;

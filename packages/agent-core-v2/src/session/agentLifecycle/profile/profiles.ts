@@ -37,6 +37,7 @@ const AGENT_TOOLS = [
   'WebSearch',
   'Agent',
   'AgentSwarm',
+  'AgentProfileCreate',
   'TeamSend',
   'TeamStatus',
   'TeamWait',

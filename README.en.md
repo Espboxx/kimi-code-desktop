@@ -23,14 +23,14 @@ Kimi Code Desktop is a Windows-first Electron workbench that brings Kimi Code ag
 
 ![Kimi Code Desktop dedicated Team workbench](docs/media/desktop-team-workbench.png)
 
-Both images are generated from an isolated local E2E fixture and contain no machine-specific path, real session, or credential data.
+These screenshots are generated from an isolated local E2E fixture and contain no machine-specific path, real session, or credential data.
 
 ## Highlights
 
 - **Session workbench:** persisted Kimi sessions, streaming transcripts, approvals and questions, context status, Plan, Goal, TodoList, and background tasks in one view.
 - **Code and Git:** a workspace tree, aggregated Git decorations, Git diff tabs, and a bundled Monaco Editor with save, search, undo, and dirty-file close protection.
 - **Agent observability:** inspect running, completed, failed, and interactive states for the main agent, subagents, and parallel tasks.
-- **Dedicated Team workbench:** manage multi-agent tasks, channels, members, nested assignments, unread messages, and agent details in a top-level Team surface separate from normal sessions.
+- **Dedicated Team workbench:** manage multi-agent tasks, named members, profession-based assignments, unread messages, and agent details in a top-level Team surface. The channel uses distinct user/agent bubbles with Markdown line breaks and clickable `@mentions`.
 - **Configuration and extensions:** manage authentication, models, MCP, Skills, Plugins, diagnostics, and workspace trust inside Desktop.
 - **Security boundary:** the renderer runs with sandbox and context isolation and can reach native capabilities only through the validated `window.kimiDesktop` IPC bridge.
 
@@ -38,13 +38,13 @@ Both images are generated from an isolated local E2E fixture and contain no mach
 
 The `desktop-v*` GitHub Actions workflow builds a portable Windows x64 executable. Open this repository's [GitHub Releases](../../releases) page and download:
 
-- `Kimi-Code-Desktop-0.2.0-x64-portable.exe`
-- `Kimi-Code-Desktop-0.2.0-x64-portable.exe.sha256`
+- `Kimi-Code-Desktop-0.3.0-x64-portable.exe`
+- `Kimi-Code-Desktop-0.3.0-x64-portable.exe.sha256`
 
 Verify the SHA256 checksum in PowerShell:
 
 ```powershell
-$exe = ".\Kimi-Code-Desktop-0.2.0-x64-portable.exe"
+$exe = ".\Kimi-Code-Desktop-0.3.0-x64-portable.exe"
 $expected = (Get-Content "$exe.sha256").Split()[0]
 $actual = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
 $actual -eq $expected
@@ -73,7 +73,9 @@ Team is a first-class top-level Desktop surface and does not require a manual ex
 3. Keep the current default permission or use YOLO for that task only.
 4. Follow progress in `general`; select a member or assignment to open that agent's details.
 
-Each team task uses its own persisted session. Posting a channel message actively wakes the leader: an idle leader starts a collaboration turn, while a busy leader receives a steer update. Leaders are prompted to delegate two or more independent workstreams when appropriate, and members share progress, blockers, and handoffs through `TeamSend`, `TeamStatus`, and `TeamWait`. File-operation records still open the target file, while edits open a before/after diff. Sessions containing Team data from earlier versions migrate safely when resumed.
+Each team task uses its own persisted session. Posting a channel message actively wakes the leader: an idle leader starts a collaboration turn, while a busy leader receives a steer update. The leader selects a profession such as `explore` or `coder` independently for each task and gives every new Agent a persistent display name. When no existing profession fits, the leader can create an approval-gated, reusable project profile with `AgentProfileCreate`, or explicitly select user scope for a profile shared across workspaces.
+
+Channel messages use bounded-height bubbles, with long content scrolling inside the bubble. Single line breaks are preserved, and highlighted `@display-name` or `@agent-id` mentions open the corresponding Agent. Members share progress, blockers, and handoffs through `TeamSend`, `TeamStatus`, and `TeamWait`. File-operation records still open the target file, while edits open a before/after diff. Sessions containing Team data from earlier versions migrate safely when resumed.
 
 ## Architecture boundary
 

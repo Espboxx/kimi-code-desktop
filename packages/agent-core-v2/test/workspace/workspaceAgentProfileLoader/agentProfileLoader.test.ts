@@ -13,7 +13,7 @@
  * test/workspace/workspaceAgentProfileLoader/agentProfileLoader.test.ts`.
  */
 
-import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 
 import { join } from 'pathe';
@@ -66,6 +66,8 @@ import { IPluginAgentProfileLoader } from '#/workspace/workspaceAgentProfileLoad
 import { IWorkspaceAgentProfileLoader } from '#/workspace/workspaceAgentProfileLoader/workspaceAgentProfileLoader';
 import { IExtraAgentProfileLoader } from '#/workspace/workspaceAgentProfileLoader/extraAgentProfileLoader';
 import { IExplicitAgentProfileLoader } from '#/workspace/workspaceAgentProfileLoader/explicitAgentProfileLoader';
+import { IAgentProfileWriter } from '#/workspace/workspaceAgentProfileLoader/agentProfileWriter';
+import { AgentProfileWriterService } from '#/workspace/workspaceAgentProfileLoader/agentProfileWriterService';
 
 import { stubBootstrap } from '../../app/bootstrap/stubs';
 
@@ -279,6 +281,7 @@ function makeStack(fixture: Fixture, opts?: StackOptions) {
       [IWorkspaceAgentProfileLoader, new SyncDescriptor(WorkspaceAgentProfileLoaderService)],
       [IExtraAgentProfileLoader, new SyncDescriptor(ExtraAgentProfileLoaderService)],
       [IExplicitAgentProfileLoader, new SyncDescriptor(ExplicitAgentProfileLoaderService)],
+      [IAgentProfileWriter, new SyncDescriptor(AgentProfileWriterService)],
     ),
     true,
   );
@@ -291,6 +294,7 @@ function makeStack(fixture: Fixture, opts?: StackOptions) {
   const workspaceLoader = get(IWorkspaceAgentProfileLoader);
   const extraLoader = get(IExtraAgentProfileLoader);
   const explicitLoader = get(IExplicitAgentProfileLoader);
+  const profileWriter = get(IAgentProfileWriter);
   const seed: ISessionAgentProfileCatalogSeed = {
     _serviceBrand: undefined,
     workspaceKey: workspaceContext.workspaceId,
@@ -305,6 +309,7 @@ function makeStack(fixture: Fixture, opts?: StackOptions) {
     workspaceLoader,
     extraLoader,
     explicitLoader,
+    profileWriter,
     catalog,
     config,
     warnings,
@@ -360,6 +365,93 @@ describe('agent profile loaders + session catalog', () => {
         expect(stack.catalog.getDefault().name).toBe(DEFAULT_AGENT_PROFILE_NAME);
         expect(stack.catalog.list().length).toBeGreaterThan(0);
         expect(stack.catalog.inspect(DEFAULT_AGENT_PROFILE_NAME)?.sourceId).toBe('builtin');
+      });
+    });
+  });
+
+  it('creates a reusable workspace profile and refreshes the session catalog', async () => {
+    await withFixture(async (fixture) => {
+      await withStack(fixture, undefined, async (stack) => {
+        await stack.ready();
+
+        const result = await stack.profileWriter.create({
+          name: 'release-auditor',
+          description: 'Audits release readiness',
+          whenToUse: 'Use before publishing a release.',
+          prompt: 'Inspect release artifacts and report blockers.',
+          scope: 'workspace',
+          tools: ['Read', 'Bash'],
+          modelPreference: 'secondary',
+        });
+
+        expect(result).toEqual({
+          name: 'release-auditor',
+          scope: 'workspace',
+          path: '.kimi-code/agents/release-auditor.md',
+          created: true,
+        });
+        expect(await readFile(join(fixture.workDir, result.path), 'utf8')).toContain(
+          'whenToUse: "Use before publishing a release."',
+        );
+        expect(stack.catalog.get('release-auditor')).toMatchObject({
+          description: 'Audits release readiness',
+          whenToUse: 'Use before publishing a release.',
+          modelPreference: 'secondary',
+        });
+        expect(stack.catalog.inspect('release-auditor')?.sourceId).toBe('workspace');
+      });
+    });
+  });
+
+  it('treats an identical profile retry as idempotent and rejects different content', async () => {
+    await withFixture(async (fixture) => {
+      await withStack(fixture, undefined, async (stack) => {
+        await stack.ready();
+        const input = {
+          name: 'test-specialist',
+          description: 'Runs focused tests',
+          whenToUse: 'Use for regression verification.',
+          prompt: 'Run the focused regression suite.',
+          scope: 'workspace' as const,
+          tools: [] as const,
+          disallowedTools: [] as const,
+          subagents: [] as const,
+        };
+
+        expect((await stack.profileWriter.create(input)).created).toBe(true);
+        expect((await stack.profileWriter.create(input)).created).toBe(false);
+        expect(await readFile(join(fixture.workDir, '.kimi-code/agents/test-specialist.md'), 'utf8'))
+          .toContain('tools: []\ndisallowedTools: []\nsubagents: []');
+        expect(stack.catalog.get('test-specialist')).toMatchObject({
+          tools: [],
+          disallowedTools: [],
+          subagents: [],
+        });
+        await expect(
+          stack.profileWriter.create({ ...input, prompt: 'Use a different workflow.' }),
+        ).rejects.toMatchObject({ code: 'profile.create_conflict' });
+      });
+    });
+  });
+
+  it('creates a user profile below KIMI_CODE_HOME and refreshes the user source', async () => {
+    await withFixture(async (fixture) => {
+      await withStack(fixture, undefined, async (stack) => {
+        await stack.ready();
+
+        const result = await stack.profileWriter.create({
+          name: 'docs-editor',
+          description: 'Edits user documentation',
+          whenToUse: 'Use for documentation changes.',
+          prompt: 'Write concise bilingual documentation.',
+          scope: 'user',
+        });
+
+        expect(result.path).toBe('agents/docs-editor.md');
+        expect(await readFile(join(fixture.homeDir, result.path), 'utf8')).toContain(
+          'name: "docs-editor"',
+        );
+        expect(stack.catalog.inspect('docs-editor')?.sourceId).toBe('user');
       });
     });
   });

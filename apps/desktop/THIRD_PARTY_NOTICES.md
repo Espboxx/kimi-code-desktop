@@ -7,9 +7,9 @@ Workspace packages maintained in this repository are covered by the repository-l
 [MIT License](../../LICENSE) and are not duplicated here. Electron also ships its own
 `LICENSE.electron.txt` and `LICENSES.chromium.html` files in Windows distributions.
 
-- External packages: 455
+- External packages: 457
 - Workspace source roots: 12
-- Dependency graph SHA-256: `79d847c252dc32f89fc1bd08ca5ccaa8bbad27dc4b890ce51311305819e93030`
+- Dependency graph SHA-256: `de52bd70885145e4369ab6ffea8ea46816c9eab06927bbe4cda49f5ffa3e85b6`
 
 Packages are sorted by name and version. SPDX expressions and license texts come from
 the installed package metadata selected by the pinned pnpm lockfile. If a published
@@ -289,6 +289,7 @@ and records that source next to the affected package.
 | `mdast-util-mdx-expression` | `2.0.1` | `MIT` | <https://github.com/syntax-tree/mdast-util-mdx-expression#readme> |
 | `mdast-util-mdx-jsx` | `3.2.0` | `MIT` | <https://github.com/syntax-tree/mdast-util-mdx-jsx#readme> |
 | `mdast-util-mdxjs-esm` | `2.0.1` | `MIT` | <https://github.com/syntax-tree/mdast-util-mdxjs-esm#readme> |
+| `mdast-util-newline-to-break` | `2.0.0` | `MIT` | <https://github.com/syntax-tree/mdast-util-newline-to-break#readme> |
 | `mdast-util-phrasing` | `4.1.0` | `MIT` | <https://github.com/syntax-tree/mdast-util-phrasing#readme> |
 | `mdast-util-to-hast` | `13.2.1` | `MIT` | <https://github.com/syntax-tree/mdast-util-to-hast#readme> |
 | `mdast-util-to-markdown` | `2.1.2` | `MIT` | <https://github.com/syntax-tree/mdast-util-to-markdown#readme> |
@@ -378,6 +379,7 @@ and records that source next to the affected package.
 | `reflect.getprototypeof` | `1.0.10` | `MIT` | <https://github.com/es-shims/Reflect.getPrototypeOf> |
 | `regexp.escape` | `2.0.1` | `MIT` | <https://github.com/es-shims/RegExp.escape#readme> |
 | `regexp.prototype.flags` | `1.5.4` | `MIT` | <https://github.com/es-shims/RegExp.prototype.flags#readme> |
+| `remark-breaks` | `4.0.0` | `MIT` | <https://github.com/remarkjs/remark-breaks#readme> |
 | `remark-gfm` | `4.0.1` | `MIT` | <https://github.com/remarkjs/remark-gfm#readme> |
 | `remark-parse` | `11.0.0` | `MIT` | <https://remark.js.org> |
 | `remark-rehype` | `11.1.2` | `MIT` | <https://github.com/remarkjs/remark-rehype#readme> |
@@ -10983,6 +10985,38 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
+### `mdast-util-newline-to-break@2.0.0`
+
+- SPDX: `MIT`
+- Homepage: <https://github.com/syntax-tree/mdast-util-newline-to-break#readme>
+
+#### `license`
+
+```text
+(The MIT License)
+
+Copyright (c) 2017 Titus Wormer <tituswormer@gmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+'Software'), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
 ### `mdast-util-phrasing@4.1.0`
 
 - SPDX: `MIT`
@@ -14056,6 +14090,38 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+```
+
+### `remark-breaks@4.0.0`
+
+- SPDX: `MIT`
+- Homepage: <https://github.com/remarkjs/remark-breaks#readme>
+
+#### `license`
+
+```text
+(The MIT License)
+
+Copyright (c) 2017 Titus Wormer <tituswormer@gmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+'Software'), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
 ### `remark-gfm@4.0.1`

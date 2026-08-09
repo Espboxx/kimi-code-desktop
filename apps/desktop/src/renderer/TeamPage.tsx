@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkBreaks from 'remark-breaks';
+import remarkGfm from 'remark-gfm';
 import {
   Bot,
   ChevronDown,
@@ -16,9 +19,11 @@ import type {
   TeamAssignment,
   TeamAssignmentStatus,
   TeamMember,
+  TeamMessage,
   TeamStateSnapshot,
 } from '../shared/desktop-api';
 import { classNames } from './ui-utils';
+import { buildTeamMentionAliases, rehypeTeamMentions } from './team-message-markdown';
 
 export function TeamPage({ sessionId, state, onSeen, onSelectAgent }: {
   readonly sessionId: string;
@@ -42,6 +47,11 @@ export function TeamPage({ sessionId, state, onSeen, onSelectAgent }: {
     [snapshot.assignments],
   );
   const assignmentGroups = useMemo(() => groupAssignmentForest(assignmentForest), [assignmentForest]);
+  const mentionAliases = useMemo(
+    () => buildTeamMentionAliases(snapshot.members, snapshot.assignments),
+    [snapshot.assignments, snapshot.members],
+  );
+  const leader = agentPresentation(team?.leaderAgentId ?? 'main', snapshot.members, snapshot.assignments);
 
   useEffect(() => {
     const element = streamRef.current;
@@ -78,7 +88,7 @@ export function TeamPage({ sessionId, state, onSeen, onSelectAgent }: {
       <header className="team-header">
         <div className="team-title"><Users size={17} /><div><strong>团队频道</strong><span>#{team.channelId}</span></div></div>
         <div className="team-summary">
-          <span title={`组长 ${team.leaderAgentId}`}><Bot size={13} />{team.leaderAgentId}</span>
+          <span title={`组长 ${team.leaderAgentId}`}><Bot size={13} />{leader.displayName}</span>
           <span><Users size={13} />{snapshot.members.length} 成员</span>
           <span className={classNames(activeBatches > 0 && 'running')}><CircleDashed size={13} />{activeBatches} 活动批次</span>
           <span className={classNames(snapshot.state === 'degraded' && 'failed')} title={snapshot.degradedReason}>
@@ -101,25 +111,14 @@ export function TeamPage({ sessionId, state, onSeen, onSelectAgent }: {
           >
             {state.messages.length === 0 && <div className="team-message-empty">general 频道还没有消息</div>}
             {state.messages.map((message) => (
-              <article className="team-message" key={message.id}>
-                <button
-                  className="team-message-avatar"
-                  disabled={message.sender.actorKind !== 'agent'}
-                  onClick={() => { if (message.sender.actorKind === 'agent') onSelectAgent(message.sender.actorId); }}
-                  title={message.sender.actorId}
-                >
-                  {message.sender.actorKind === 'agent' ? <Bot size={14} /> : <UserRound size={14} />}
-                </button>
-                <div>
-                  <header>
-                    <strong>{senderLabel(message.sender.actorKind, message.sender.actorId, message.sender.role)}</strong>
-                    <span>{message.sender.role}</span>
-                    {message.assignmentId !== undefined && <code>{shortId(message.assignmentId)}</code>}
-                    <time>{formatTime(message.createdAt)}</time>
-                  </header>
-                  <p>{message.body}</p>
-                </div>
-              </article>
+              <TeamMessageBubble
+                assignments={snapshot.assignments}
+                members={snapshot.members}
+                mentionAliases={mentionAliases}
+                message={message}
+                onSelectAgent={onSelectAgent}
+                key={message.id}
+              />
             ))}
           </div>
           <div className="team-composer">
@@ -157,7 +156,12 @@ export function TeamPage({ sessionId, state, onSeen, onSelectAgent }: {
           </button>
           {assignmentsOpen && (
             <div className="team-assignment-scroll">
-              <MemberList members={snapshot.members} leaderAgentId={team.leaderAgentId} onSelectAgent={onSelectAgent} />
+              <MemberList
+                assignments={snapshot.assignments}
+                members={snapshot.members}
+                leaderAgentId={team.leaderAgentId}
+                onSelectAgent={onSelectAgent}
+              />
               {assignmentForest.length === 0
                 ? <div className="team-assignment-empty">暂无任务分配</div>
                 : assignmentGroups.map((group) => (
@@ -174,24 +178,30 @@ export function TeamPage({ sessionId, state, onSeen, onSelectAgent }: {
   );
 }
 
-function MemberList({ members, leaderAgentId, onSelectAgent }: {
+function MemberList({ members, assignments, leaderAgentId, onSelectAgent }: {
   readonly members: readonly TeamMember[];
+  readonly assignments: readonly TeamAssignment[];
   readonly leaderAgentId: string;
   readonly onSelectAgent: (agentId: string) => void;
 }) {
   return (
     <div className="team-member-list">
       <h3>成员</h3>
-      {members.map((member) => (
-        <button
-          onClick={() => {
-            onSelectAgent(member.agentId);
-          }}
-          key={member.agentId}
-        >
-          <Bot size={13} /><span>{member.agentId}</span><em>{member.agentId === leaderAgentId ? '组长' : '成员'}</em>
-        </button>
-      ))}
+      {members.map((member) => {
+        const presentation = agentPresentation(member.agentId, members, assignments);
+        return (
+          <button
+            onClick={() => {
+              onSelectAgent(member.agentId);
+            }}
+            key={member.agentId}
+          >
+            <Bot size={13} />
+            <span title={member.agentId}>{presentation.displayName}</span>
+            <em>{member.agentId === leaderAgentId ? '组长' : presentation.profileName ?? '成员'}</em>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -216,7 +226,7 @@ function AssignmentNode({ node, depth, onSelectAgent }: {
         title={assignment.description}
       >
         <AssignmentStatusIcon status={assignment.status} />
-        <span><strong>{assignment.description}</strong><small>{assignment.profileName} · {assignment.agentId ?? '等待 Agent'}</small></span>
+        <span><strong>{assignment.description}</strong><small>{assignment.profileName} · {assignment.displayName ?? assignment.agentId ?? '等待 Agent'}</small></span>
         <em className={`assignment-${assignment.status}`}>{assignmentStatusLabel(assignment.status)}</em>
       </button>
       {node.children.map((child) => <AssignmentNode node={child} depth={depth + 1} onSelectAgent={onSelectAgent} key={child.assignment.id} />)}
@@ -299,14 +309,77 @@ function assignmentStatusLabel(status: TeamAssignmentStatus): string {
   return labels[status];
 }
 
-function senderLabel(actorKind: 'agent' | 'user', actorId: string, role: string): string {
-  if (actorKind === 'user') return '你';
-  if (role === 'leader') return `${actorId}（组长）`;
-  return actorId;
-}
-
 function shortId(id: string): string {
   return id.length <= 14 ? id : `${id.slice(0, 8)}…`;
+}
+
+function TeamMessageBubble({ message, members, assignments, mentionAliases, onSelectAgent }: {
+  readonly message: TeamMessage;
+  readonly members: readonly TeamMember[];
+  readonly assignments: readonly TeamAssignment[];
+  readonly mentionAliases: ReturnType<typeof buildTeamMentionAliases>;
+  readonly onSelectAgent: (agentId: string) => void;
+}) {
+  const isUser = message.sender.actorKind === 'user';
+  const presentation = isUser
+    ? { displayName: '你', profileName: undefined, agentId: message.sender.actorId }
+    : agentPresentation(message.sender.actorId, members, assignments);
+  return (
+    <article className={classNames('team-message', isUser ? 'user' : 'agent', message.sender.role === 'leader' && 'leader')}>
+      <button
+        className="team-message-avatar"
+        disabled={isUser}
+        onClick={() => { if (!isUser) onSelectAgent(message.sender.actorId); }}
+        title={isUser ? '你' : `${presentation.displayName} · ${message.sender.actorId}`}
+      >
+        {isUser ? <UserRound size={14} /> : <Bot size={14} />}
+      </button>
+      <div className="team-message-frame">
+        <header className="team-message-meta">
+          <strong>{presentation.displayName}</strong>
+          <span>{message.sender.role === 'leader' ? '组长' : presentation.profileName ?? '用户'}</span>
+          {message.assignmentId !== undefined && <code>{shortId(message.assignmentId)}</code>}
+          <time>{formatTime(message.createdAt)}</time>
+        </header>
+        <div className="team-message-bubble markdown-body">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkBreaks]}
+            rehypePlugins={[[rehypeTeamMentions, mentionAliases]]}
+            components={{
+              button: ({ node, children, ...props }) => {
+                const agentId = String(node?.properties?.['dataAgentId'] ?? '');
+                return (
+                  <button
+                    {...props}
+                    type="button"
+                    onClick={() => { if (agentId !== '') onSelectAgent(agentId); }}
+                  >
+                    {children}
+                  </button>
+                );
+              },
+            }}
+          >
+            {message.body}
+          </ReactMarkdown>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function agentPresentation(
+  agentId: string,
+  members: readonly TeamMember[],
+  assignments: readonly TeamAssignment[],
+): { readonly agentId: string; readonly displayName: string; readonly profileName?: string } {
+  const member = members.find((candidate) => candidate.agentId === agentId);
+  const assignment = assignments.findLast((candidate) => candidate.agentId === agentId);
+  return {
+    agentId,
+    displayName: member?.displayName ?? assignment?.displayName ?? (agentId === 'main' ? '组长' : agentId),
+    profileName: assignment?.profileName,
+  };
 }
 
 function formatTime(timestamp: number): string {

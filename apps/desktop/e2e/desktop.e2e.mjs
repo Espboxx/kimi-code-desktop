@@ -32,6 +32,7 @@ const sampleImagePath = join(workspace, 'pixel.png');
 const secondImagePath = join(workspace, 'pixel-2.png');
 const oversizedImagePath = join(workspace, 'oversized.png');
 const swarmOutputPath = join(workspace, 'swarm-alpha.txt');
+const teamProfilePath = join(workspace, '.kimi-code', 'agents', 'fixture-researcher.md');
 const providerToken = 'sk-desktop-e2e-boundary-secret';
 const processLogs = [];
 const pageErrors = [];
@@ -506,8 +507,13 @@ try {
   assert.equal(await teamTab.getAttribute('aria-selected'), 'true', 'new Team task should open its channel');
   const teamPage = page.locator('.team-page');
   await teamPage.waitFor({ state: 'visible' });
-  await teamPage.locator('.team-member-list button').filter({ hasText: 'main' }).click();
+  await teamPage.locator('.team-member-list button:has(span[title="main"])').click();
   await page.locator('.team-agent-surface').waitFor({ state: 'visible' });
+  await approveProfileIfNeeded(page, teamProfilePath);
+  assert.ok(
+    provider.requests.some((request) => request.toolName === 'AgentProfileCreate'),
+    'Team leader did not create the reusable fixture profile',
+  );
   try {
     await waitForAssistant(page, 'Team coordination resumed after a live message.', 45_000);
   } catch (error) {
@@ -540,15 +546,46 @@ try {
   });
   assert.match(teamWaitOutput ?? '', /"type":"message\.sent"/, `TeamWait was not woken by a team message: ${teamWaitOutput ?? 'missing'}`);
   await page.waitForFunction(async (id) =>
-    ((await window.kimiDesktop.host.snapshot()).teams[id]?.snapshot.latestChannelSeq ?? 0) >= 2,
+    ((await window.kimiDesktop.host.snapshot()).teams[id]?.snapshot.latestChannelSeq ?? 0) >= 3,
   teamSessionId, { timeout: 30_000 });
-  await page.waitForFunction(() => document.querySelectorAll('.team-message').length >= 2);
+  await page.waitForFunction(() => document.querySelectorAll('.team-message.agent').length >= 2);
   assert.ok(await teamPage.locator('.team-assignment-node').count() >= 2, 'Team assignments are missing');
-  assert.match(await teamPage.innerText(), /team-alpha|team-beta/);
+  const teamText = await teamPage.innerText();
+  const assignedItems = await page.evaluate(async (id) => (
+    (await window.kimiDesktop.host.snapshot()).teams[id]?.snapshot.assignments
+      .map((assignment) => assignment.item)
+      .filter((item) => item !== undefined)
+      .sort() ?? []
+  ), teamSessionId);
+  assert.deepEqual(assignedItems, ['team-alpha', 'team-beta']);
+  assert.match(teamText, /界面侦察/);
+  assert.match(teamText, /构建专家/);
+  assert.match(teamText, /explore/);
+  assert.match(teamText, /fixture-researcher/);
+  assert.ok(await teamPage.locator('.team-message.agent').count() >= 2, 'Agent messages are not rendered as agent bubbles');
+  assert.ok(await teamPage.locator('.team-message.agent .team-message-bubble br').count() >= 2, 'single newlines were not rendered');
+  const mention = teamPage.locator('.team-mention').filter({ hasText: '@构建专家' }).first();
+  await mention.waitFor({ state: 'visible' });
+  const longBubble = teamPage.locator('.team-message-bubble').filter({ hasText: '验证行 01' });
+  const bubbleMetrics = await longBubble.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+    overflowY: getComputedStyle(element).overflowY,
+  }));
+  assert.ok(bubbleMetrics.clientHeight <= 240, `Team bubble exceeded fixed height: ${JSON.stringify(bubbleMetrics)}`);
+  assert.ok(bubbleMetrics.scrollHeight > bubbleMetrics.clientHeight, `long Team bubble does not scroll: ${JSON.stringify(bubbleMetrics)}`);
+  assert.equal(bubbleMetrics.overflowY, 'auto');
+  await mention.click();
+  await page.locator('.team-agent-surface').waitFor({ state: 'visible' });
+  assert.match(await page.locator('.team-agent-surface .conversation-header').innerText(), /构建专家/);
+  await page.locator('.team-channel-back').click();
+  await teamPage.waitFor({ state: 'visible' });
   const teamComposer = teamPage.locator('.team-composer textarea');
   await teamComposer.fill('User follow-up from the Team channel.');
   await teamPage.locator('.team-composer button').click();
-  await teamPage.locator('.team-message p').getByText('User follow-up from the Team channel.', { exact: true }).waitFor();
+  const userMessage = teamPage.locator('.team-message.user').filter({ hasText: 'User follow-up from the Team channel.' });
+  await userMessage.waitFor();
+  assert.equal(await userMessage.evaluate((element) => getComputedStyle(element).flexDirection), 'row-reverse');
   assert.equal(await page.locator('.approval-panel').count(), 0, 'Team messaging must not request tool approval');
   const persistedTeamTabs = await page.evaluate(() => Object.values(localStorage)
     .filter((value) => value.includes('"kind":"team"')));
@@ -919,6 +956,8 @@ try {
   }
   await restoredTeamTab.click();
   await restoredPage.locator('.team-page').getByText('User follow-up from the Team channel.', { exact: true }).waitFor();
+  assert.match(await restoredPage.locator('.team-page').innerText(), /界面侦察/);
+  assert.match(await restoredPage.locator('.team-page').innerText(), /构建专家/);
   await selectSessionByTitle(restoredPage, 'Desktop E2E Session');
   await restoredPage.locator('.inspector-tabs button').nth(1).click();
   await restoredPage.waitForFunction(() => document.querySelectorAll('.inspector .agent-activity-row').length >= 3);
@@ -1221,6 +1260,29 @@ async function waitForFileText(path, expected) {
   assert.equal(await readFile(path, 'utf8'), expected);
 }
 
+async function approveProfileIfNeeded(page, path) {
+  const approval = page.locator('.approval-panel');
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    try {
+      if ((await readFile(path, 'utf8')).includes('name: "fixture-researcher"')) return;
+    } catch {
+      // The profile has not been written yet.
+    }
+    if (await approval.isVisible().catch(() => false)) {
+      assert.match(await approval.innerText(), /fixture-researcher|Agent profile/i);
+      await approval.locator('.button-primary').click();
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+  }
+  const diagnostic = await page.evaluate(() => window.kimiDesktop.host.snapshot());
+  throw new Error(`Team profile was not created: ${JSON.stringify({
+    providerRequests: provider.requests.slice(-12),
+    activeSessionId: diagnostic.activeSessionId,
+    transcript: diagnostic.transcript,
+    team: diagnostic.activeSessionId === undefined ? undefined : diagnostic.teams[diagnostic.activeSessionId],
+  })}`);
+}
+
 async function selectSessionByTitle(page, title) {
   await page.locator('.surface-switcher').getByRole('button', { name: '会话', exact: true }).click();
   await page.locator('.session-row').filter({ hasText: title }).locator('.session-main').click();
@@ -1490,11 +1552,15 @@ async function startProvider() {
       }
       if (historyText.includes('team-alpha') && !hasToolCall(messages, 'TeamSend')) {
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
-        return sendTool(response, 'TeamSend', { message: 'team-alpha finding is ready' }, 'team-send-alpha', ++responseId);
+        return sendTool(response, 'TeamSend', {
+          message: '界面检查完成\n换行可见\n@构建专家 请继续验证',
+        }, 'team-send-alpha', ++responseId);
       }
       if (historyText.includes('team-beta') && !hasToolCall(messages, 'TeamSend')) {
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 900));
-        return sendTool(response, 'TeamSend', { message: 'team-beta finding is ready' }, 'team-send-beta', ++responseId);
+        return sendTool(response, 'TeamSend', {
+          message: ['@界面侦察 已收到', ...Array.from({ length: 32 }, (_, index) => `验证行 ${String(index + 1).padStart(2, '0')}`)].join('\n'),
+        }, 'team-send-beta', ++responseId);
       }
 
       if (last.role === 'tool') {
@@ -1579,20 +1645,35 @@ async function startProvider() {
         }, 'swarm-call-1', ++responseId);
       }
       if (promptText.includes('Launch a Team Mode batch and wait for live updates.')) {
+        if (!hasToolCall(messages, 'AgentProfileCreate')) {
+          return sendTool(response, 'AgentProfileCreate', {
+            name: 'fixture-researcher',
+            description: 'Validates long Team channel updates',
+            when_to_use: 'Use for long-form Team fixture verification.',
+            prompt: 'Inspect the assigned fixture, coordinate through TeamSend, and report a concise result.',
+            scope: 'workspace',
+          }, 'team-profile-create-call-1', ++responseId);
+        }
         return sendTool(response, 'AgentSwarm', {
           description: 'Coordinate Team Mode fixtures',
           prompt_template: 'Inspect {{item}}, send one update with TeamSend, then finish.',
-          items: ['team-alpha', 'team-beta'],
-          subagent_type: 'explore',
+          items: [
+            { item: 'team-alpha', display_name: '界面侦察', subagent_type: 'explore' },
+            { item: 'team-beta', display_name: '构建专家', subagent_type: 'fixture-researcher' },
+          ],
         }, 'team-swarm-call-1', ++responseId);
       }
       if (promptText.includes('Inspect team-alpha, send one update with TeamSend, then finish.')) {
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
-        return sendTool(response, 'TeamSend', { message: 'team-alpha finding is ready' }, 'team-send-alpha', ++responseId);
+        return sendTool(response, 'TeamSend', {
+          message: '界面检查完成\n换行可见\n@构建专家 请继续验证',
+        }, 'team-send-alpha', ++responseId);
       }
       if (promptText.includes('Inspect team-beta, send one update with TeamSend, then finish.')) {
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 900));
-        return sendTool(response, 'TeamSend', { message: 'team-beta finding is ready' }, 'team-send-beta', ++responseId);
+        return sendTool(response, 'TeamSend', {
+          message: ['@界面侦察 已收到', ...Array.from({ length: 32 }, (_, index) => `验证行 ${String(index + 1).padStart(2, '0')}`)].join('\n'),
+        }, 'team-send-beta', ++responseId);
       }
       if (promptText.includes('Recover after one transient provider failure.')) {
         transientAttempts += 1;

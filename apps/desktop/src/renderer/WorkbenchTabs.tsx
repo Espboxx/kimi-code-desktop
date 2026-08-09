@@ -4,12 +4,13 @@ import type { SessionListItem, SessionStatusSnapshot } from '../shared/desktop-a
 import { classNames } from './ui-utils';
 import type { WorkbenchTab, WorkbenchTabState } from './workbench-tabs';
 
-export function WorkbenchTabs({ state, sessions, statuses, pendingCounts, teamBadges, onActivate, onClose }: {
+export function WorkbenchTabs({ state, sessions, statuses, pendingCounts, teamBadges, agentLabels, onActivate, onClose }: {
   readonly state: WorkbenchTabState;
   readonly sessions: readonly SessionListItem[];
   readonly statuses: Readonly<Record<string, SessionStatusSnapshot>>;
   readonly pendingCounts: Readonly<Record<string, number>>;
   readonly teamBadges?: Readonly<Record<string, { readonly unread: number; readonly running: number; readonly failed: number }>>;
+  readonly agentLabels?: Readonly<Record<string, string>>;
   readonly onActivate: (tab: WorkbenchTab) => void;
   readonly onClose: (tab: WorkbenchTab) => void;
 }) {
@@ -31,9 +32,9 @@ export function WorkbenchTabs({ state, sessions, statuses, pendingCounts, teamBa
               onAuxClick={(event) => { if (event.button === 1) onClose(tab); }}
               key={tab.id}
             >
-              <button className="workbench-tab-main" onClick={() => onActivate(tab)} title={tabTitle(tab, session)}>
+              <button className="workbench-tab-main" onClick={() => onActivate(tab)} title={tabTitle(tab, session, agentLabels)}>
                 {tab.kind === 'session' ? <Bot size={13} /> : tab.kind === 'team' ? <Users size={13} /> : tab.kind === 'agent' ? <UserRoundCog size={13} /> : tab.kind === 'file' ? <FileCode2 size={13} /> : <GitCompare size={13} />}
-                <span>{tabLabel(tab, session)}</span>
+                <span>{tabLabel(tab, session, agentLabels)}</span>
                 {busy && <i className="tab-working" title="Working" />}
                 {pending > 0 && <em title={`${pending} 个待处理交互`}>{pending}</em>}
                 {(teamBadge?.running ?? 0) > 0 && <i className="tab-working" title={`${teamBadge?.running} 个任务运行中`} />}
@@ -50,19 +51,33 @@ export function WorkbenchTabs({ state, sessions, statuses, pendingCounts, teamBa
   );
 }
 
-function tabLabel(tab: WorkbenchTab, session?: SessionListItem): string {
+function tabLabel(
+  tab: WorkbenchTab,
+  session?: SessionListItem,
+  agentLabels?: Readonly<Record<string, string>>,
+): string {
   if (tab.kind === 'session') return session?.title || session?.lastPrompt || 'Kimi 会话';
   if (tab.kind === 'team') return `${session?.title || session?.lastPrompt || 'Kimi 会话'} · 团队`;
-  if (tab.kind === 'agent') return tab.agentId === 'main' ? '组长详情' : `${tab.agentId} · Agent`;
+  if (tab.kind === 'agent') {
+    const label = agentLabels?.[`${tab.sessionId}:${tab.agentId}`];
+    return tab.agentId === 'main' ? '组长详情' : `${label ?? tab.agentId} · Agent`;
+  }
   const name = tab.path.split('/').at(-1) ?? tab.path;
   if (tab.kind === 'diff') return `${name} (${areaLabel(tab.area)})`;
   return tab.kind === 'operation-diff' ? `${name} (操作差异)` : name;
 }
 
-function tabTitle(tab: WorkbenchTab, session?: SessionListItem): string {
+function tabTitle(
+  tab: WorkbenchTab,
+  session?: SessionListItem,
+  agentLabels?: Readonly<Record<string, string>>,
+): string {
   if (tab.kind === 'session') return `${session?.title || session?.lastPrompt || 'Kimi 会话'} · ${tab.sessionId}`;
   if (tab.kind === 'team') return `团队频道 · ${session?.title || session?.lastPrompt || tab.sessionId}`;
-  if (tab.kind === 'agent') return `${tab.agentId} · ${session?.title || session?.lastPrompt || tab.sessionId}`;
+  if (tab.kind === 'agent') {
+    const label = agentLabels?.[`${tab.sessionId}:${tab.agentId}`] ?? tab.agentId;
+    return `${label} (${tab.agentId}) · ${session?.title || session?.lastPrompt || tab.sessionId}`;
+  }
   if (tab.kind === 'diff') return `${tab.path} · ${areaLabel(tab.area)} Diff`;
   return tab.kind === 'operation-diff' ? `${tab.path} · 本次操作差异` : tab.path;
 }

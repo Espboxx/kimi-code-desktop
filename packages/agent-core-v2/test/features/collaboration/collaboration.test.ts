@@ -99,14 +99,14 @@ describe('SessionCollaborationService', () => {
       service.prepareSwarmBatch({
         callerAgentId: 'main',
         assignments: [
-          { assignmentId: 'a1', profileName: 'coder', description: 'Implement A' },
-          { assignmentId: 'a2', profileName: 'explore', description: 'Inspect B' },
+          { assignmentId: 'a1', displayName: 'builder', profileName: 'coder', description: 'Implement A' },
+          { assignmentId: 'a2', displayName: 'scout', profileName: 'explore', description: 'Inspect B' },
         ],
       }),
       service.prepareSwarmBatch({
         callerAgentId: 'main',
         assignments: [
-          { assignmentId: 'a3', profileName: 'explore', description: 'Inspect C' },
+          { assignmentId: 'a3', displayName: 'reviewer', profileName: 'explore', description: 'Inspect C' },
         ],
       }),
     ]);
@@ -125,6 +125,10 @@ describe('SessionCollaborationService', () => {
     });
 
     expect(receipt.batchId).toMatch(/^batch_/);
+    expect((await service.snapshot()).members).toContainEqual(expect.objectContaining({
+      agentId: 'agent-1',
+      displayName: 'builder',
+    }));
     expect(retriedLeaderMessage).toEqual(leaderMessage);
     expect(memberMessage.channelSeq).toBe(leaderMessage.channelSeq + 1);
     await expect(service.sendAgentMessage({
@@ -156,7 +160,7 @@ describe('SessionCollaborationService', () => {
     const first = buildService(true, persistence);
     const receipt = await first.service.prepareSwarmBatch({
       callerAgentId: 'main',
-      assignments: [{ assignmentId: 'a-restart', profileName: 'coder', description: 'Long work' }],
+      assignments: [{ assignmentId: 'a-restart', displayName: 'long-runner', profileName: 'coder', description: 'Long work' }],
     });
     await first.service.bindAssignment({ assignmentId: 'a-restart', agentId: 'agent-restart', parentAgentId: 'main' });
     const before = (await first.service.snapshot()).latestSeq;
@@ -193,7 +197,7 @@ describe('SessionCollaborationService', () => {
     const { service } = buildService();
     await service.prepareSwarmBatch({
       callerAgentId: 'main',
-      assignments: [{ assignmentId: 'a-protocol', profileName: 'coder', description: 'Implement protocol' }],
+      assignments: [{ assignmentId: 'a-protocol', displayName: 'protocol-builder', profileName: 'coder', description: 'Implement protocol' }],
     });
     await service.bindAssignment({
       assignmentId: 'a-protocol',
@@ -219,7 +223,7 @@ describe('SessionCollaborationService', () => {
     const { service } = buildService();
     await service.prepareSwarmBatch({
       callerAgentId: 'main',
-      assignments: [{ assignmentId: 'a-limit', profileName: 'coder', description: 'Work' }],
+      assignments: [{ assignmentId: 'a-limit', displayName: 'limit-worker', profileName: 'coder', description: 'Work' }],
     });
     for (let index = 0; index < 10; index += 1) {
       await service.sendUserMessage({ body: `message-${String(index)}`, clientMessageId: `id-${String(index)}` });
@@ -235,7 +239,7 @@ describe('SessionCollaborationService', () => {
     const first = buildService(true, persistence);
     await first.service.prepareSwarmBatch({
       callerAgentId: 'main',
-      assignments: [{ assignmentId: 'a-corrupt', profileName: 'coder', description: 'Work' }],
+      assignments: [{ assignmentId: 'a-corrupt', displayName: 'corrupt-worker', profileName: 'coder', description: 'Work' }],
     });
     first.log.append(SESSION_SCOPE + '/collaboration', 'events.jsonl', {
       version: 2,
@@ -286,6 +290,26 @@ describe('SessionCollaborationService', () => {
     wire.dispatch(contextClear({}));
     expect(wire.getModel(CollaborationDeliveryModel)).toEqual({ 'team-1': 7 });
   });
+
+  it('rejects invalid or duplicate display names before creating a batch', async () => {
+    const { service } = buildService();
+    await service.ensureTeam();
+
+    await expect(service.prepareSwarmBatch({
+      callerAgentId: 'main',
+      assignments: [
+        { assignmentId: 'a-duplicate-1', displayName: 'same-name', profileName: 'coder', description: 'First' },
+        { assignmentId: 'a-duplicate-2', displayName: 'SAME-NAME', profileName: 'explore', description: 'Second' },
+      ],
+    })).rejects.toMatchObject({ code: 'request.invalid' });
+    await expect(service.prepareSwarmBatch({
+      callerAgentId: 'main',
+      assignments: [
+        { assignmentId: 'a-reserved', displayName: 'agent-2', profileName: 'coder', description: 'Reserved' },
+      ],
+    })).rejects.toMatchObject({ code: 'request.invalid' });
+    expect((await service.snapshot()).batches).toEqual([]);
+  });
 });
 
 describe('TeamStatus tool', () => {
@@ -294,8 +318,8 @@ describe('TeamStatus tool', () => {
     await service.prepareSwarmBatch({
       callerAgentId: 'main',
       assignments: [
-        { assignmentId: 'a-complete', profileName: 'explore', description: 'Inspect renderer', item: 'renderer' },
-        { assignmentId: 'a-running', profileName: 'coder', description: 'Implement runtime', item: 'runtime' },
+        { assignmentId: 'a-complete', displayName: 'renderer-scout', profileName: 'explore', description: 'Inspect renderer', item: 'renderer' },
+        { assignmentId: 'a-running', displayName: 'runtime-builder', profileName: 'coder', description: 'Implement runtime', item: 'runtime' },
       ],
     });
     await service.bindAssignment({ assignmentId: 'a-complete', agentId: 'agent-1', parentAgentId: 'main' });
@@ -316,9 +340,11 @@ describe('TeamStatus tool', () => {
 
     expect(output.reusableMembers).toEqual([expect.objectContaining({
       agentId: 'agent-1',
+      displayName: 'renderer-scout',
       availability: 'reusable',
       latestAssignment: expect.objectContaining({
         profileName: 'explore',
+        displayName: 'renderer-scout',
         description: 'Inspect renderer',
         item: 'renderer',
         status: 'completed',

@@ -4,14 +4,22 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { ErrorCodes, KimiError } from '@moonshot-ai/kimi-code-sdk';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+const refreshWorkspaceMock = vi.hoisted(() => vi.fn());
+vi.mock('./workspace-service', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./workspace-service')>(),
+  refreshWorkspace: refreshWorkspaceMock,
+}));
 
 import {
   applySessionCreationDefaults,
   assertExternalUrl,
+  isCurrentWorkspace,
   prepareConfigPatch,
   redactSecrets,
   sanitizeConfig,
+  KimiDesktopRuntime,
   serializeError,
 } from './runtime';
 import { materializeReplayMedia, prepareDesktopMedia } from './media-service';
@@ -23,6 +31,104 @@ import {
   workspacePreferencesPath,
   writeWorkspacePreferences,
 } from './workspace-preferences';
+
+describe('workspace freshness', () => {
+  it('accepts only the active workspace generation', () => {
+    expect(isCurrentWorkspace('D:\\workspace-a', 3, 'D:\\workspace-a', 3)).toBe(true);
+    expect(isCurrentWorkspace('D:\\workspace-a', 3, 'D:\\workspace-b', 3)).toBe(false);
+    expect(isCurrentWorkspace('D:\\workspace-a', 2, 'D:\\workspace-a', 3)).toBe(false);
+    expect(isCurrentWorkspace('D:\\workspace-a', 3, undefined, 3)).toBe(false);
+  });
+
+  it('does not publish a stale workspace refresh after an A-to-B switch', async () => {
+    type Deferred<T> = { readonly promise: Promise<T>; readonly resolve: (value: T) => void };
+    const deferred = <T>(): Deferred<T> => {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>((next) => { resolve = next; });
+      return { promise, resolve };
+    };
+    const workspaceResult = (root: string, name: string, tree: readonly string[]) => ({
+      workspace: {
+        name,
+        root,
+        branch: 'HEAD',
+        changedFiles: tree.length,
+        isRepo: false,
+        gatedMcpServers: [],
+      },
+      isRepo: false,
+      tree,
+      files: [],
+    });
+    const trust = { trusted: false, gatedMcpServers: [] };
+    const workspaceA = await mkdtemp(join(tmpdir(), 'kimi-desktop-race-a-'));
+    const workspaceB = await mkdtemp(join(tmpdir(), 'kimi-desktop-race-b-'));
+    const openA = deferred<ReturnType<typeof workspaceResult>>();
+    const refreshA = deferred<ReturnType<typeof workspaceResult>>();
+    const openB = deferred<ReturnType<typeof workspaceResult>>();
+    const refreshTrustA = deferred<typeof trust>();
+    const notifications: Array<{ readonly workspace: { readonly root: string }; readonly tree: readonly string[] }> = [];
+    const runtime = new KimiDesktopRuntime({
+      workspaceRoot: workspaceA,
+      host: {
+        chooseDirectory: async () => null,
+        openExternal: async () => {},
+        openPath: async () => {},
+        setDirtyFiles: () => {},
+        resolveClose: () => {},
+        rememberWorkspace: async () => {},
+        notify: (notification) => {
+          if (notification.type === 'workspace.changed') notifications.push(notification);
+        },
+      },
+    });
+    const harness = runtime.harness;
+    const trustResults = [Promise.resolve(trust), refreshTrustA.promise, Promise.resolve(trust)];
+    const refreshResults = [openA.promise, refreshA.promise, openB.promise];
+    refreshWorkspaceMock.mockReset();
+    refreshWorkspaceMock.mockImplementation(() => refreshResults.shift()!);
+    vi.spyOn(harness, 'getWorkspaceTrustInfo').mockImplementation(async () => trustResults.shift()!);
+    vi.spyOn(harness, 'listSessions').mockResolvedValue([]);
+    vi.spyOn(harness, 'listPlugins').mockResolvedValue([]);
+    vi.spyOn(harness, 'listCapabilities').mockResolvedValue([]);
+    vi.spyOn(harness, 'listWorkspaceSkills').mockResolvedValue([]);
+    (runtime as unknown as { restartWorkspaceWatcher: () => Promise<void> }).restartWorkspaceWatcher = async () => {};
+    const openWorkspace = (runtime as unknown as {
+      openWorkspace: (path: string, options: { remember: boolean; publish: boolean }) => Promise<void>;
+    }).openWorkspace.bind(runtime);
+    const refreshWorkspace = (runtime as unknown as {
+      refreshWorkspace: (paths: readonly string[], root: string, generation: number) => Promise<void>;
+    }).refreshWorkspace.bind(runtime);
+
+    try {
+      const openingA = openWorkspace(workspaceA, { remember: false, publish: false });
+      openA.resolve(workspaceResult(workspaceA, 'A', ['a.txt']));
+      await openingA;
+      expect(runtime.snapshot().workspace.root).toBe(workspaceA);
+
+      const staleRefresh = refreshWorkspace([], workspaceA, 1);
+      const openingB = openWorkspace(workspaceB, { remember: false, publish: false });
+      openB.resolve(workspaceResult(workspaceB, 'B', ['b.txt']));
+      await openingB;
+      expect(runtime.snapshot()).toMatchObject({ workspace: { root: workspaceB }, tree: ['b.txt'] });
+
+      refreshA.resolve(workspaceResult(workspaceA, 'A', ['stale-a.txt']));
+      refreshTrustA.resolve(trust);
+      await staleRefresh;
+      expect(runtime.snapshot()).toMatchObject({ workspace: { root: workspaceB }, tree: ['b.txt'] });
+      expect(notifications.map(({ workspace, tree }) => ({ root: workspace.root, tree }))).toEqual([
+        { root: workspaceA, tree: ['a.txt'] },
+        { root: workspaceB, tree: ['b.txt'] },
+      ]);
+    } finally {
+      await runtime.close();
+      await Promise.all([
+        rm(workspaceA, { recursive: true, force: true }),
+        rm(workspaceB, { recursive: true, force: true }),
+      ]);
+    }
+  });
+});
 
 describe('desktop runtime boundary', () => {
   it('classifies explicit and live Team sessions without guessing from unrelated metadata', () => {

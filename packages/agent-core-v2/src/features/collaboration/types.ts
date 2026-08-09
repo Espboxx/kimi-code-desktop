@@ -16,6 +16,21 @@ export const TEAM_OPERATION_MAX_LIMIT = 1_000;
 export const TEAM_DELIVERY_MAX_MESSAGES = 20;
 export const TEAM_DELIVERY_MAX_BYTES = 24 * 1024;
 
+const TEAM_DISPLAY_NAME_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N}_-]{0,23}$/u;
+
+export const teamDisplayNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(24)
+  .regex(
+    TEAM_DISPLAY_NAME_PATTERN,
+    'Team display names may contain only letters, numbers, underscores, and hyphens',
+  )
+  .refine((name) => name.toLowerCase() !== 'main' && !/^agent-\d+$/i.test(name), {
+    message: 'Team display names must not use reserved agent identifiers',
+  });
+
 export const teamRoleSchema = z.enum(['leader', 'member']);
 export type TeamRole = z.infer<typeof teamRoleSchema>;
 
@@ -49,6 +64,7 @@ export type Team = z.infer<typeof teamSchema>;
 
 export const teamMemberSchema = z.object({
   agentId: z.string().min(1),
+  displayName: teamDisplayNameSchema.optional(),
   role: teamRoleSchema,
   parentAgentId: z.string().min(1).optional(),
   joinedAt: z.number().nonnegative(),
@@ -71,6 +87,7 @@ export const teamAssignmentSchema = z.object({
   batchId: z.string().min(1),
   parentAssignmentId: z.string().min(1).optional(),
   agentId: z.string().min(1).optional(),
+  displayName: teamDisplayNameSchema.optional(),
   profileName: z.string().min(1),
   description: z.string().min(1),
   item: z.string().optional(),
@@ -157,9 +174,11 @@ export interface TeamSnapshot {
 
 export interface TeamBatchAssignmentInput {
   readonly assignmentId: string;
+  readonly displayName?: string;
   readonly profileName: string;
   readonly description: string;
   readonly item?: string;
+  readonly resumeAgentId?: string;
 }
 
 export interface TeamBatchReceipt {

@@ -14,6 +14,9 @@ export const teamBatchStatusSchema = z.enum([
   'running', 'completed', 'failed', 'cancelled', 'interrupted',
 ]);
 export type TeamBatchStatus = z.infer<typeof teamBatchStatusSchema>;
+const teamDisplayNameSchema = z.string().trim().min(1).max(24)
+  .regex(/^[\p{L}\p{N}][\p{L}\p{N}_-]{0,23}$/u)
+  .refine((name) => name.toLowerCase() !== 'main' && !/^agent-\d+$/i.test(name));
 export const teamSchema = z.object({
   id: z.string().min(1),
   sessionId: z.string().min(1),
@@ -24,6 +27,7 @@ export const teamSchema = z.object({
 export type Team = z.infer<typeof teamSchema>;
 export const teamMemberSchema = z.object({
   agentId: z.string().min(1),
+  displayName: teamDisplayNameSchema.optional(),
   role: z.enum(['leader', 'member']),
   parentAgentId: z.string().min(1).optional(),
   joinedAt: z.number().nonnegative(),
@@ -44,6 +48,7 @@ export const teamAssignmentSchema = z.object({
   batchId: z.string().min(1),
   parentAssignmentId: z.string().min(1).optional(),
   agentId: z.string().min(1).optional(),
+  displayName: teamDisplayNameSchema.optional(),
   profileName: z.string().min(1),
   description: z.string().min(1),
   item: z.string().optional(),

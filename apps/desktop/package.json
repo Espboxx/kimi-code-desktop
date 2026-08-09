@@ -1,6 +1,6 @@
 {
   "name": "@moonshot-ai/kimi-code-desktop",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Unofficial Windows-first desktop client derived from Kimi Code",
   "license": "MIT",
@@ -73,6 +73,7 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
+    "remark-breaks": "4.0.0",
     "remark-gfm": "^4.0.1",
     "zod": "^4.3.6"
   },

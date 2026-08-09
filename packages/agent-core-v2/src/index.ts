@@ -202,6 +202,8 @@ export {
   _clearAgentProfileContributionsForTests,
 } from '#/app/agentProfileCatalog/contribution';
 export * from '#/workspace/workspaceAgentProfileLoader/configSection';
+export * from '#/workspace/workspaceAgentProfileLoader/agentProfileWriter';
+export * from '#/workspace/workspaceAgentProfileLoader/agentProfileWriterService';
 export { parseAgentFileText } from '#/workspace/workspaceAgentProfileLoader/internal/agentFile';
 export { resolveAgentPath } from '#/workspace/workspaceAgentProfileLoader/internal/paths';
 export * from '#/workspace/workspaceAgentProfileLoader/userAgentProfileLoader';
@@ -233,6 +235,7 @@ export * from '#/features/collaboration/deliveryOps';
 export * from '#/features/collaboration/tools/teamSend';
 export * from '#/features/collaboration/tools/teamStatus';
 export * from '#/features/collaboration/tools/teamWait';
+export * from '#/features/collaboration/tools/agentProfileCreate';
 import '#/features/collaboration/collaborationFeature';
 export * from '#/agent/command/agentCommand';
 export * from '#/agent/command/commandContribution';

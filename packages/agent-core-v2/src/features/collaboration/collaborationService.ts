@@ -32,6 +32,7 @@ import {
   TEAM_MESSAGE_MAX_BYTES,
   TEAM_OPERATION_MAX_LIMIT,
   TEAM_OPERATION_VERSION,
+  teamDisplayNameSchema,
   teamOperationSchema,
   type Team,
   type TeamAssignment,
@@ -213,6 +214,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
           details: { assignmentIds },
         });
       }
+      this.validateAssignmentDisplayNames(input.assignments);
       if (this.team === undefined && input.callerAgentId !== MAIN_AGENT_ID) {
         throw this.notMemberError(input.callerAgentId);
       }
@@ -233,6 +235,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
         id: assignment.assignmentId,
         batchId,
         parentAssignmentId,
+        displayName: assignment.displayName,
         profileName: assignment.profileName,
         description: assignment.description,
         item: assignment.item,
@@ -273,8 +276,10 @@ export class SessionCollaborationService extends Service implements ISessionColl
       }
       const at = Date.now();
       const existing = this.members.get(input.agentId);
+      const displayName = assignment.displayName ?? existing?.displayName;
       const member: TeamMember = existing ?? {
         agentId: input.agentId,
+        displayName,
         role: input.agentId === this.team?.leaderAgentId ? 'leader' : 'member',
         parentAgentId: input.agentId === this.team?.leaderAgentId ? undefined : input.parentAgentId,
         joinedAt: at,
@@ -287,7 +292,9 @@ export class SessionCollaborationService extends Service implements ISessionColl
         at,
         assignmentId: input.assignmentId,
         agentId: input.agentId,
-        member: existing === undefined ? { ...member, joinedSeq: seq } : member,
+        member: existing === undefined
+          ? { ...member, joinedSeq: seq }
+          : { ...member, displayName },
       }));
     });
   }
@@ -607,6 +614,59 @@ export class SessionCollaborationService extends Service implements ISessionColl
       latestChannelSeq: this.latestChannelSeq,
       degradedReason: this.degradedReason,
     };
+  }
+
+  private validateAssignmentDisplayNames(assignments: readonly TeamBatchAssignmentInput[]): void {
+    const existingNames = new Map<string, string>();
+    for (const member of this.members.values()) {
+      if (member.displayName !== undefined) {
+        existingNames.set(member.displayName.toLocaleLowerCase(), member.agentId);
+      }
+    }
+    for (const existing of this.assignments.values()) {
+      if (existing.displayName !== undefined) {
+        existingNames.set(
+          existing.displayName.toLocaleLowerCase(),
+          existing.agentId ?? `assignment:${existing.id}`,
+        );
+      }
+    }
+    const batchNames = new Set<string>();
+    for (const assignment of assignments) {
+      if (assignment.displayName === undefined) {
+        if (assignment.resumeAgentId !== undefined) continue;
+        throw new Error2(
+          ErrorCodes.REQUEST_INVALID,
+          'New Team assignments require a display name',
+          { details: { assignmentId: assignment.assignmentId } },
+        );
+      }
+      const parsed = teamDisplayNameSchema.safeParse(assignment.displayName);
+      if (!parsed.success) {
+        throw new Error2(
+          ErrorCodes.REQUEST_INVALID,
+          `Invalid Team display name "${assignment.displayName}"`,
+          { details: { assignmentId: assignment.assignmentId, issues: parsed.error.issues } },
+        );
+      }
+      const key = parsed.data.toLocaleLowerCase();
+      if (batchNames.has(key)) {
+        throw new Error2(
+          ErrorCodes.REQUEST_INVALID,
+          `Team display name "${parsed.data}" is duplicated in this batch`,
+          { details: { displayName: parsed.data } },
+        );
+      }
+      const existingAgentId = existingNames.get(key);
+      if (existingAgentId !== undefined && existingAgentId !== assignment.resumeAgentId) {
+        throw new Error2(
+          ErrorCodes.REQUEST_INVALID,
+          `Team display name "${parsed.data}" is already in use`,
+          { details: { displayName: parsed.data, agentId: existingAgentId } },
+        );
+      }
+      batchNames.add(key);
+    }
   }
 
   private requireTeam(): Team {

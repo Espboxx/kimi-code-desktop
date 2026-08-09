@@ -30,7 +30,7 @@ Kimi Code Desktop 是一个 Windows 优先的 Electron 桌面工作台，把 Kim
 - **会话工作台**：持久化 Kimi 会话、流式对话时间线、审批与提问、上下文状态、Plan、Goal、TodoList 和后台任务集中展示。
 - **代码与 Git**：工作区文件树、Git 状态聚合、Git diff 标签页，以及内置 Monaco Editor；支持保存、搜索、撤销和脏文件关闭确认。
 - **Agent 可观测性**：查看主 Agent、子 Agent 和并行任务的运行、完成、失败与交互状态。
-- **独立 Team 工作台**：在顶层“团队”面板中管理多 Agent 任务、频道、成员、嵌套分工、未读消息和 Agent 详情，不再与普通会话混在一起。
+- **独立 Team 工作台**：在顶层“团队”面板中管理多 Agent 任务、频道、具名成员、职业分工、未读消息和 Agent 详情；频道使用左右气泡区分用户与 Agent，并支持 Markdown 换行和可点击的 `@提及`。
 - **配置与扩展**：在 Desktop 内管理登录、模型、MCP、Skills、Plugins、诊断和工作区信任。
 - **安全边界**：渲染进程启用 sandbox 和 context isolation，只能通过经过校验的 `window.kimiDesktop` IPC 调用主进程能力。
 
@@ -38,13 +38,13 @@ Kimi Code Desktop 是一个 Windows 优先的 Electron 桌面工作台，把 Kim
 
 Windows x64 便携版由 `desktop-v*` 标签触发的 GitHub Actions 构建。前往本仓库的 [GitHub Releases](../../releases)，下载：
 
-- `Kimi-Code-Desktop-0.2.0-x64-portable.exe`
-- `Kimi-Code-Desktop-0.2.0-x64-portable.exe.sha256`
+- `Kimi-Code-Desktop-0.3.0-x64-portable.exe`
+- `Kimi-Code-Desktop-0.3.0-x64-portable.exe.sha256`
 
 下载后可在 PowerShell 校验 SHA256：
 
 ```powershell
-$exe = ".\Kimi-Code-Desktop-0.2.0-x64-portable.exe"
+$exe = ".\Kimi-Code-Desktop-0.3.0-x64-portable.exe"
 $expected = (Get-Content "$exe.sha256").Split()[0]
 $actual = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
 $actual -eq $expected
@@ -73,7 +73,9 @@ Team 是 Desktop 的独立顶层工作台，无需手动设置实验开关：
 3. 选择沿用当前默认权限，或仅为该任务使用 YOLO。
 4. 在 `general` 频道跟进工作；点击成员或任务分配可打开对应 Agent 详情。
 
-每个团队任务使用单独的持久化会话。用户消息写入频道后会主动唤醒组长：空闲组长开始协作回合，正在工作的组长则接收 steer 更新。组长会优先拆分两个或更多相互独立的工作流，成员通过 `TeamSend`、`TeamStatus` 和 `TeamWait` 共享进展、阻塞和交付结果。文件读写记录仍可点击打开目标文件；编辑操作直接显示操作前后差异。旧版本已经产生 Team 数据的会话会在恢复时安全迁移到团队列表。
+每个团队任务使用单独的持久化会话。用户消息写入频道后会主动唤醒组长：空闲组长开始协作回合，正在工作的组长则接收 steer 更新。组长会按任务分别选择 `explore`、`coder` 等职业并为 Agent 命名，而不是让整批成员共享同一职业；名称和职业随团队状态持久化，并用于频道、标签页和任务树展示。找不到合适职业时，组长可在审批后用 `AgentProfileCreate` 创建项目级可复用 Profile，也可显式选择用户级作用域。
+
+频道消息以固定上限的气泡展示，长消息在气泡内部滚动；单换行按原样显示，`@显示名` 与 `@agent-id` 会高亮，点击即可打开对应 Agent。成员通过 `TeamSend`、`TeamStatus` 和 `TeamWait` 共享进展、阻塞和交付结果。文件读写记录仍可点击打开目标文件；编辑操作直接显示操作前后差异。旧版本已经产生 Team 数据的会话会在恢复时安全迁移到团队列表。
 
 ## 架构边界
 

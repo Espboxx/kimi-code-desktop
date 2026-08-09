@@ -138,12 +138,13 @@ function stubSwarmCatalog(
   defaultProfile: AgentProfile = DEFAULT_CALLER_PROFILE,
   targetProfiles: readonly AgentProfile[] = DEFAULT_SWARM_TARGET_PROFILES,
 ): ISessionAgentProfileCatalog {
+  const profiles = [defaultProfile, ...targetProfiles];
   return {
     _serviceBrand: undefined,
     ready: Promise.resolve(),
-    get: (name: string) =>
-      [defaultProfile, ...targetProfiles].find((profile) => profile.name === name),
+    get: (name: string) => profiles.find((profile) => profile.name === name),
     getDefault: () => defaultProfile,
+    list: () => profiles,
   } as unknown as ISessionAgentProfileCatalog;
 }
 
@@ -443,6 +444,7 @@ describe('AgentSwarmTool', () => {
           index: 1,
           item: 'src/a.ts',
           prompt: 'Review src/a.ts',
+          profileName: 'explore',
         },
         profileName: 'explore',
         parentToolCallId: 'call_swarm',
@@ -461,6 +463,7 @@ describe('AgentSwarmTool', () => {
           index: 2,
           item: 'src/b.ts',
           prompt: 'Review src/b.ts',
+          profileName: 'explore',
         },
         profileName: 'explore',
         parentToolCallId: 'call_swarm',
@@ -514,11 +517,22 @@ describe('AgentSwarmTool', () => {
     host.swarmService.launch = launch as ISessionSwarmService['launch'];
     const collaboration = {
       _serviceBrand: undefined,
+      snapshot: vi.fn().mockResolvedValue({ members: [], assignments: [] }),
       prepareSwarmBatch: vi.fn().mockResolvedValue({
         batchId: 'team-batch',
         assignments: [
-          { id: 'assignment-1', description: 'Review files #1 (coder)' },
-          { id: 'assignment-2', description: 'Review files #2 (coder)' },
+          {
+            id: 'assignment-1',
+            description: 'Review files #1 (coder)',
+            displayName: 'reviewer-a',
+            profileName: 'coder',
+          },
+          {
+            id: 'assignment-2',
+            description: 'Review files #2 (explore)',
+            displayName: 'reviewer-b',
+            profileName: 'explore',
+          },
         ],
       }),
       bindAssignment: vi.fn(),
@@ -540,7 +554,10 @@ describe('AgentSwarmTool', () => {
     const result = await executeTool(tool, context({
       description: 'Review files',
       prompt_template: 'Review {{item}}',
-      items: ['src/a.ts', 'src/b.ts'],
+      items: [
+        { item: 'src/a.ts', display_name: 'reviewer-a', subagent_type: 'coder' },
+        { item: 'src/b.ts', display_name: 'reviewer-b', subagent_type: 'explore' },
+      ],
     }));
 
     expect(launch).toHaveBeenCalledOnce();
@@ -559,11 +576,22 @@ describe('AgentSwarmTool', () => {
     }) as ISessionSwarmService['launch'];
     const collaboration = {
       _serviceBrand: undefined,
+      snapshot: vi.fn().mockResolvedValue({ members: [], assignments: [] }),
       prepareSwarmBatch: vi.fn().mockResolvedValue({
         batchId: 'team-batch',
         assignments: [
-          { id: 'assignment-1', description: 'Review files #1 (coder)' },
-          { id: 'assignment-2', description: 'Review files #2 (coder)' },
+          {
+            id: 'assignment-1',
+            description: 'Review files #1 (coder)',
+            displayName: 'reviewer-a',
+            profileName: 'coder',
+          },
+          {
+            id: 'assignment-2',
+            description: 'Review files #2 (explore)',
+            displayName: 'reviewer-b',
+            profileName: 'explore',
+          },
         ],
       }),
       bindAssignment: vi.fn(),
@@ -585,7 +613,10 @@ describe('AgentSwarmTool', () => {
     const result = await executeTool(tool, context({
       description: 'Review files',
       prompt_template: 'Review {{item}}',
-      items: ['src/a.ts', 'src/b.ts'],
+      items: [
+        { item: 'src/a.ts', display_name: 'reviewer-a', subagent_type: 'coder' },
+        { item: 'src/b.ts', display_name: 'reviewer-b', subagent_type: 'explore' },
+      ],
     }));
 
     expect(result).toMatchObject({ isError: true, output: 'scheduler unavailable' });
@@ -802,6 +833,7 @@ describe('AgentSwarmTool', () => {
           index: 3,
           item: 'src/new.ts',
           prompt: 'Review src/new.ts',
+          profileName: 'explore',
         },
         profileName: 'explore',
         parentToolCallId: 'call_swarm',

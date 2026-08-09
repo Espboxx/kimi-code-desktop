@@ -43,11 +43,16 @@ session as a Team task. The left column lists Team tasks, the center owns channe
 agent, file, and diff tabs, and the right column shows members and nested assignments.
 
 Posting a Team message uses an idempotency key and wakes the leader through a
-collaboration turn when idle or a steer update when busy. Agent coordination uses
-`TeamSend`, `TeamStatus`, and `TeamWait`; the leader prompt calls for independent
-delegation, progress sharing, blocker escalation, and a final handoff. Existing
-sessions with Team data are marked as Team sessions when resumed, without changing
-normal Chat sessions.
+collaboration turn when idle or a steer update when busy. The channel renders
+bounded-height user/Agent bubbles, Markdown single-line breaks, and highlighted,
+clickable mentions. The leader gives every new member a persistent display name
+and selects a profession independently per assignment. If the catalog has no
+suitable profession, the approval-gated `AgentProfileCreate` tool writes and loads
+a reusable workspace profile (or an explicitly requested user profile). Agent
+coordination uses `TeamSend`, `TeamStatus`, and `TeamWait`; the leader prompt calls
+for independent delegation, progress sharing, blocker escalation, and a final
+handoff. Existing sessions with Team data are marked as Team sessions when resumed,
+without changing normal Chat sessions.
 
 ## Run
 

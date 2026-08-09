@@ -12,10 +12,29 @@
 import { z } from 'zod';
 
 import { createDecorator } from '#/_base/di/instantiation';
+import { teamDisplayNameSchema } from '#/features/collaboration/types';
 import { type AgentTool } from '#/tool/toolContract';
 
 export const PROMPT_TEMPLATE_PLACEHOLDER = '{{item}}';
 export const MAX_AGENT_SWARM_SUBAGENTS = 128;
+
+export const AgentSwarmStructuredItemSchema = z.object({
+  item: z.string().trim().min(1).describe('Task value used to fill the prompt template.'),
+  display_name: teamDisplayNameSchema.describe(
+    'Short unique persistent name for this Team member. Required for new agents in Team Mode.',
+  ),
+  subagent_type: z.string().trim().min(1).describe(
+    'Agent profile selected for this specific task.',
+  ),
+  model: z.enum(['secondary', 'primary']).optional().describe(
+    'Optional model choice for this specific task; overrides the batch-level model.',
+  ),
+}).strict();
+
+export const AgentSwarmItemSchema = z.union([
+  z.string().trim().min(1),
+  AgentSwarmStructuredItemSchema,
+]);
 
 export const AgentSwarmToolInputSchema = z
   .object({
@@ -41,11 +60,11 @@ export const AgentSwarmToolInputSchema = z
         `Prompt template for each subagent. The ${PROMPT_TEMPLATE_PLACEHOLDER} placeholder is replaced with each item value.`,
       ),
     items: z
-      .array(z.string().trim().min(1))
+      .array(AgentSwarmItemSchema)
       .max(MAX_AGENT_SWARM_SUBAGENTS)
       .optional()
       .describe(
-        `Values used to fill ${PROMPT_TEMPLATE_PLACEHOLDER}. Each item launches one new subagent.`,
+        `Values used to fill ${PROMPT_TEMPLATE_PLACEHOLDER}. Each item launches one new subagent. Team Mode requires object items with display_name and subagent_type so every assignment has a persistent name and an explicitly selected profession.`,
       ),
     resume_agent_ids: z
       .record(z.string().trim().min(1), z.string().trim().min(1))

@@ -73,6 +73,9 @@ interface AgentSwarmSpawnSpec {
   readonly index: number;
   readonly item: string;
   readonly prompt: string;
+  readonly displayName?: string;
+  readonly profileName: string;
+  readonly model?: 'secondary' | 'primary';
 }
 
 interface AgentSwarmResumeSpec {
@@ -127,9 +130,10 @@ export class AgentSwarmTool implements IAgentSwarmTool {
       this.profile.data().modelAlias,
       this.modelCatalog,
     );
-    return modelLines === undefined
-      ? AGENT_SWARM_DESCRIPTION
-      : `${AGENT_SWARM_DESCRIPTION}\n\n${modelLines}`;
+    const profileLines = this.availableProfileLines();
+    return [AGENT_SWARM_DESCRIPTION, profileLines, modelLines].filter(
+      (part): part is string => part !== undefined,
+    ).join('\n\n');
   }
 
   resolveExecution(args: AgentSwarmToolInput): ToolExecution {
@@ -170,68 +174,95 @@ export class AgentSwarmTool implements IAgentSwarmTool {
     signal: AbortSignal,
     toolCallId: string,
   ): Promise<string> {
-    const profileName = normalizeOptionalString(args.subagent_type) ?? DEFAULT_SUBAGENT_TYPE;
-    let binding: { model: string; thinking?: string } | undefined;
-    if ((args.items?.length ?? 0) > 0) {
-      await this.catalog.ready;
-      const own = this.profile.data();
-      const allowlist = subagentAllowlistFor(this.catalog, own);
-      if (allowlist !== undefined && !allowlist.includes(profileName)) {
-        throw new Error2(
-          ErrorCodes.AGENT_TYPE_NOT_ALLOWED,
-          subagentTypeNotAllowedMessage(profileName, allowlist),
-          { details: { profileName, allowlist } },
-        );
-      }
-      const targetProfile = this.catalog.get(profileName);
-      if (targetProfile === undefined) {
-        throw new Error2(ErrorCodes.PROFILE_UNKNOWN, `Unknown agent type: "${profileName}"`, {
-          details: { profileName },
-        });
-      }
-      if (own.modelAlias !== undefined) {
-        const resolved = resolveSubagentBinding(
-          this.config,
-          this.flags,
-          { modelAlias: own.modelAlias, thinkingLevel: own.thinkingLevel },
-          args.model ?? targetProfile.modelPreference,
-        );
-        binding = { model: resolved.model, thinking: resolved.thinking };
-      }
-    }
+    const teamMode = this.collaboration !== undefined && this.flags.enabled(TEAM_COLLABORATION_FLAG_ID);
     const timeoutMs = resolveSubagentTimeoutMs(this.config);
     const specs = await createAgentSwarmSpecs(args, (agentId) =>
       this.swarmService.getSwarmItem({ callerAgentId: this.callerAgentId, agentId }),
     );
-    // The optional dependency keeps direct tool unit fixtures backwards-compatible;
-    // production feature composition contributes it whenever the flag is available.
-    const teamMode = this.collaboration !== undefined && this.flags.enabled(TEAM_COLLABORATION_FLAG_ID);
+    if (teamMode && specs.some((spec) => spec.kind === 'spawn' && spec.displayName === undefined)) {
+      throw new Error2(
+        ErrorCodes.VALIDATION_FAILED,
+        'Team Mode requires every new AgentSwarm item to provide display_name and subagent_type.',
+      );
+    }
+    const bindings = new Map<number, { model: string; thinking?: string }>();
+    const spawnSpecs = specs.filter((spec): spec is AgentSwarmSpawnSpec => spec.kind === 'spawn');
+    if (spawnSpecs.length > 0) {
+      await this.catalog.ready;
+      const own = this.profile.data();
+      const allowlist = teamMode && this.callerAgentId === 'main'
+        ? undefined
+        : subagentAllowlistFor(this.catalog, own);
+      for (const spec of spawnSpecs) {
+        if (allowlist !== undefined && !allowlist.includes(spec.profileName)) {
+          throw new Error2(
+            ErrorCodes.AGENT_TYPE_NOT_ALLOWED,
+            subagentTypeNotAllowedMessage(spec.profileName, allowlist),
+            { details: { profileName: spec.profileName, allowlist } },
+          );
+        }
+        const targetProfile = this.catalog.get(spec.profileName);
+        if (targetProfile === undefined) {
+          throw new Error2(ErrorCodes.PROFILE_UNKNOWN, `Unknown agent type: "${spec.profileName}"`, {
+            details: { profileName: spec.profileName },
+          });
+        }
+        if (own.modelAlias !== undefined) {
+          const resolved = resolveSubagentBinding(
+            this.config,
+            this.flags,
+            { modelAlias: own.modelAlias, thinkingLevel: own.thinkingLevel },
+            spec.model ?? targetProfile.modelPreference,
+          );
+          bindings.set(spec.index, { model: resolved.model, thinking: resolved.thinking });
+        }
+      }
+    }
     let teamReceipt: Awaited<ReturnType<ISessionCollaborationService['prepareSwarmBatch']>> | undefined;
+    const resumeMetadata = new Map<string, { readonly displayName?: string; readonly profileName: string }>();
     if (teamMode) {
       const collaboration = this.requireCollaboration();
+      const snapshot = await collaboration.snapshot();
+      for (const spec of specs) {
+        if (spec.kind !== 'resume') continue;
+        const member = snapshot.members.find((candidate) => candidate.agentId === spec.agentId);
+        const latestAssignment = snapshot.assignments.findLast(
+          (assignment) => assignment.agentId === spec.agentId,
+        );
+        resumeMetadata.set(spec.agentId, {
+          displayName: member?.displayName ?? latestAssignment?.displayName,
+          profileName: latestAssignment?.profileName ?? 'subagent',
+        });
+      }
       teamReceipt = await collaboration.prepareSwarmBatch({
         callerAgentId: this.callerAgentId,
-        assignments: specs.map((spec) => ({
-          assignmentId: `assignment_${randomUUID()}`,
-          profileName: spec.kind === 'resume' ? 'subagent' : profileName,
-          description: childDescription(
-            args.description,
-            spec.index,
-            spec.kind === 'resume' ? 'resume' : profileName,
-          ),
-          item: spec.item,
-        })),
+        assignments: specs.map((spec) => {
+          const metadata = spec.kind === 'resume' ? resumeMetadata.get(spec.agentId) : undefined;
+          const profileName = spec.kind === 'spawn' ? spec.profileName : metadata?.profileName ?? 'subagent';
+          return {
+            assignmentId: `assignment_${randomUUID()}`,
+            displayName: spec.kind === 'spawn' ? spec.displayName : metadata?.displayName,
+            profileName,
+            description: childDescription(args.description, spec.index, profileName),
+            item: spec.item,
+            resumeAgentId: spec.kind === 'resume' ? spec.agentId : undefined,
+          };
+        }),
       });
     }
     const tasks: SessionSwarmTask<AgentSwarmSpec>[] = specs.map((spec, taskIndex) => {
-      const descriptionName = spec.kind === 'resume' ? 'resume' : profileName;
+      const resumeProfileName = spec.kind === 'resume'
+        ? resumeMetadata.get(spec.agentId)?.profileName ?? 'subagent'
+        : undefined;
+      const profileName = spec.kind === 'spawn' ? spec.profileName : resumeProfileName!;
+      const descriptionProfileName = spec.kind === 'resume' && !teamMode ? 'resume' : profileName;
       const assignment = teamReceipt?.assignments[taskIndex];
       const common = {
         data: spec,
-        profileName: spec.kind === 'resume' ? 'subagent' : profileName,
+        profileName,
         parentToolCallId: toolCallId,
         prompt: spec.prompt,
-        description: childDescription(args.description, spec.index, descriptionName),
+        description: childDescription(args.description, spec.index, descriptionProfileName),
         swarmIndex: spec.index,
         runInBackground: teamMode,
         swarmItem: spec.item,
@@ -255,7 +286,7 @@ export class AgentSwarmTool implements IAgentSwarmTool {
       return {
         ...common,
         kind: 'spawn' as const,
-        binding,
+        binding: bindings.get(spec.index),
       };
     });
     if (teamReceipt !== undefined) {
@@ -325,19 +356,47 @@ export class AgentSwarmTool implements IAgentSwarmTool {
     }
     return this.collaboration;
   }
+
+  private availableProfileLines(): string {
+    const own = this.profile.data();
+    const allowlist = this.collaboration !== undefined
+      && this.flags.enabled(TEAM_COLLABORATION_FLAG_ID)
+      && this.callerAgentId === 'main'
+      ? undefined
+      : subagentAllowlistFor(this.catalog, own);
+    const profiles = this.catalog.list().filter(
+      (candidate) => allowlist === undefined || allowlist.includes(candidate.name),
+    );
+    return [
+      'Available profession profiles (choose subagent_type independently for each Team item):',
+      ...profiles.map((candidate) => {
+        const guidance = candidate.whenToUse ?? candidate.description ?? 'No usage guidance provided.';
+        return `- ${candidate.name}: ${guidance}`;
+      }),
+      '- In Team Mode, if none fits, the leader can call AgentProfileCreate first and then use the newly created profile name.',
+    ].join('\n');
+  }
 }
 
 function renderSwarmLaunchReceipt(
   batchId: string,
-  assignments: readonly { readonly id: string; readonly description: string }[],
+  assignments: readonly {
+    readonly id: string;
+    readonly description: string;
+    readonly displayName?: string;
+    readonly profileName: string;
+  }[],
 ): string {
   return [
     '<agent_swarm_started>',
     `<batch_id>${batchId}</batch_id>`,
     `<accepted>${String(assignments.length)}</accepted>`,
-    ...assignments.map((assignment) =>
-      `<assignment id="${escapeXmlAttribute(assignment.id)}">${escapeXmlAttribute(assignment.description)}</assignment>`,
-    ),
+    ...assignments.map((assignment) => {
+      const name = assignment.displayName === undefined
+        ? ''
+        : ` display_name="${escapeXmlAttribute(assignment.displayName)}"`;
+      return `<assignment id="${escapeXmlAttribute(assignment.id)}"${name} profile="${escapeXmlAttribute(assignment.profileName)}">${escapeXmlAttribute(assignment.description)}</assignment>`;
+    }),
     '<coordination>Use TeamStatus, TeamSend, and TeamWait to coordinate this running batch.</coordination>',
     '</agent_swarm_started>',
   ].join('\n');
@@ -353,7 +412,15 @@ async function createAgentSwarmSpecs(
     agentId: agentId.trim(),
     prompt: prompt.trim(),
   }));
-  const items = (args.items ?? []).map((item) => item.trim());
+  const defaultProfileName = normalizeOptionalString(args.subagent_type) ?? DEFAULT_SUBAGENT_TYPE;
+  const items = (args.items ?? []).map((item) => typeof item === 'string'
+    ? { item: item.trim(), profileName: defaultProfileName, model: args.model }
+    : {
+        item: item.item.trim(),
+        displayName: item.display_name.trim(),
+        profileName: item.subagent_type.trim(),
+        model: item.model ?? args.model,
+      });
   const itemCount = items.length;
   const resumeCount = resumeEntries.length;
   const totalCount = resumeCount + itemCount;
@@ -398,8 +465,8 @@ async function createAgentSwarmSpecs(
   }
   if (items.length > 0) {
     const itemPromptTemplate = promptTemplate!;
-    items.forEach((item, index) => {
-      const prompt = itemPromptTemplate.split(PROMPT_TEMPLATE_PLACEHOLDER).join(item);
+    items.forEach((entry, index) => {
+      const prompt = itemPromptTemplate.split(PROMPT_TEMPLATE_PLACEHOLDER).join(entry.item);
       const previousIndex = seenPrompts.get(prompt);
       if (previousIndex !== undefined) {
         throw new Error2(
@@ -412,8 +479,11 @@ async function createAgentSwarmSpecs(
       specs.push({
         kind: 'spawn',
         index: specs.length + 1,
-        item,
+        item: entry.item,
         prompt,
+        displayName: entry.displayName,
+        profileName: entry.profileName,
+        model: entry.model,
       });
     });
   }

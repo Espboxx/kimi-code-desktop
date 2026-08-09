@@ -11,6 +11,7 @@ export interface Team {
 
 export interface TeamMember {
   readonly agentId: string;
+  readonly displayName?: string;
   readonly role: 'leader' | 'member';
   readonly parentAgentId?: string;
   readonly joinedAt: number;
@@ -31,6 +32,7 @@ export interface TeamAssignment {
   readonly batchId: string;
   readonly parentAssignmentId?: string;
   readonly agentId?: string;
+  readonly displayName?: string;
   readonly profileName: string;
   readonly description: string;
   readonly item?: string;

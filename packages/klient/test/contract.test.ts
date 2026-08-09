@@ -83,9 +83,21 @@ describe('TodoList contract validation', () => {
 describe('Team collaboration contract validation', () => {
   it('accepts versioned operations and rejects unknown fields or versions', () => {
     const snapshot = {
-      state: 'ready', members: [], batches: [], assignments: [], latestSeq: 0, latestChannelSeq: 0,
+      state: 'ready',
+      members: [{ agentId: 'agent-2', displayName: '界面侦察', role: 'member', joinedAt: 1, joinedSeq: 1 }],
+      batches: [],
+      assignments: [{
+        id: 'a1', batchId: 'b1', agentId: 'agent-2', displayName: '界面侦察',
+        profileName: 'explore', description: 'Inspect UI', status: 'running', createdAt: 1, updatedAt: 1,
+      }],
+      latestSeq: 0,
+      latestChannelSeq: 0,
     };
     expect(teamSnapshotSchema.safeParse(snapshot).success).toBe(true);
+    expect(teamSnapshotSchema.safeParse({
+      ...snapshot,
+      members: [{ ...snapshot.members[0], displayName: 'agent-2' }],
+    }).success).toBe(false);
     expect(teamSnapshotSchema.safeParse({ ...snapshot, secret: 'leak' }).success).toBe(false);
 
     const operation = {

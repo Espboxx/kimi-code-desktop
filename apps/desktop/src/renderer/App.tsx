@@ -626,6 +626,17 @@ export function App() {
     running: teamState.snapshot.assignments.filter((assignment) => assignment.status === 'running' || assignment.status === 'queued').length,
     failed: teamState.snapshot.assignments.filter((assignment) => assignment.status === 'failed').length,
   }]));
+  const teamAgentLabels = Object.fromEntries(Object.entries(state.teams).flatMap(([sessionId, teamState]) =>
+    teamState.snapshot.members.map((member) => {
+      const assignment = teamState.snapshot.assignments.findLast(
+        (candidate) => candidate.agentId === member.agentId,
+      );
+      return [
+        `${sessionId}:${member.agentId}`,
+        member.displayName ?? assignment?.displayName ?? (member.agentId === 'main' ? '组长' : member.agentId),
+      ];
+    }),
+  ));
   const createSession = async () => openSession(await window.kimiDesktop.session.create());
   const selectSurface = (next: DesktopSurface) => {
     if (next === surface) return;
@@ -886,6 +897,7 @@ export function App() {
               statuses={state.sessionStatuses}
               pendingCounts={state.pendingInteractionCounts}
               teamBadges={teamBadges}
+              agentLabels={teamAgentLabels}
               onActivate={activateTab}
               onClose={requestCloseTab}
             />
@@ -909,7 +921,10 @@ export function App() {
             {activeTab?.kind === 'agent' && activeTab.sessionId === snapshot.activeSessionId && (
               <div className="team-agent-surface">
                 <div className="conversation-header">
-                  <div><strong>{activeTab.agentId === 'main' ? '组长详情' : 'Agent 详情'}</strong><span>{activeTab.agentId}</span></div>
+                  <div>
+                    <strong>{activeTab.agentId === 'main' ? '组长详情' : teamAgentLabels[`${activeTab.sessionId}:${activeTab.agentId}`] ?? 'Agent 详情'}</strong>
+                    <span>{activeTab.agentId}</span>
+                  </div>
                   <button className="team-channel-back" onClick={() => openTeam(activeTab.sessionId)}><Users size={13} />返回团队频道</button>
                 </div>
                 <Timeline
