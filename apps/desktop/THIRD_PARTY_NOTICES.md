@@ -9,7 +9,7 @@ Workspace packages maintained in this repository are covered by the repository-l
 
 - External packages: 457
 - Workspace source roots: 12
-- Dependency graph SHA-256: `de52bd70885145e4369ab6ffea8ea46816c9eab06927bbe4cda49f5ffa3e85b6`
+- Dependency graph SHA-256: `c76dcb73d8b6f0c3e4bcc23fc71801e3c888ac5db3b7c0c96fd74f251d965e6a`
 
 Packages are sorted by name and version. SPDX expressions and license texts come from
 the installed package metadata selected by the pinned pnpm lockfile. If a published
