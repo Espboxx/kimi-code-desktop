@@ -26,6 +26,12 @@ import type {
   WorkspaceSnapshot,
 } from '../shared/desktop-api';
 import { gitDecoration, gitStatusLabel, gitStatusLetter } from './git-tree';
+import {
+  NavigationRow,
+  NavigationSection,
+  NavigationSidebar,
+  NavigationSidebarHeader,
+} from './SidePrimitives';
 import { basename, classNames, formatTime } from './ui-utils';
 
 export type SessionAction = 'rename' | 'fork' | 'export' | 'close' | 'delete';
@@ -55,20 +61,22 @@ export function Sidebar(props: SidebarProps) {
   const [workspaceOpen, setWorkspaceOpen] = useState(true);
   const [sessionsOpen, setSessionsOpen] = useState(true);
   return (
-    <aside className="sidebar">
-      <div className="workspace-header">
-        <button className="workspace-title" onClick={props.onChooseWorkspace} title="切换工作区">
-          <FolderGit2 size={17} />
-          <span><strong>{props.workspace.name || '工作区'}</strong><small>{props.workspace.root}</small></span>
-        </button>
-        <button className="icon-button" onClick={props.onRefreshWorkspace} title="刷新工作区"><RefreshCw size={15} /></button>
-      </div>
+    <NavigationSidebar className="sidebar">
+      <NavigationSidebarHeader
+        icon={<FolderGit2 size={17} />}
+        title={props.workspace.name || '工作区'}
+        subtitle={props.workspace.root}
+        titleClassName="workspace-title"
+        onSelect={props.onChooseWorkspace}
+        action={<button className="icon-button" onClick={props.onRefreshWorkspace} title="刷新工作区"><RefreshCw size={15} /></button>}
+      />
       <div className="workspace-meta">
         <span><GitBranch size={13} />{props.workspace.branch}</span>
         <span>{props.workspace.changedFiles} changes</span>
       </div>
 
-      <SidebarSection
+      <NavigationSection
+        className="sidebar-section"
         title="文件"
         open={workspaceOpen}
         onToggle={() => setWorkspaceOpen((value) => !value)}
@@ -86,9 +94,10 @@ export function Sidebar(props: SidebarProps) {
             />
           )}
         </div>
-      </SidebarSection>
+      </NavigationSection>
 
-      <SidebarSection
+      <NavigationSection
+        className="sidebar-section"
         title="Kimi 会话"
         count={props.sessions.length}
         open={sessionsOpen}
@@ -99,56 +108,43 @@ export function Sidebar(props: SidebarProps) {
           {props.sessions.length === 0 ? <div className="sidebar-empty">当前工作区暂无会话</div> : props.sessions.map((session) => {
             const status = props.sessionStatuses[session.id];
             const pending = props.pendingInteractionCounts[session.id] ?? 0;
+            const title = session.title || session.lastPrompt || '未命名会话';
             return (
-              <div className={classNames(
-                'session-row',
-                session.id === props.activeWorkbenchSessionId && 'selected',
-                props.openSessionIds.has(session.id) && 'open-tab',
-              )} key={session.id}>
-                <button className="session-main" onClick={() => props.onSelectSession(session.id)}>
-                  <span className={classNames('session-presence', (session.active || status?.busy === true) && 'active', status?.busy === true && 'busy')} />
-                  <span className="session-copy">
-                    <strong>{session.title || session.lastPrompt || '未命名会话'}</strong>
-                    <small>{formatTime(session.updatedAt)} · {basename(session.id)}</small>
-                  </span>
-                  {status?.busy === true && <span className="session-state-label">Working</span>}
-                  {pending > 0 && <span className="session-pending" title={`${pending} 个待处理交互`}>{pending}</span>}
-                </button>
-                {session.id === props.activeSessionId && (
-                  <div className="session-actions">
+              <NavigationRow
+                className="session-row"
+                mainClassName="session-main"
+                copyClassName="session-copy"
+                actionsClassName="session-actions"
+                title={title}
+                subtitle={`${formatTime(session.updatedAt)} · ${basename(session.id)}`}
+                selected={session.id === props.activeWorkbenchSessionId}
+                open={props.openSessionIds.has(session.id)}
+                active={session.active}
+                busy={status?.busy === true}
+                onSelect={() => { props.onSelectSession(session.id); }}
+                trailing={(
+                  <>
+                    {status?.busy === true && <span className="session-state-label">Working</span>}
+                    {pending > 0 && <span className="session-pending" title={`${pending} 个待处理交互`}>{pending}</span>}
+                  </>
+                )}
+                actions={session.id === props.activeSessionId ? (
+                  <>
                     <button onClick={() => props.onReloadSession(session.id)} title="重载会话"><RotateCcw size={13} /></button>
                     <button onClick={() => props.onSessionAction(session, 'rename')} title="重命名"><Pencil size={13} /></button>
                     <button onClick={() => props.onSessionAction(session, 'fork')} title="分叉"><GitFork size={13} /></button>
                     <button onClick={() => props.onSessionAction(session, 'export')} title="导出"><FileOutput size={13} /></button>
                     <button onClick={() => props.onSessionAction(session, 'close')} title="关闭"><X size={13} /></button>
                     <button className="danger" onClick={() => props.onSessionAction(session, 'delete')} title="永久删除"><Trash2 size={13} /></button>
-                  </div>
-                )}
-              </div>
+                  </>
+                ) : undefined}
+                key={session.id}
+              />
             );
           })}
         </div>
-      </SidebarSection>
-    </aside>
-  );
-}
-
-function SidebarSection({ title, count, open, onToggle, action, children }: {
-  readonly title: string;
-  readonly count?: number;
-  readonly open: boolean;
-  readonly onToggle: () => void;
-  readonly action?: React.ReactNode;
-  readonly children: React.ReactNode;
-}) {
-  return (
-    <section className={classNames('sidebar-section', !open && 'collapsed')}>
-      <div className="section-heading">
-        <button onClick={onToggle}>{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<span>{title}</span>{count !== undefined && <em>{count}</em>}</button>
-        {action}
-      </div>
-      {open && children}
-    </section>
+      </NavigationSection>
+    </NavigationSidebar>
   );
 }
 

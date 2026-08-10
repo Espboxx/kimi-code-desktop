@@ -4,11 +4,8 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
-  type PointerEvent as ReactPointerEvent,
 } from 'react';
 import {
-  AlertCircle,
   AtSign,
   Bot,
   ChevronDown,
@@ -19,25 +16,26 @@ import {
   Sparkles,
   Square,
   Video,
-  X,
 } from 'lucide-react';
 
 import type { SessionStatusSnapshot } from '../shared/desktop-api';
 import {
   cacheMetrics,
   attachmentProblem,
-  clampComposerHeight,
   COMPOSER_HEIGHT_STORAGE_KEY,
   COMPOSER_IMAGE_ACCEPT,
-  composerMaxHeight,
   contextPercentage,
   contextProgress,
   formatTokenCount,
-  MIN_COMPOSER_HEIGHT,
-  parseComposerHeight,
   readImageAttachment,
   type ComposerAttachmentError,
 } from './composer-utils';
+import {
+  ComposerAttachmentList,
+  ComposerErrorBanner,
+  ComposerFrame,
+  type ComposerAttachmentView,
+} from './ComposerPrimitives';
 import { SessionControls, type SessionModelOption } from './SessionControls';
 import { classNames, record, text } from './ui-utils';
 
@@ -86,11 +84,8 @@ export function Composer(props: ComposerProps) {
   const [attachmentError, setAttachmentError] = useState<ComposerAttachmentError>();
   const [submitting, setSubmitting] = useState(false);
   const [invocation, setInvocation] = useState<CommandSuggestion>();
-  const [editorHeight, setEditorHeight] = useState(() => initialEditorHeight());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const editorHeightRef = useRef(editorHeight);
-  const resizeDragRef = useRef<{ readonly pointerId: number; readonly startY: number; readonly startHeight: number } | undefined>(undefined);
   const suggestions = useMemo(() => collectSuggestions(props), [props]);
   const visibleSuggestions = value.startsWith('/') && invocation === undefined
     ? suggestions.filter((item) => item.label.toLowerCase().includes(value.slice(1).split(/\s/)[0]?.toLowerCase() ?? '')).slice(0, 8)
@@ -98,26 +93,6 @@ export function Composer(props: ComposerProps) {
   const contextPercent = props.status === undefined ? undefined : contextPercentage(props.status.contextUsage);
   const contextBar = props.status === undefined ? 0 : contextProgress(props.status.contextUsage);
   const cache = cacheMetrics(props.status?.usage);
-
-  const updateEditorHeight = useCallback((height: number, persist: boolean) => {
-    const next = clampComposerHeight(height, window.innerHeight);
-    editorHeightRef.current = next;
-    setEditorHeight(next);
-    if (!persist) return;
-    try {
-      window.localStorage.setItem(COMPOSER_HEIGHT_STORAGE_KEY, String(next));
-    } catch {
-      // A blocked storage backend should not disable resizing.
-    }
-  }, []);
-
-  useEffect(() => {
-    const onResize = () => {
-      updateEditorHeight(editorHeightRef.current, false);
-    };
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, [updateEditorHeight]);
 
   useEffect(() => {
     setMode('prompt');
@@ -187,149 +162,82 @@ export function Composer(props: ComposerProps) {
     }
   }, []);
 
-  const startResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
-    resizeDragRef.current = {
-      pointerId: event.pointerId,
-      startY: event.clientY,
-      startHeight: editorHeightRef.current,
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-    event.preventDefault();
-  };
-
-  const moveResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const drag = resizeDragRef.current;
-    if (drag === undefined || drag.pointerId !== event.pointerId) return;
-    updateEditorHeight(drag.startHeight + drag.startY - event.clientY, false);
-  };
-
-  const finishResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const drag = resizeDragRef.current;
-    if (drag === undefined || drag.pointerId !== event.pointerId) return;
-    resizeDragRef.current = undefined;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    updateEditorHeight(editorHeightRef.current, true);
-  };
-
   const contextTitle = props.status === undefined
     ? '尚未选择会话'
     : `上下文 ${formatTokenCount(props.status.contextTokens)} / ${formatTokenCount(props.status.maxContextTokens)} tokens (${String(contextPercent)}%)`;
   const cacheTitle = cache === undefined
     ? '会话尚无用量数据'
     : `会话累计 · 普通输入 ${formatTokenCount(cache.inputOther)} · 缓存读取 ${formatTokenCount(cache.cacheRead)} · 缓存写入 ${formatTokenCount(cache.cacheCreation)} · 输入总量 ${formatTokenCount(cache.inputTotal)}`;
-  const maxHeight = composerMaxHeight(window.innerHeight);
+  const attachmentViews: ComposerAttachmentView[] = [
+    ...(invocation === undefined ? [] : [{
+      id: `invocation:${invocation.id}`,
+      label: `/${invocation.label}`,
+      icon: <Sparkles size={12} />,
+    }]),
+    ...media.map((item) => ({
+      id: item.id,
+      label: item.label,
+      icon: item.type === 'image_url' ? <ImagePlus size={12} /> : <Video size={12} />,
+    })),
+  ];
 
   return (
-    <div className="composer-wrap">
-      {visibleSuggestions.length > 0 && (
-        <div className="command-menu" role="listbox">
-          {visibleSuggestions.map((suggestion) => (
-            <button
-              role="option"
-              aria-selected="false"
-              key={suggestion.id}
-              onClick={() => {
-                setInvocation(suggestion);
-                setValue('');
-                textareaRef.current?.focus();
-              }}
-            >
-              {suggestion.kind === 'skill' ? <Sparkles size={14} /> : suggestion.kind === 'plugin' ? <Bot size={14} /> : <AtSign size={14} />}
-              <span><strong>/{suggestion.label}</strong><small>{suggestion.description}</small></span>
-            </button>
-          ))}
-        </div>
-      )}
-      {showMedia && (
-        <div className="media-input-row" aria-label="通过 URL 或路径添加媒体">
-          <div className="segmented compact">
-            <button className={mediaType === 'image_url' ? 'active' : ''} onClick={() => { setMediaType('image_url'); }} title="图片"><ImagePlus size={14} /></button>
-            <button className={mediaType === 'video_url' ? 'active' : ''} onClick={() => { setMediaType('video_url'); }} title="视频"><Video size={14} /></button>
-          </div>
-          <input value={mediaDraft} onChange={(event) => { setMediaDraft(event.target.value); }} placeholder="URL 或绝对文件路径" onKeyDown={(event) => { if (event.key === 'Enter') addMedia(); }} />
-          <button className="icon-button" onClick={addMedia} title="添加"><Send size={14} /></button>
-        </div>
-      )}
-      {attachmentError !== undefined && (
-        <div className="composer-attachment-error" role="alert">
-          <AlertCircle size={13} />
-          <span><strong>{attachmentError.code}</strong>{attachmentError.message}</span>
-          <button onClick={() => { setAttachmentError(undefined); }} title="关闭"><X size={11} /></button>
-        </div>
-      )}
-      {(media.length > 0 || invocation !== undefined) && (
-        <div className="composer-chips">
-          {invocation !== undefined && (
-            <span><Sparkles size={12} /><span className="attachment-label">/{invocation.label}</span><button onClick={() => { setInvocation(undefined); }} title="移除"><X size={11} /></button></span>
+    <ComposerFrame
+      value={value}
+      disabled={props.sessionId === undefined}
+      placeholder={props.sessionId === undefined ? '先选择或创建会话' : invocation === undefined ? '交给 Kimi 一个任务…' : `/${invocation.label} 参数`}
+      heightStorageKey={COMPOSER_HEIGHT_STORAGE_KEY}
+      textareaRef={textareaRef}
+      onChange={setValue}
+      onSubmit={() => { void submit(); }}
+      onEscape={() => {
+        setInvocation(undefined);
+        setValue('');
+      }}
+      onPasteImages={(files) => { void addImageFiles(files); }}
+      above={(
+        <>
+          {visibleSuggestions.length > 0 && (
+            <div className="command-menu" role="listbox">
+              {visibleSuggestions.map((suggestion) => (
+                <button
+                  role="option"
+                  aria-selected="false"
+                  key={suggestion.id}
+                  onClick={() => {
+                    setInvocation(suggestion);
+                    setValue('');
+                    textareaRef.current?.focus();
+                  }}
+                >
+                  {suggestion.kind === 'skill' ? <Sparkles size={14} /> : suggestion.kind === 'plugin' ? <Bot size={14} /> : <AtSign size={14} />}
+                  <span><strong>/{suggestion.label}</strong><small>{suggestion.description}</small></span>
+                </button>
+              ))}
+            </div>
           )}
-          {media.map((item, index) => (
-            <span key={item.id} title={item.label}>
-              {item.type === 'image_url' ? <ImagePlus size={12} /> : <Video size={12} />}
-              <span className="attachment-label">{item.label}</span>
-              <button onClick={() => { setMedia((current) => current.filter((_, itemIndex) => itemIndex !== index)); }} title="移除"><X size={11} /></button>
-            </span>
-          ))}
-        </div>
+          {showMedia && (
+            <div className="media-input-row" aria-label="通过 URL 或路径添加媒体">
+              <div className="segmented compact">
+                <button className={mediaType === 'image_url' ? 'active' : ''} onClick={() => { setMediaType('image_url'); }} title="图片"><ImagePlus size={14} /></button>
+                <button className={mediaType === 'video_url' ? 'active' : ''} onClick={() => { setMediaType('video_url'); }} title="视频"><Video size={14} /></button>
+              </div>
+              <input value={mediaDraft} onChange={(event) => { setMediaDraft(event.target.value); }} placeholder="URL 或绝对文件路径" onKeyDown={(event) => { if (event.key === 'Enter') addMedia(); }} />
+              <button className="icon-button" onClick={addMedia} title="添加"><Send size={14} /></button>
+            </div>
+          )}
+          <ComposerErrorBanner error={attachmentError} onDismiss={() => { setAttachmentError(undefined); }} />
+          <ComposerAttachmentList
+            items={attachmentViews}
+            onRemove={(id) => {
+              if (id.startsWith('invocation:')) setInvocation(undefined);
+              else setMedia((current) => current.filter((item) => item.id !== id));
+            }}
+          />
+        </>
       )}
-      <div
-        className={classNames('composer', props.sessionId === undefined && 'disabled')}
-        style={{ '--composer-editor-height': `${String(editorHeight)}px` } as CSSProperties}
-      >
-        <div
-          className="composer-resize-handle"
-          role="separator"
-          aria-label="调整输入框高度"
-          aria-orientation="horizontal"
-          aria-valuemin={MIN_COMPOSER_HEIGHT}
-          aria-valuemax={maxHeight}
-          aria-valuenow={editorHeight}
-          tabIndex={0}
-          onPointerDown={startResize}
-          onPointerMove={moveResize}
-          onPointerUp={finishResize}
-          onPointerCancel={finishResize}
-          onKeyDown={(event) => {
-            let next: number | undefined;
-            if (event.key === 'ArrowUp') next = editorHeightRef.current + (event.shiftKey ? 24 : 8);
-            if (event.key === 'ArrowDown') next = editorHeightRef.current - (event.shiftKey ? 24 : 8);
-            if (event.key === 'Home') next = MIN_COMPOSER_HEIGHT;
-            if (event.key === 'End') next = maxHeight;
-            if (next === undefined) return;
-            event.preventDefault();
-            updateEditorHeight(next, true);
-          }}
-        ><span /></div>
-        <textarea
-          ref={textareaRef}
-          value={value}
-          disabled={props.sessionId === undefined}
-          placeholder={props.sessionId === undefined ? '先选择或创建会话' : invocation === undefined ? '交给 Kimi 一个任务…' : `/${invocation.label} 参数`}
-          rows={2}
-          onChange={(event) => { setValue(event.target.value); }}
-          onPaste={(event) => {
-            const files = Array.from(event.clipboardData.items)
-              .filter((item) => item.kind === 'file' && item.type.toLowerCase().startsWith('image/'))
-              .map((item) => item.getAsFile())
-              .filter((file): file is File => file !== null);
-            if (files.length === 0) return;
-            if (event.clipboardData.getData('text/plain').length === 0) event.preventDefault();
-            void addImageFiles(files);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault();
-              void submit();
-            }
-            if (event.key === 'Escape') {
-              setInvocation(undefined);
-              setValue('');
-            }
-          }}
-        />
-        <div className="composer-status-toolbar">
+      status={(
+        <>
           <SessionControls
             sessionId={props.sessionId}
             status={props.status}
@@ -349,48 +257,50 @@ export function Composer(props: ComposerProps) {
               <span>缓存 <strong>{cache === undefined ? '--' : formatTokenCount(cache.cacheRead)}</strong> · 命中 <strong>{cache === undefined ? '--' : `${String(cache.hitRate)}%`}</strong></span>
             </span>
           </div>
+        </>
+      )}
+      toolbarStart={(
+        <div className="segmented composer-modes" aria-label="发送模式">
+          <button className={mode === 'prompt' ? 'active' : ''} onClick={() => { setMode('prompt'); }} title="普通 Prompt"><Bot size={13} /><span>Prompt</span></button>
+          <button className={mode === 'steer' ? 'active' : ''} onClick={() => { setMode('steer'); }} title="Steer 当前轮次"><Sparkles size={13} /><span>Steer</span></button>
         </div>
-        <div className="composer-toolbar">
-          <div className="segmented composer-modes" aria-label="发送模式">
-            <button className={mode === 'prompt' ? 'active' : ''} onClick={() => { setMode('prompt'); }} title="普通 Prompt"><Bot size={13} /><span>Prompt</span></button>
-            <button className={mode === 'steer' ? 'active' : ''} onClick={() => { setMode('steer'); }} title="Steer 当前轮次"><Sparkles size={13} /><span>Steer</span></button>
-          </div>
-          <div className="composer-actions">
-            <input
-              ref={fileInputRef}
-              className="composer-file-input"
-              type="file"
-              accept={COMPOSER_IMAGE_ACCEPT}
-              multiple
-              tabIndex={-1}
-              onChange={(event) => {
-                const files = Array.from(event.currentTarget.files ?? []);
-                event.currentTarget.value = '';
-                void addImageFiles(files);
-              }}
-            />
-            <button
-              className="icon-button image-picker-button"
-              disabled={props.sessionId === undefined}
-              onClick={() => fileInputRef.current?.click()}
-              title="选择图片"
-            ><ImagePlus size={15} /></button>
-            <button
-              className={classNames('icon-button', 'attachment-menu-button', showMedia && 'active')}
-              disabled={props.sessionId === undefined}
-              aria-expanded={showMedia}
-              onClick={() => { setShowMedia((current) => !current); }}
-              title="通过 URL 或路径添加媒体"
-            ><ChevronDown size={14} /></button>
-            {props.busy ? (
-              <button className="icon-button cancel-button" onClick={() => void props.onCancel()} title="取消当前轮次"><Square size={14} /></button>
-            ) : (
-              <button className="send-button" onClick={() => void submit()} disabled={submitting || props.sessionId === undefined} title="发送"><Send size={16} /></button>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
+      )}
+      toolbarEnd={(
+        <>
+          <input
+            ref={fileInputRef}
+            className="composer-file-input"
+            type="file"
+            accept={COMPOSER_IMAGE_ACCEPT}
+            multiple
+            tabIndex={-1}
+            onChange={(event) => {
+              const files = Array.from(event.currentTarget.files ?? []);
+              event.currentTarget.value = '';
+              void addImageFiles(files);
+            }}
+          />
+          <button
+            className="icon-button image-picker-button"
+            disabled={props.sessionId === undefined}
+            onClick={() => fileInputRef.current?.click()}
+            title="选择图片"
+          ><ImagePlus size={15} /></button>
+          <button
+            className={classNames('icon-button', 'attachment-menu-button', showMedia && 'active')}
+            disabled={props.sessionId === undefined}
+            aria-expanded={showMedia}
+            onClick={() => { setShowMedia((current) => !current); }}
+            title="通过 URL 或路径添加媒体"
+          ><ChevronDown size={14} /></button>
+          {props.busy ? (
+            <button className="icon-button cancel-button" onClick={() => void props.onCancel()} title="取消当前轮次"><Square size={14} /></button>
+          ) : (
+            <button className="send-button" onClick={() => void submit()} disabled={submitting || props.sessionId === undefined} title="发送"><Send size={16} /></button>
+          )}
+        </>
+      )}
+    />
   );
 }
 
@@ -423,14 +333,6 @@ function collectSuggestions(props: Pick<ComposerProps, 'skills' | 'pluginCommand
     });
   }
   return output;
-}
-
-function initialEditorHeight(): number {
-  try {
-    return parseComposerHeight(window.localStorage.getItem(COMPOSER_HEIGHT_STORAGE_KEY), window.innerHeight);
-  } catch {
-    return parseComposerHeight(null, window.innerHeight);
-  }
 }
 
 function attachmentId(): string {

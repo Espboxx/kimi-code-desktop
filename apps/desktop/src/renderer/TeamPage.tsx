@@ -14,7 +14,6 @@ import {
   Send,
   UserRound,
   Users,
-  X,
 } from 'lucide-react';
 
 import type {
@@ -30,11 +29,19 @@ import {
   attachmentProblem,
   COMPOSER_IMAGE_ACCEPT,
   readImageAttachment,
+  TEAM_COMPOSER_HEIGHT_STORAGE_KEY,
   type ComposerAttachmentError,
   type ComposerImageAttachment,
 } from './composer-utils';
+import {
+  ComposerAttachmentList,
+  ComposerErrorBanner,
+  ComposerFrame,
+  type ComposerAttachmentView,
+} from './ComposerPrimitives';
 import { collectTeamAgentActivities, type TeamAgentActivity } from './swarm-ui';
 import { ModelSelect, type SessionModelOption } from './SessionControls';
+import { SidePanelFrame } from './SidePrimitives';
 import { classNames } from './ui-utils';
 import { buildTeamMentionAliases, rehypeTeamMentions } from './team-message-markdown';
 
@@ -84,6 +91,11 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
   const selectedModelOption = models.find((model) => model.id === selectedModel);
   const imageInputSupport = selectedModelOption?.imageInput ?? 'unknown';
   const imageInputBlocked = images.length > 0 && imageInputSupport === 'unsupported';
+  const attachmentViews: ComposerAttachmentView[] = images.map((image) => ({
+    id: image.id,
+    label: image.label,
+    previewUrl: image.url,
+  }));
 
   useEffect(() => {
     const element = streamRef.current;
@@ -102,9 +114,9 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
     setError(undefined);
     const operation = window.kimiDesktop.turn.setModel(model, sessionId).then(
       () => true,
-      (reason: unknown) => {
+      (error: unknown) => {
         setSelectedModel(status?.model);
-        setError(reason instanceof Error ? reason.message : String(reason));
+        setError(error instanceof Error ? error.message : String(error));
         modelChangeRef.current = Promise.resolve(true);
         return false;
       },
@@ -225,121 +237,115 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
               />
             )}
           </div>
-          <div className="team-composer">
-            <div className="team-composer-toolbar">
-              <ModelSelect
-                value={selectedModel}
-                models={models}
-                disabled={snapshot.state === 'degraded' || modelPending || models.length === 0}
-                title="主代理模型"
-                onChange={changeModel}
-              />
-              <span className={classNames('team-image-support', `support-${imageInputSupport}`)}>
-                {modelPending
-                  ? '正在切换模型…'
-                  : imageInputSupport === 'supported'
-                    ? '当前模型支持图片 · 主代理会为新子 Agent 单独选择执行模型'
-                    : imageInputSupport === 'unsupported'
-                      ? '当前模型不支持图片输入'
-                      : '当前模型未声明图片能力，发送前请确认'}
-              </span>
-            </div>
-            {images.length > 0 && (
-              <div className="team-composer-images" aria-label={`已附加 ${String(images.length)} 张图片`}>
-                {images.map((image) => (
-                  <div className="team-composer-image" title={image.label} key={image.id}>
-                    <img src={image.url} alt={image.label} />
-                    <span>{image.label}</span>
-                    <button
-                      type="button"
-                      title={`移除 ${image.label}`}
-                      onClick={() => {
-                        setImages((current) => current.filter((item) => item.id !== image.id));
-                        setClientMessageId(undefined);
-                        setAttachmentError(undefined);
-                      }}
-                    ><X size={11} /></button>
-                  </div>
-                ))}
-              </div>
+          <ComposerFrame
+            className="team-composer"
+            frameClassName="team-composer-frame"
+            value={body}
+            disabled={snapshot.state === 'degraded'}
+            placeholder="发送消息到 general…"
+            ariaLabel="发送团队消息"
+            heightStorageKey={TEAM_COMPOSER_HEIGHT_STORAGE_KEY}
+            onChange={(value) => {
+              setBody(value);
+              setClientMessageId(undefined);
+            }}
+            onSubmit={() => { void send(); }}
+            onPasteImages={(files) => { void addImageFiles(files); }}
+            above={(
+              <>
+                <ComposerAttachmentList
+                  items={attachmentViews}
+                  ariaLabel={`已附加 ${String(images.length)} 张图片`}
+                  className="team-composer-images"
+                  itemClassName="team-composer-image"
+                  onRemove={(id) => {
+                    setImages((current) => current.filter((item) => item.id !== id));
+                    setClientMessageId(undefined);
+                    setAttachmentError(undefined);
+                  }}
+                />
+                <ComposerErrorBanner
+                  error={attachmentError}
+                  className="team-attachment-error"
+                  onDismiss={() => { setAttachmentError(undefined); }}
+                />
+                {error !== undefined && <div className="team-send-error"><CircleAlert size={13} /><span>{error}</span><button onClick={() => void send()}>重试原请求</button></div>}
+              </>
             )}
-            {attachmentError !== undefined && (
-              <div className="team-attachment-error" role="alert">
-                <CircleAlert size={13} />
-                <span><strong>{attachmentError.code}</strong>{attachmentError.message}</span>
-                <button type="button" onClick={() => { setAttachmentError(undefined); }} title="关闭"><X size={11} /></button>
-              </div>
+            status={(
+              <>
+                <ModelSelect
+                  value={selectedModel}
+                  models={models}
+                  disabled={snapshot.state === 'degraded' || modelPending || models.length === 0}
+                  title="主代理模型"
+                  onChange={changeModel}
+                />
+                <span className={classNames('team-image-support', `support-${imageInputSupport}`)}>
+                  {modelPending
+                    ? '正在切换模型…'
+                    : imageInputSupport === 'supported'
+                      ? '当前模型支持图片 · 主代理会为新子 Agent 单独选择执行模型'
+                      : imageInputSupport === 'unsupported'
+                        ? '当前模型不支持图片输入'
+                        : '当前模型未声明图片能力，发送前请确认'}
+                </span>
+              </>
             )}
-            <textarea
-              value={body}
-              onChange={(event) => {
-                setBody(event.target.value);
-                setClientMessageId(undefined);
-              }}
-              onPaste={(event) => {
-                const files = Array.from(event.clipboardData.items)
-                  .filter((item) => item.kind === 'file' && item.type.toLowerCase().startsWith('image/'))
-                  .map((item) => item.getAsFile())
-                  .filter((file): file is File => file !== null);
-                if (files.length === 0) return;
-                if (event.clipboardData.getData('text/plain').length === 0) event.preventDefault();
-                void addImageFiles(files);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                  event.preventDefault();
-                  void send();
-                }
-              }}
-              placeholder="发送消息到 general…"
-              disabled={snapshot.state === 'degraded'}
-            />
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept={COMPOSER_IMAGE_ACCEPT}
-              multiple
-              hidden
-              onChange={(event) => {
-                void addImageFiles(Array.from(event.target.files ?? []));
-                event.currentTarget.value = '';
-              }}
-            />
-            <div className="team-composer-actions">
-              <button
-                className="team-image-picker"
-                type="button"
-                onClick={() => { fileInputRef.current?.click(); }}
-                disabled={snapshot.state === 'degraded' || images.length >= 8}
-                title="粘贴或选择图片"
-              ><ImagePlus size={16} /></button>
-              <button
-                className="team-message-send"
-                type="button"
-                onClick={() => void send()}
-                disabled={sending || modelPending || imageInputBlocked || (body.trim().length === 0 && images.length === 0) || snapshot.state === 'degraded'}
-                title={imageInputBlocked ? '当前模型不支持图片输入' : '发送团队消息'}
-              >
-                {sending ? <CircleDashed className="spin" size={16} /> : <Send size={16} />}
-              </button>
-            </div>
-            {error !== undefined && <div className="team-send-error"><CircleAlert size={13} /><span>{error}</span><button onClick={() => void send()}>重试原请求</button></div>}
-          </div>
+            toolbarEnd={(
+              <>
+                <input
+                  ref={fileInputRef}
+                  className="composer-file-input"
+                  type="file"
+                  accept={COMPOSER_IMAGE_ACCEPT}
+                  multiple
+                  tabIndex={-1}
+                  onChange={(event) => {
+                    void addImageFiles(Array.from(event.currentTarget.files ?? []));
+                    event.currentTarget.value = '';
+                  }}
+                />
+                <button
+                  className="icon-button team-image-picker"
+                  type="button"
+                  onClick={() => { fileInputRef.current?.click(); }}
+                  disabled={snapshot.state === 'degraded' || images.length >= 8}
+                  title="粘贴或选择图片"
+                ><ImagePlus size={16} /></button>
+                <button
+                  className="send-button team-message-send"
+                  type="button"
+                  onClick={() => void send()}
+                  disabled={sending || modelPending || imageInputBlocked || (body.trim().length === 0 && images.length === 0) || snapshot.state === 'degraded'}
+                  title={imageInputBlocked ? '当前模型不支持图片输入' : '发送团队消息'}
+                >
+                  {sending ? <CircleDashed className="spin" size={16} /> : <Send size={16} />}
+                </button>
+              </>
+            )}
+          />
         </div>
 
-        <aside className={classNames('team-assignments', assignmentsOpen && 'open')}>
-          <button
-            className="team-assignment-toggle"
-            onClick={() => {
-              setAssignmentsOpen((value) => !value);
-            }}
-          >
-            {assignmentsOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            <strong>任务分配</strong>
-            <span>{statusCounts.running} 进行中 · {statusCounts.queued} 等待 · {statusCounts.terminal} 已结束</span>
-          </button>
-          {assignmentsOpen && (
-            <div className="team-assignment-scroll">
+        <SidePanelFrame
+          className="team-assignments"
+          ariaLabel="团队成员与任务分配"
+          open={assignmentsOpen}
+          bodyClassName="team-assignment-scroll"
+          header={(
+            <button
+              className="team-assignment-toggle"
+              onClick={() => {
+                setAssignmentsOpen((value) => !value);
+              }}
+              aria-expanded={assignmentsOpen}
+            >
+              {assignmentsOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              <strong>任务分配</strong>
+              <span>{statusCounts.running} 进行中 · {statusCounts.queued} 等待 · {statusCounts.terminal} 已结束</span>
+            </button>
+          )}
+        >
               <MemberList
                 assignments={snapshot.assignments}
                 members={snapshot.members}
@@ -354,9 +360,7 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
                       {group.nodes.map((node) => <AssignmentNode node={node} depth={0} onSelectAgent={onSelectAgent} key={node.assignment.id} />)}
                     </section>
                   ))}
-            </div>
-          )}
-        </aside>
+        </SidePanelFrame>
       </div>
     </section>
   );

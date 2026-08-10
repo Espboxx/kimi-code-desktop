@@ -41,6 +41,7 @@ let secondApp;
 let bootstrapApp;
 let provider;
 let persistedComposerHeight;
+let persistedTeamComposerHeight;
 let persistedTheme;
 let secondarySessionId;
 let teamSessionId;
@@ -130,6 +131,8 @@ try {
   const composerControls = page.locator('.session-controls[data-placement="composer"]');
   assert.equal(await page.locator('.session-controls[data-placement="topbar"]').count(), 0, 'top session controls should be removed');
   await composerControls.waitFor({ state: 'visible' });
+  assert.equal(await page.locator('.sidebar.navigation-sidebar').count(), 1, 'Chat must reuse the navigation sidebar shell');
+  assert.equal(await page.locator('.inspector.side-panel').count(), 1, 'Inspector must reuse the side-panel shell');
   assert.deepEqual(await page.locator('.composer-modes button').allTextContents(), ['Prompt', 'Steer']);
   assert.equal(await page.locator('.composer-modes').getByTitle('Agent Swarm').count(), 0, 'one-shot Swarm should not be exposed');
   assert.equal(await composerControls.getByTitle('Session Swarm 模式').count(), 0, 'normal Chat must not expose Team/Swarm controls');
@@ -490,6 +493,11 @@ try {
   await page.locator('.team-workbench').waitFor({ state: 'visible' });
   assert.equal(await page.locator('.sidebar').count(), 0, 'Chat sidebar must stay outside the Team workbench');
   assert.equal(await page.locator('.inspector').count(), 0, 'Chat inspector must stay outside the Team workbench');
+  const teamTaskSectionToggle = page.locator('.team-task-section .section-heading > button');
+  assert.equal(await teamTaskSectionToggle.getAttribute('aria-expanded'), 'true');
+  await teamTaskSectionToggle.click();
+  assert.equal(await teamTaskSectionToggle.getAttribute('aria-expanded'), 'false');
+  await teamTaskSectionToggle.click();
   await page.locator('.team-create-button').click();
   const createTeamDialog = page.locator('.create-team-dialog');
   await createTeamDialog.waitFor({ state: 'visible' });
@@ -527,6 +535,30 @@ try {
   assert.equal(await teamTab.getAttribute('aria-selected'), 'true', 'new Team task should open its channel');
   const teamPage = page.locator('.team-page');
   await teamPage.waitFor({ state: 'visible' });
+  assert.equal(await page.locator('.team-task-sidebar.navigation-sidebar').count(), 1, 'Team must reuse the navigation sidebar shell');
+  assert.equal(await teamPage.locator('.team-assignments.side-panel').count(), 1, 'Team assignments must reuse the side-panel shell');
+  assert.equal(await teamPage.locator('.team-composer > .composer').count(), 1, 'Team must reuse the composer frame');
+  const teamResizeHandle = teamPage.locator('.team-composer .composer-resize-handle');
+  await teamResizeHandle.focus();
+  await teamResizeHandle.press('Home');
+  await teamResizeHandle.press('Shift+ArrowUp');
+  persistedTeamComposerHeight = await teamPage.locator('.team-composer textarea')
+    .evaluate((element) => Math.round(element.getBoundingClientRect().height));
+  assert.equal(
+    await page.evaluate(() => Number(localStorage.getItem('kimi-desktop.team-composer-height.v1'))),
+    persistedTeamComposerHeight,
+  );
+  assert.equal(
+    await page.evaluate(() => Number(localStorage.getItem('kimi-desktop.composer-height.v1'))),
+    persistedComposerHeight,
+    'Team resize must not overwrite the Chat composer height',
+  );
+  const assignmentToggle = teamPage.locator('.team-assignment-toggle');
+  await assignmentToggle.click();
+  assert.equal(await assignmentToggle.getAttribute('aria-expanded'), 'false');
+  assert.equal(await teamPage.locator('.team-assignment-scroll').count(), 0);
+  await assignmentToggle.click();
+  assert.equal(await assignmentToggle.getAttribute('aria-expanded'), 'true');
   await page.waitForFunction(async (id) => (
     await window.kimiDesktop.host.snapshot()
   ).activeSessionId === id && (
@@ -1092,6 +1124,9 @@ try {
     assert.fail(`Team tab did not restore: ${JSON.stringify({ error: error instanceof Error ? error.message : String(error), restoreDiagnostic })}`);
   }
   await restoredTeamTab.click();
+  const restoredTeamComposerHeight = await restoredPage.locator('.team-composer textarea')
+    .evaluate((element) => Math.round(element.getBoundingClientRect().height));
+  assert.equal(restoredTeamComposerHeight, persistedTeamComposerHeight, 'Team composer height was not restored independently');
   const restoredTeamMessage = restoredPage.locator('.team-message.user').filter({ hasText: 'User follow-up from the Team channel.' });
   await restoredTeamMessage.getByText('User follow-up from the Team channel.', { exact: true }).waitFor();
   const restoredTeamImage = restoredTeamMessage.locator('.team-message-attachments img');

@@ -376,41 +376,56 @@ progress {
   background: var(--bg);
 }
 
-.team-task-sidebar {
-  display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+.navigation-sidebar {
+  display: flex;
   min-width: 0;
   min-height: 0;
+  flex-direction: column;
   border-right: 1px solid var(--border);
   background: var(--panel);
   overflow: hidden;
 }
 
-.team-task-sidebar-header {
+.navigation-sidebar-header {
   display: flex;
   min-width: 0;
-  min-height: 52px;
+  min-height: 48px;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  padding: 7px 8px 5px 10px;
-  border-bottom: 1px solid var(--border);
+  padding: 7px 7px 4px 9px;
 }
 
-.team-task-sidebar-header > div,
-.team-task-sidebar-header span {
+.navigation-sidebar-title,
+.navigation-sidebar-title span {
   display: flex;
   min-width: 0;
   align-items: center;
 }
 
-.team-task-sidebar-header > div { gap: 8px; }
-.team-task-sidebar-header > div > svg { flex: 0 0 auto; color: var(--accent); }
-.team-task-sidebar-header span { align-items: flex-start; flex-direction: column; }
-.team-task-sidebar-header strong,
-.team-task-sidebar-header small { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.team-task-sidebar-header strong { font-size: 12px; }
-.team-task-sidebar-header small { color: var(--muted); font-size: 9px; }
+.navigation-sidebar-title {
+  flex: 1;
+  gap: 8px;
+  padding: 3px 5px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.navigation-sidebar-title > svg { flex: 0 0 auto; }
+.navigation-sidebar-title span { align-items: flex-start; flex: 1; flex-direction: column; }
+.navigation-sidebar-title strong,
+.navigation-sidebar-title small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.navigation-sidebar-title strong { font-size: 12px; }
+.navigation-sidebar-title small { color: var(--muted); font-size: 9px; }
+
+.sidebar .navigation-sidebar-title > svg { color: var(--amber); }
+.team-task-sidebar .navigation-sidebar-title > svg { color: var(--accent); }
+.team-task-sidebar .navigation-sidebar-header {
+  min-height: 52px;
+  padding: 7px 8px 5px 10px;
+  border-bottom: 1px solid var(--border);
+}
 
 .team-create-button {
   display: inline-flex;
@@ -445,25 +460,46 @@ progress {
   font-style: normal;
 }
 
-.team-task-list { min-height: 0; overflow: auto; }
+.team-task-list { min-height: 0; flex: 1; overflow: auto; }
 
-.team-task-row-shell {
+.navigation-row {
   position: relative;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  min-width: 0;
 }
 
-.team-task-row {
+.navigation-row-main {
   display: flex;
   width: 100%;
   min-width: 0;
-  min-height: 58px;
   align-items: center;
   gap: 7px;
-  padding: 7px 38px 7px 9px;
   border: 0;
   border-radius: 0;
   background: transparent;
   text-align: left;
+}
+
+.navigation-row-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.navigation-row-copy strong,
+.navigation-row-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-task-row-shell {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+}
+
+.team-task-row {
+  min-height: 58px;
+  padding: 7px 38px 7px 9px;
 }
 
 .team-task-row:hover { background: var(--surface-hover); }
@@ -595,13 +631,6 @@ progress {
 
 .sidebar {
   grid-area: sidebar;
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-  flex-direction: column;
-  border-right: 1px solid var(--border);
-  background: var(--panel);
-  overflow: hidden;
 }
 
 .workspace-header {
@@ -695,7 +724,7 @@ progress {
   white-space: nowrap;
 }
 
-.sidebar-section {
+.navigation-section {
   display: flex;
   min-height: 0;
   flex: 1 1 54%;
@@ -704,16 +733,16 @@ progress {
   overflow: hidden;
 }
 
-.sidebar-section:last-child {
+.sidebar .navigation-section:last-child {
   flex-basis: 46%;
 }
 
-.sidebar-section.collapsed {
+.navigation-section.collapsed {
   min-height: 31px;
   flex: 0 0 31px;
 }
 
-.section-heading {
+.navigation-section-heading {
   display: flex;
   height: 31px;
   flex: 0 0 31px;
@@ -721,7 +750,7 @@ progress {
   padding: 0 5px;
 }
 
-.section-heading > button:first-child {
+.navigation-section-heading > button:first-child {
   display: flex;
   min-width: 0;
   flex: 1;
@@ -737,13 +766,18 @@ progress {
   text-transform: uppercase;
 }
 
-.section-heading em {
+.navigation-section-heading em {
   padding: 0 5px;
   border-radius: 8px;
   background: var(--surface);
   color: var(--muted);
   font-size: 9px;
   font-style: normal;
+}
+
+.team-task-section {
+  flex-basis: auto;
+  border-top: 1px solid var(--border);
 }
 
 .tree-scroll,
@@ -2001,6 +2035,12 @@ progress {
   border-top: 1px solid var(--border);
 }
 
+.composer-toolbar-start {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
 .segmented {
   display: inline-flex;
   align-items: center;
@@ -2134,6 +2174,14 @@ progress {
   white-space: nowrap;
 }
 
+.composer-attachment-preview {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border-radius: 3px;
+  object-fit: cover;
+}
+
 .composer-chips .attachment-label {
   min-width: 0;
   overflow: hidden;
@@ -2198,15 +2246,37 @@ progress {
   white-space: nowrap;
 }
 
-.inspector {
-  grid-area: inspector;
+.side-panel {
   display: grid;
-  grid-template-rows: 34px auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   border-left: 1px solid var(--border);
   background: var(--panel);
   overflow: hidden;
+}
+
+.side-panel-header,
+.side-panel-body {
+  min-width: 0;
+  min-height: 0;
+}
+
+.side-panel-body {
+  overflow: hidden;
+}
+
+.inspector {
+  grid-area: inspector;
+}
+
+.inspector > .side-panel-header {
+  height: 34px;
+}
+
+.inspector-body {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .todo-fixed-panel {
@@ -2389,6 +2459,7 @@ progress {
 
 .inspector-tabs {
   display: flex;
+  height: 100%;
   min-width: 0;
   align-items: center;
   border-bottom: 1px solid var(--border);
@@ -4014,25 +4085,16 @@ progress {
 }
 
 .team-composer {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px;
-  padding: 9px 12px 11px;
-  border-top: 1px solid var(--border);
-  background: var(--panel-2);
+  padding-inline: 12px;
 }
 
-.team-composer-toolbar {
-  display: flex;
-  min-width: 0;
-  grid-column: 1 / -1;
-  align-items: center;
-  gap: 8px;
+.team-composer .composer {
+  max-width: 920px;
 }
 
-.team-composer-toolbar > span {
+.team-composer .composer-status-toolbar > .team-image-support {
   min-width: 0;
+  flex: 1 1 260px;
   overflow: hidden;
   color: var(--muted);
   font-size: 9px;
@@ -4040,119 +4102,65 @@ progress {
   white-space: nowrap;
 }
 
-.team-composer-toolbar > .team-image-support.support-supported {
+.team-composer .team-image-support.support-supported {
   color: var(--accent-strong);
 }
 
-.team-composer-toolbar > .team-image-support.support-unsupported {
+.team-composer .team-image-support.support-unsupported {
   color: var(--red);
 }
 
 .team-composer-images {
-  display: flex;
   min-width: 0;
-  grid-column: 1 / -1;
-  gap: 6px;
+  flex-wrap: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
 }
 
 .team-composer-image {
-  position: relative;
-  display: grid;
   min-width: 128px;
   max-width: 180px;
   height: 46px;
-  grid-template-columns: 42px minmax(0, 1fr) 20px;
-  align-items: center;
-  gap: 5px;
-  padding: 2px;
-  border: 1px solid var(--border);
+  flex: 0 0 auto;
+  padding: 2px 3px;
   border-radius: 7px;
-  background: var(--panel);
 }
 
-.team-composer-image img {
+.team-composer-image .composer-attachment-preview {
   width: 42px;
   height: 40px;
+  flex: 0 0 42px;
   border-radius: 5px;
   object-fit: cover;
 }
 
-.team-composer-image span {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text-soft);
-  font-size: 9px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.team-composer-image button,
-.team-attachment-error button {
-  padding: 0;
-  border: 0;
-  background: transparent;
-}
-
 .team-attachment-error {
-  display: flex;
-  min-width: 0;
-  grid-column: 1 / -1;
-  align-items: center;
-  gap: 6px;
-  color: var(--red);
-  font-size: 9px;
+  font-size: 10px;
 }
 
-.team-attachment-error span {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.team-attachment-error strong {
-  margin-right: 5px;
-  font-family: var(--mono);
-}
-
-.team-composer-toolbar .model-control {
+.team-composer .model-control {
   max-width: min(310px, 58%);
 }
 
-.team-composer textarea {
-  min-height: 54px;
-  max-height: 150px;
-  resize: vertical;
-}
-
-.team-composer-actions {
-  display: flex;
-  align-self: end;
-  gap: 5px;
-}
-
-.team-composer-actions button {
-  width: 34px;
-  height: 34px;
-  padding: 0;
-}
-
-.team-composer-actions .team-image-picker {
+.team-composer .team-image-picker {
   color: var(--muted);
 }
 
-.team-composer-actions .team-message-send {
-  color: var(--accent-strong);
+.team-composer .team-message-send {
+  color: #0c1d18;
 }
 
 .team-send-error {
   display: flex;
-  grid-column: 1 / -1;
+  width: min(920px, 100%);
+  min-height: 28px;
   align-items: center;
   gap: 6px;
+  margin: 0 auto 6px;
+  padding: 5px 7px;
+  border: 1px solid color-mix(in srgb, var(--red) 55%, var(--border));
+  border-radius: 5px;
+  background: var(--red-bg);
   color: var(--red);
   font-size: 10px;
 }
@@ -4171,12 +4179,10 @@ progress {
 }
 
 .team-assignments {
-  min-width: 0;
-  min-height: 0;
-  border-left: 1px solid var(--border);
-  background: var(--panel);
-  overflow: hidden;
+  grid-template-rows: 38px minmax(0, 1fr);
 }
+
+.team-assignments > .side-panel-header { height: 38px; }
 
 .team-assignment-toggle {
   display: flex;
@@ -4203,7 +4209,6 @@ progress {
 }
 
 .team-assignment-scroll {
-  height: calc(100% - 38px);
   overflow: auto;
 }
 

@@ -1,6 +1,7 @@
 import type { SessionUsageSnapshot } from '../shared/desktop-api';
 
 export const COMPOSER_HEIGHT_STORAGE_KEY = 'kimi-desktop.composer-height.v1';
+export const TEAM_COMPOSER_HEIGHT_STORAGE_KEY = 'kimi-desktop.team-composer-height.v1';
 export const DEFAULT_COMPOSER_HEIGHT = 112;
 export const MIN_COMPOSER_HEIGHT = 64;
 export const MAX_COMPOSER_HEIGHT = 360;

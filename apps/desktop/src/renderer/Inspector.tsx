@@ -14,10 +14,10 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-import type { SessionDetailsSnapshot } from '../shared/desktop-api';
-import type { TodoItem } from '../shared/desktop-api';
+import type { SessionDetailsSnapshot, TodoItem } from '../shared/desktop-api';
 import { AgentActivityTree } from './AgentActivity';
 import type { AgentActivityForest } from './agent-activity';
+import { SidePanelFrame } from './SidePrimitives';
 import { classNames, formatJson, number, record, text } from './ui-utils';
 import { TodoListPanel } from './TodoListPanel';
 
@@ -45,18 +45,24 @@ export function Inspector(props: InspectorProps) {
     { id: 'goal', label: 'Goal', icon: <Gauge size={13} /> },
   ];
   return (
-    <aside className="inspector">
-      <div className="inspector-tabs" role="tablist">
-        {tabs.map((item) => (
-          <button
-            role="tab"
-            aria-selected={tab === item.id}
-            className={tab === item.id ? 'active' : ''}
-            onClick={() => setTab(item.id)}
-            key={item.id}
-          >{item.icon}<span>{item.label}</span></button>
-        ))}
-      </div>
+    <SidePanelFrame
+      className="inspector"
+      ariaLabel="会话检查器"
+      bodyClassName="inspector-body"
+      header={(
+        <div className="inspector-tabs" role="tablist">
+          {tabs.map((item) => (
+            <button
+              role="tab"
+              aria-selected={tab === item.id}
+              className={tab === item.id ? 'active' : ''}
+              onClick={() => setTab(item.id)}
+              key={item.id}
+            >{item.icon}<span>{item.label}</span></button>
+          ))}
+        </div>
+      )}
+    >
       <TodoListPanel
         key={props.sessionId ?? 'no-session'}
         sessionId={props.sessionId}
@@ -81,7 +87,7 @@ export function Inspector(props: InspectorProps) {
           </>
         )}
       </div>
-    </aside>
+    </SidePanelFrame>
   );
 }
 

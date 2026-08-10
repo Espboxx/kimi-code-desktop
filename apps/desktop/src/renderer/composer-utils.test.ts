@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   cacheMetrics,
   clampComposerHeight,
+  COMPOSER_HEIGHT_STORAGE_KEY,
   composerMaxHeight,
   contextPercentage,
   contextProgress,
@@ -12,6 +13,7 @@ import {
   MAX_INLINE_IMAGE_BYTES,
   modelImageInputSupport,
   parseComposerHeight,
+  TEAM_COMPOSER_HEIGHT_STORAGE_KEY,
 } from './composer-utils';
 
 describe('composer usage metrics', () => {
@@ -52,6 +54,10 @@ describe('composer height', () => {
     expect(parseComposerHeight('180', 1_040)).toBe(180);
     expect(parseComposerHeight('invalid', 1_040)).toBe(DEFAULT_COMPOSER_HEIGHT);
     expect(parseComposerHeight(null, 1_040)).toBe(DEFAULT_COMPOSER_HEIGHT);
+  });
+
+  it('keeps Chat and Team resize preferences independent', () => {
+    expect(COMPOSER_HEIGHT_STORAGE_KEY).not.toBe(TEAM_COMPOSER_HEIGHT_STORAGE_KEY);
   });
 });
 
