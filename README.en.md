@@ -155,6 +155,8 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting changes. Keep changes 
 
 Thanks to [CodeProxy](https://codeproxy.dev/) for supporting the development and open-source release of this project.
 
+[![CodeProxy website](docs/media/codeproxy-sponsor.png)](https://codeproxy.dev/)
+
 ## License and attribution
 
 Upstream code and this project's modifications remain available under the [MIT License](LICENSE). The root `LICENSE` preserves the upstream copyright text; third-party dependencies retain their respective licenses. See [NOTICE.md](NOTICE.md) for attribution, unofficial-project status, and trademark information.

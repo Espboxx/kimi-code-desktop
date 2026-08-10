@@ -155,6 +155,8 @@ fnm exec --using=24.15.0 -- pnpm --filter @moonshot-ai/kimi-code-desktop dist:wi
 
 感谢 [CodeProxy](https://codeproxy.dev/) 对本项目开发与开源发布的支持。
 
+[![CodeProxy 官网](docs/media/codeproxy-sponsor.png)](https://codeproxy.dev/)
+
 ## 许可证与归属
 
 上游代码及本项目修改继续采用 [MIT License](LICENSE)。根 `LICENSE` 保留上游版权原文；第三方依赖按各自许可证分发。项目归属、非官方声明和商标说明见 [NOTICE.md](NOTICE.md)。
