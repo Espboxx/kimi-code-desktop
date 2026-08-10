@@ -250,7 +250,7 @@ export class SessionSwarmService extends Disposable implements ISessionSwarmServ
         labels: subagentLabels(callerAgentId, { swarmItem: options.swarmItem }),
       });
     } catch (error) {
-      throw wrapSubagentModelError(error, binding.model, callerData.modelAlias);
+      throw wrapSubagentModelError(error, binding.model, callerData.modelAlias, this.config);
     }
     try {
       await options.onAgentBound?.(child.id);

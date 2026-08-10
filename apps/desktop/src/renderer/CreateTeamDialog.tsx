@@ -2,17 +2,25 @@ import { useEffect, useState } from 'react';
 import { CircleDashed, ShieldAlert, Users, X } from 'lucide-react';
 
 import { classNames } from './ui-utils';
+import { ModelSelect, type SessionModelOption } from './SessionControls';
 
 type TeamPermissionChoice = 'current' | 'yolo';
 type SessionPermission = 'manual' | 'auto' | 'yolo';
 
-export function CreateTeamDialog({ currentPermission, onCreate, onCancel }: {
+export function CreateTeamDialog({ currentPermission, models, defaultModel, onCreate, onCancel }: {
   readonly currentPermission: SessionPermission;
-  readonly onCreate: (objective: string, permission: TeamPermissionChoice) => Promise<void>;
+  readonly models: readonly SessionModelOption[];
+  readonly defaultModel?: string;
+  readonly onCreate: (
+    objective: string,
+    permission: TeamPermissionChoice,
+    model?: string,
+  ) => Promise<void>;
   readonly onCancel: () => void;
 }) {
   const [objective, setObjective] = useState('');
   const [permission, setPermission] = useState<TeamPermissionChoice>('current');
+  const [model, setModel] = useState(defaultModel ?? models[0]?.id ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
 
@@ -32,7 +40,7 @@ export function CreateTeamDialog({ currentPermission, onCreate, onCancel }: {
     setBusy(true);
     setError(undefined);
     try {
-      await onCreate(value, permission);
+      await onCreate(value, permission, model || undefined);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
       setBusy(false);
@@ -57,6 +65,17 @@ export function CreateTeamDialog({ currentPermission, onCreate, onCancel }: {
               autoFocus
             />
           </label>
+          <div className="team-create-model">
+            <span>主代理模型</span>
+            <ModelSelect
+              value={model || undefined}
+              models={models}
+              disabled={busy || models.length === 0}
+              title="主代理模型"
+              onChange={setModel}
+            />
+            <small>子 Agent 会由主代理按每项任务从全部可用模型中单独选择。</small>
+          </div>
           <fieldset className="team-permission-options">
             <legend>工具权限</legend>
             <label className={classNames('team-permission-option', permission === 'current' && 'selected')}>

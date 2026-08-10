@@ -26,6 +26,12 @@ import type { ApprovalHandler, QuestionHandler } from '#/events';
 import type {
   AddAdditionalDirInput,
   AddAdditionalDirResult,
+  AgentProfileDeleteInput,
+  AgentProfileDeleteResult,
+  AgentProfileDraft,
+  AgentProfileListResult,
+  AgentProfileMutationResult,
+  AgentProfileUpdateInput,
   AgentCommandInfo,
   BackgroundTaskInfo,
   ConfigDiagnostics,
@@ -227,6 +233,50 @@ export abstract class SDKRpcClientBase {
   async listWorkspaceSkills(workDir: string): Promise<readonly SkillSummary[]> {
     const rpc = await this.getRpc();
     return rpc.listWorkspaceSkills({ workDir });
+  }
+
+  async listAgentProfiles(workDir: string): Promise<AgentProfileListResult> {
+    void workDir;
+    throw new KimiError(
+      ErrorCodes.NOT_IMPLEMENTED,
+      'Agent profile management requires the agent-core-v2 engine.',
+    );
+  }
+
+  async createAgentProfile(
+    workDir: string,
+    input: AgentProfileDraft,
+  ): Promise<AgentProfileMutationResult> {
+    void workDir;
+    void input;
+    throw new KimiError(
+      ErrorCodes.NOT_IMPLEMENTED,
+      'Agent profile management requires the agent-core-v2 engine.',
+    );
+  }
+
+  async updateAgentProfile(
+    workDir: string,
+    input: AgentProfileUpdateInput,
+  ): Promise<AgentProfileMutationResult> {
+    void workDir;
+    void input;
+    throw new KimiError(
+      ErrorCodes.NOT_IMPLEMENTED,
+      'Agent profile management requires the agent-core-v2 engine.',
+    );
+  }
+
+  async deleteAgentProfile(
+    workDir: string,
+    input: AgentProfileDeleteInput,
+  ): Promise<AgentProfileDeleteResult> {
+    void workDir;
+    void input;
+    throw new KimiError(
+      ErrorCodes.NOT_IMPLEMENTED,
+      'Agent profile management requires the agent-core-v2 engine.',
+    );
   }
 
   /**

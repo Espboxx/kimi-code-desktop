@@ -237,6 +237,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
         parentAssignmentId,
         displayName: assignment.displayName,
         profileName: assignment.profileName,
+        model: assignment.model,
         description: assignment.description,
         item: assignment.item,
         status: 'queued',

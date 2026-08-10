@@ -5,7 +5,10 @@ import { SyncDescriptor } from '#/_base/di/descriptors';
 import { DisposableStore } from '#/_base/di/lifecycle';
 import { TestInstantiationService } from '#/_base/di/test';
 import { IAgentContextMemoryService } from '#/agent/contextMemory/contextMemory';
-import { DEFAULT_SUBAGENT_TIMEOUT_MS } from '#/session/subagent/configSection';
+import {
+  DEFAULT_SUBAGENT_TIMEOUT_MS,
+  SUBAGENT_SECTION,
+} from '#/session/subagent/configSection';
 import { IAgentLifecycleService } from '#/session/agentLifecycle/agentLifecycle';
 import { ISessionSwarmService, type SessionSwarmRunResult, type SessionSwarmTask } from '#/session/swarm/sessionSwarm';
 import { IAgentSystemReminderService } from '#/agent/systemReminder/systemReminder';
@@ -14,6 +17,10 @@ import { IAgentSwarmService } from '#/agent/swarm/swarm';
 import { AgentSwarmService } from '#/agent/swarm/swarmService';
 import { SwarmModel } from '#/agent/swarm/swarmOps';
 import { SECONDARY_DERIVED_MODEL_ID } from '#/app/kosongConfig/secondaryModelOverlay';
+import {
+  MODELS_SECTION,
+  SECONDARY_MODEL_SECTION,
+} from '#/app/kosongConfig/configSection';
 import { AgentSwarmToolInputSchema } from '#/agent/tools/agent-swarm/agent-swarm';
 import { AgentSwarmTool } from '#/agent/tools/agent-swarm/agentSwarmTool';
 import { IAgentToolApprovalService } from '#/agent/toolApproval/toolApproval';
@@ -108,10 +115,24 @@ function stubConfig(section?: {
   timeoutMs?: number;
   model?: string;
   defaultEffort?: string;
+  models?: Readonly<Record<string, unknown>>;
 }): IConfigService {
   return {
     _serviceBrand: undefined,
-    get: () => section,
+    get: (domain: string) => {
+      if (domain === SUBAGENT_SECTION) {
+        return section?.timeoutMs === undefined ? undefined : { timeoutMs: section.timeoutMs };
+      }
+      if (domain === SECONDARY_MODEL_SECTION) {
+        return section?.model === undefined
+          ? undefined
+          : section.defaultEffort === undefined
+            ? { model: section.model }
+            : { model: section.model, defaultEffort: section.defaultEffort };
+      }
+      if (domain === MODELS_SECTION) return section?.models;
+      return undefined;
+    },
   } as unknown as IConfigService;
 }
 
@@ -170,9 +191,51 @@ function stubModelCatalog(
     get: (id: string) => {
       const capability = capabilities[id];
       if (capability === undefined) throw new Error(`Model "${id}" is not configured.`);
-      return { capabilities: capability };
+      return {
+        id,
+        name: id,
+        displayName: id,
+        providerName: 'test-provider',
+        maxContextSize: capability.max_context_tokens,
+        capabilities: capability,
+      };
     },
   } as unknown as IModelCatalog;
+}
+
+const TEST_MODEL_CAPABILITY: ModelCapability = {
+  image_in: false,
+  video_in: false,
+  audio_in: false,
+  thinking: true,
+  tool_use: true,
+  max_context_tokens: 262_144,
+};
+
+function stubTeamCollaboration(): ISessionCollaborationService {
+  return {
+    _serviceBrand: undefined,
+    snapshot: vi.fn().mockResolvedValue({ members: [], assignments: [] }),
+    prepareSwarmBatch: vi.fn().mockImplementation(async (input) => ({
+      batchId: 'team-batch',
+      assignments: input.assignments.map((assignment: {
+        readonly assignmentId: string;
+        readonly description: string;
+        readonly displayName?: string;
+        readonly profileName: string;
+        readonly model?: string;
+      }) => ({
+        id: assignment.assignmentId,
+        description: assignment.description,
+        displayName: assignment.displayName,
+        profileName: assignment.profileName,
+        model: assignment.model,
+      })),
+    })),
+    bindAssignment: vi.fn(),
+    settleAssignment: vi.fn(),
+    settleBatch: vi.fn(),
+  } as unknown as ISessionCollaborationService;
 }
 
 describe('AgentSwarmService', () => {
@@ -526,12 +589,14 @@ describe('AgentSwarmTool', () => {
             description: 'Review files #1 (coder)',
             displayName: 'reviewer-a',
             profileName: 'coder',
+            model: 'main-model',
           },
           {
             id: 'assignment-2',
             description: 'Review files #2 (explore)',
             displayName: 'reviewer-b',
             profileName: 'explore',
+            model: 'main-model',
           },
         ],
       }),
@@ -543,11 +608,13 @@ describe('AgentSwarmTool', () => {
       host.swarmService,
       makeAgentScopeContext({ agentId: host.callerAgentId, agentScope: '' }),
       mockSwarmMode(),
-      stubConfig(),
+      stubConfig({ models: { 'main-model': {} } }),
       stubFlag((id) => id === TEAM_COLLABORATION_FLAG_ID),
       stubSwarmCatalog(),
-      stubCallerProfile(),
-      stubModelCatalog(),
+      stubCallerProfile({ modelAlias: 'main-model', thinkingLevel: 'high' }),
+      stubModelCatalog({
+        'main-model': { image_in: false, video_in: false, audio_in: false, thinking: true, tool_use: true, max_context_tokens: 262_144 },
+      }),
       collaboration,
     );
 
@@ -555,8 +622,8 @@ describe('AgentSwarmTool', () => {
       description: 'Review files',
       prompt_template: 'Review {{item}}',
       items: [
-        { item: 'src/a.ts', display_name: 'reviewer-a', subagent_type: 'coder' },
-        { item: 'src/b.ts', display_name: 'reviewer-b', subagent_type: 'explore' },
+        { item: 'src/a.ts', display_name: 'reviewer-a', subagent_type: 'coder', model: 'main-model' },
+        { item: 'src/b.ts', display_name: 'reviewer-b', subagent_type: 'explore', model: 'main-model' },
       ],
     }));
 
@@ -564,9 +631,128 @@ describe('AgentSwarmTool', () => {
     expect(host.swarmService.run).not.toHaveBeenCalled();
     expect(result.output).toContain('<agent_swarm_started>');
     expect(result.output).toContain('<batch_id>team-batch</batch_id>');
+    expect(result.output).toContain('model="main-model"');
     expect(result.output).toContain('Use TeamStatus, TeamSend, and TeamWait');
+    expect(collaboration.prepareSwarmBatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assignments: expect.arrayContaining([
+          expect.objectContaining({ model: 'main-model', profileName: 'coder' }),
+          expect.objectContaining({ model: 'main-model', profileName: 'explore' }),
+        ]),
+      }),
+    );
     settleCompletion?.([]);
     await Promise.resolve();
+  });
+
+  it('requires a per-item model choice when Team Mode has multiple routable aliases', async () => {
+    const host = mockSwarmHost();
+    const collaboration = stubTeamCollaboration();
+    const tool = new AgentSwarmTool(
+      host.swarmService,
+      makeAgentScopeContext({ agentId: host.callerAgentId, agentScope: '' }),
+      mockSwarmMode(),
+      stubConfig({ models: { fast: {}, deep: {} } }),
+      stubFlag((id) => id === TEAM_COLLABORATION_FLAG_ID),
+      stubSwarmCatalog(),
+      stubCallerProfile({ modelAlias: 'deep', thinkingLevel: 'high' }),
+      stubModelCatalog({ fast: TEST_MODEL_CAPABILITY, deep: TEST_MODEL_CAPABILITY }),
+      collaboration,
+    );
+
+    const result = await executeTool(tool, context({
+      description: 'Review files',
+      prompt_template: 'Review {{item}}',
+      items: [
+        { item: 'src/a.ts', display_name: 'quick-reviewer', subagent_type: 'coder' },
+        { item: 'src/b.ts', display_name: 'deep-reviewer', subagent_type: 'explore' },
+      ],
+      model: 'fast',
+    }));
+
+    expect(result).toMatchObject({
+      isError: true,
+      output: 'Team Mode requires every new AgentSwarm item to provide an exact model alias when multiple models are available.',
+    });
+    expect(collaboration.prepareSwarmBatch).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unknown per-item Team model alias before persisting assignments', async () => {
+    const host = mockSwarmHost();
+    const collaboration = stubTeamCollaboration();
+    const tool = new AgentSwarmTool(
+      host.swarmService,
+      makeAgentScopeContext({ agentId: host.callerAgentId, agentScope: '' }),
+      mockSwarmMode(),
+      stubConfig({ models: { fast: {}, deep: {} } }),
+      stubFlag((id) => id === TEAM_COLLABORATION_FLAG_ID),
+      stubSwarmCatalog(),
+      stubCallerProfile({ modelAlias: 'deep', thinkingLevel: 'high' }),
+      stubModelCatalog({ fast: TEST_MODEL_CAPABILITY, deep: TEST_MODEL_CAPABILITY }),
+      collaboration,
+    );
+
+    const result = await executeTool(tool, context({
+      description: 'Review files',
+      prompt_template: 'Review {{item}}',
+      items: [
+        { item: 'src/a.ts', display_name: 'quick-reviewer', subagent_type: 'coder', model: 'fast' },
+        { item: 'src/b.ts', display_name: 'deep-reviewer', subagent_type: 'explore', model: 'missing' },
+      ],
+    }));
+
+    expect(result).toMatchObject({
+      isError: true,
+      output: 'Unknown Team subagent model alias: "missing".',
+    });
+    expect(collaboration.prepareSwarmBatch).not.toHaveBeenCalled();
+  });
+
+  it('routes each Team item to its selected model and persists the aliases', async () => {
+    const host = mockSwarmHost();
+    const launch = vi.fn((args: Parameters<ISessionSwarmService['launch']>[0]) => ({
+      batchId: 'scheduler-batch',
+      accepted: args.tasks,
+      completion: Promise.resolve([]),
+    }));
+    host.swarmService.launch = launch as ISessionSwarmService['launch'];
+    const collaboration = stubTeamCollaboration();
+    const tool = new AgentSwarmTool(
+      host.swarmService,
+      makeAgentScopeContext({ agentId: host.callerAgentId, agentScope: '' }),
+      mockSwarmMode(),
+      stubConfig({ models: { fast: {}, deep: {} } }),
+      stubFlag((id) => id === TEAM_COLLABORATION_FLAG_ID),
+      stubSwarmCatalog(),
+      stubCallerProfile({ modelAlias: 'deep', thinkingLevel: 'high' }),
+      stubModelCatalog({ fast: TEST_MODEL_CAPABILITY, deep: TEST_MODEL_CAPABILITY }),
+      collaboration,
+    );
+
+    const result = await executeTool(tool, context({
+      description: 'Review files',
+      prompt_template: 'Review {{item}}',
+      items: [
+        { item: 'src/a.ts', display_name: 'quick-reviewer', subagent_type: 'coder', model: 'fast' },
+        { item: 'src/b.ts', display_name: 'deep-reviewer', subagent_type: 'explore', model: 'deep' },
+      ],
+    }));
+
+    expect(result.isError).toBeUndefined();
+    expect(launch).toHaveBeenCalledWith(expect.objectContaining({
+      tasks: [
+        expect.objectContaining({ binding: { model: 'fast', thinking: undefined } }),
+        expect.objectContaining({ binding: { model: 'deep', thinking: undefined } }),
+      ],
+    }));
+    expect(collaboration.prepareSwarmBatch).toHaveBeenCalledWith(expect.objectContaining({
+      assignments: [
+        expect.objectContaining({ displayName: 'quick-reviewer', model: 'fast' }),
+        expect.objectContaining({ displayName: 'deep-reviewer', model: 'deep' }),
+      ],
+    }));
+    expect(result.output).toContain('model="fast"');
+    expect(result.output).toContain('model="deep"');
   });
 
   it('marks the durable Team batch failed when scheduler admission throws', async () => {
@@ -585,12 +771,14 @@ describe('AgentSwarmTool', () => {
             description: 'Review files #1 (coder)',
             displayName: 'reviewer-a',
             profileName: 'coder',
+            model: 'main-model',
           },
           {
             id: 'assignment-2',
             description: 'Review files #2 (explore)',
             displayName: 'reviewer-b',
             profileName: 'explore',
+            model: 'main-model',
           },
         ],
       }),
@@ -602,11 +790,13 @@ describe('AgentSwarmTool', () => {
       host.swarmService,
       makeAgentScopeContext({ agentId: host.callerAgentId, agentScope: '' }),
       mockSwarmMode(),
-      stubConfig(),
+      stubConfig({ models: { 'main-model': {} } }),
       stubFlag((id) => id === TEAM_COLLABORATION_FLAG_ID),
       stubSwarmCatalog(),
-      stubCallerProfile(),
-      stubModelCatalog(),
+      stubCallerProfile({ modelAlias: 'main-model', thinkingLevel: 'high' }),
+      stubModelCatalog({
+        'main-model': { image_in: false, video_in: false, audio_in: false, thinking: true, tool_use: true, max_context_tokens: 262_144 },
+      }),
       collaboration,
     );
 
@@ -614,8 +804,8 @@ describe('AgentSwarmTool', () => {
       description: 'Review files',
       prompt_template: 'Review {{item}}',
       items: [
-        { item: 'src/a.ts', display_name: 'reviewer-a', subagent_type: 'coder' },
-        { item: 'src/b.ts', display_name: 'reviewer-b', subagent_type: 'explore' },
+        { item: 'src/a.ts', display_name: 'reviewer-a', subagent_type: 'coder', model: 'main-model' },
+        { item: 'src/b.ts', display_name: 'reviewer-b', subagent_type: 'explore', model: 'main-model' },
       ],
     }));
 

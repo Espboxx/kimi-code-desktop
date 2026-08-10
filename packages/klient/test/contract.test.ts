@@ -88,7 +88,8 @@ describe('Team collaboration contract validation', () => {
       batches: [],
       assignments: [{
         id: 'a1', batchId: 'b1', agentId: 'agent-2', displayName: '界面侦察',
-        profileName: 'explore', description: 'Inspect UI', status: 'running', createdAt: 1, updatedAt: 1,
+        profileName: 'explore', model: 'desktop-fast', description: 'Inspect UI',
+        status: 'running', createdAt: 1, updatedAt: 1,
       }],
       latestSeq: 0,
       latestChannelSeq: 0,

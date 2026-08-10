@@ -1225,7 +1225,7 @@ describe('SessionSwarmService metadata compatibility', () => {
     );
   });
 
-  it('points at the secondary model config when a spawn task binding is invalid', async () => {
+  it('points at the requested model alias when an explicit spawn task binding is invalid', async () => {
     const service = ix.get(ISessionSwarmService);
     const spawnTask: SessionSwarmSpawnTask = {
       ...spawnSessionTask('src/a.ts'),
@@ -1241,7 +1241,7 @@ describe('SessionSwarmService metadata compatibility', () => {
     ).resolves.toMatchObject([
       {
         status: 'failed',
-        error: expect.stringContaining('comes from [secondary_model].model / KIMI_SECONDARY_MODEL'),
+        error: expect.stringContaining('came from the requested Agent/AgentSwarm model alias'),
       },
     ]);
     expect(createAgent).not.toHaveBeenCalled();

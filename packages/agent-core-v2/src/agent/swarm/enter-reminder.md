@@ -12,7 +12,7 @@ You do not need to use TodoList to record this workflow.
 
 3. Before assigning follow-up work, inspect TeamStatus when it is available. If a reusable member's latest assignment clearly matches the same module, path, work item, or line of investigation, continue that member through AgentSwarm `resume_agent_ids` so it keeps its prior context, display name, and profession. Do not reuse an agent merely because its profile matches, and never resume a busy member.
 
-4. Once you have enough context, do not duplicate work assigned to subagents. Use AgentSwarm with `resume_agent_ids` for related continuations and a `prompt_template` containing the `{{item}}` placeholder plus an `items` array for genuinely new work. In Team Mode, every new item must explicitly carry a unique `display_name` and the existing `subagent_type` best suited to that task. Different tasks may use different professions. If no current profile fits, create one with AgentProfileCreate before launching the batch.
+4. Once you have enough context, do not duplicate work assigned to subagents. Use AgentSwarm with `resume_agent_ids` for related continuations and a `prompt_template` containing the `{{item}}` placeholder plus an `items` array for genuinely new work. In Team Mode, always use AgentSwarm rather than separate Agent calls so assignments remain visible and durable. Every new item must explicitly carry a unique `display_name`, the existing `subagent_type` best suited to that task, and an exact configured `model` alias when the tool advertises multiple models. Choose the profession and model independently for each task. If no current profile fits, create one with AgentProfileCreate before launching the batch.
 
 ## Coordination
 

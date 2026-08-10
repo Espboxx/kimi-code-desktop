@@ -202,6 +202,7 @@ import {
   ISessionActivityView,
   ISessionLifecycleService,
   IWorkspaceLifecycleService,
+  IWorkspaceAgentProfileManager,
   IWorkspaceSkillCatalog,
   IWorkspaceTrust,
   closeSessionById,
@@ -260,6 +261,12 @@ import {
 import type {
   AddAdditionalDirInput,
   AddAdditionalDirResult,
+  AgentProfileDeleteInput,
+  AgentProfileDeleteResult,
+  AgentProfileDraft,
+  AgentProfileListResult,
+  AgentProfileMutationResult,
+  AgentProfileUpdateInput,
   AgentCommandInfo,
   BackgroundTaskInfo,
   CapabilityStatus,
@@ -568,6 +575,45 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     const catalog = handler.accessor.get(IWorkspaceSkillCatalog);
     await catalog.ready;
     return catalog.catalog.listSkills().map(summarizeSkill);
+  }
+
+  override async listAgentProfiles(workDir: string): Promise<AgentProfileListResult> {
+    const manager = await this.agentProfileManager('listAgentProfiles', workDir);
+    return manager.list();
+  }
+
+  override async createAgentProfile(
+    workDir: string,
+    input: AgentProfileDraft,
+  ): Promise<AgentProfileMutationResult> {
+    const manager = await this.agentProfileManager('createAgentProfile', workDir);
+    return manager.create(input);
+  }
+
+  override async updateAgentProfile(
+    workDir: string,
+    input: AgentProfileUpdateInput,
+  ): Promise<AgentProfileMutationResult> {
+    const manager = await this.agentProfileManager('updateAgentProfile', workDir);
+    return manager.update(input);
+  }
+
+  override async deleteAgentProfile(
+    workDir: string,
+    input: AgentProfileDeleteInput,
+  ): Promise<AgentProfileDeleteResult> {
+    const manager = await this.agentProfileManager('deleteAgentProfile', workDir);
+    return manager.delete(input);
+  }
+
+  private async agentProfileManager(
+    operation: string,
+    workDir: string,
+  ): Promise<IWorkspaceAgentProfileManager> {
+    const handler = await this.engineAccessor
+      .get(IWorkspaceLifecycleService)
+      .handlerFor({ root: normalizeRequiredWorkDir(operation, workDir) });
+    return handler.accessor.get(IWorkspaceAgentProfileManager);
   }
 
   /**

@@ -21,13 +21,13 @@ export const MAX_AGENT_SWARM_SUBAGENTS = 128;
 export const AgentSwarmStructuredItemSchema = z.object({
   item: z.string().trim().min(1).describe('Task value used to fill the prompt template.'),
   display_name: teamDisplayNameSchema.describe(
-    'Short unique persistent name for this Team member. Required for new agents in Team Mode.',
+    'Short unique persistent name for this Team member. Required for new agents in Team Mode. Use 1-24 letters or numbers, with underscores and hyphens allowed after the first character. Do not use main or agent-N.',
   ),
   subagent_type: z.string().trim().min(1).describe(
     'Agent profile selected for this specific task.',
   ),
-  model: z.enum(['secondary', 'primary']).optional().describe(
-    'Optional model choice for this specific task; overrides the batch-level model.',
+  model: z.string().trim().min(1).optional().describe(
+    'Exact configured model alias for this task. Required per new item in Team Mode when more than one model is available; overrides the batch-level model.',
   ),
 }).strict();
 
@@ -73,10 +73,12 @@ export const AgentSwarmToolInputSchema = z
         'Map of reusable existing subagent agent_id to its continuation prompt. Prefer this when new work is clearly related to that agent\'s previous assignment; resumed subagents keep their context and launch before new item-based subagents.',
       ),
     model: z
-      .enum(['secondary', 'primary'])
+      .string()
+      .trim()
+      .min(1)
       .optional()
       .describe(
-        'Which model to run the item-spawned subagents on: "secondary" = the configured secondary model; "primary" = the main model you are running on (for hard, quality-sensitive tasks). This explicit choice overrides the selected agent type\'s model_preference; without either, secondary is the default when configured. Only effective when a secondary model is configured; otherwise subagents inherit your model. Resumed subagents always keep their own model.',
+        'Model for item-spawned subagents. Outside Team Mode, pass "secondary" for the configured secondary model, "primary", or an exact configured model alias. In Team Mode, each structured item must carry its own exact alias when multiple models are available; this batch-level value is not a substitute. Resumed subagents always keep their own model.',
       ),
   })
   .strict();

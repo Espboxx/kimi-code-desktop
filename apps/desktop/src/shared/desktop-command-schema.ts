@@ -14,6 +14,26 @@ const todoItem = z.object({
   status: z.enum(['pending', 'in_progress', 'done']),
 }).strict();
 const todoItems = z.array(todoItem).max(1_000);
+const profileName = z
+  .string()
+  .trim()
+  .min(1)
+  .max(48)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+const profileStringList = z.array(z.string().trim().min(1).max(256)).max(128);
+const profileDraft = z.object({
+  name: profileName,
+  description: z.string().trim().min(1).max(240),
+  whenToUse: z.string().trim().min(1).max(500).optional(),
+  prompt: z.string().trim().min(1).max(64 * 1024),
+  scope: z.enum(['workspace', 'user']),
+  override: z.boolean().optional(),
+  tools: profileStringList.optional(),
+  disallowedTools: profileStringList.optional(),
+  subagents: profileStringList.optional(),
+  modelPreference: z.enum(['auto', 'primary', 'secondary']).optional(),
+}).strict();
+const profileRevision = z.string().regex(/^[a-f0-9]{64}$/);
 
 export const desktopCommandSchemas = {
   'workspace.choose': empty,
@@ -46,6 +66,15 @@ export const desktopCommandSchemas = {
   'config.removeProvider': z.object({ providerId: nonEmptyString }).strict(),
   'config.diagnostics': empty,
   'config.features': empty,
+
+  'profile.list': empty,
+  'profile.create': profileDraft,
+  'profile.update': profileDraft.extend({ revision: profileRevision }).strict(),
+  'profile.delete': z.object({
+    name: profileName,
+    scope: z.enum(['workspace', 'user']),
+    revision: profileRevision,
+  }).strict(),
 
   'session.list': empty,
   'session.create': z

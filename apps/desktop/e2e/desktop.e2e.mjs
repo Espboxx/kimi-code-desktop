@@ -496,6 +496,8 @@ try {
   await createTeamDialog.locator('.team-objective-field textarea').fill(
     'Desktop Team E2E\nLaunch a Team Mode batch and wait for live updates.',
   );
+  await createTeamDialog.getByLabel('主代理模型').selectOption('desktop-test-alt');
+  assert.equal(await createTeamDialog.getByLabel('主代理模型').inputValue(), 'desktop-test-alt');
   await createTeamDialog.getByRole('button', { name: '创建并开始', exact: true }).click();
   await createTeamDialog.waitFor({ state: 'hidden', timeout: 30_000 });
   teamSessionId = await page.evaluate(async () => (
@@ -507,6 +509,12 @@ try {
   assert.equal(await teamTab.getAttribute('aria-selected'), 'true', 'new Team task should open its channel');
   const teamPage = page.locator('.team-page');
   await teamPage.waitFor({ state: 'visible' });
+  await page.waitForFunction(async (id) => (
+    await window.kimiDesktop.host.snapshot()
+  ).activeSessionId === id && (
+    await window.kimiDesktop.host.snapshot()
+  ).session.status?.model === 'desktop-test-alt', teamSessionId);
+  assert.equal(await teamPage.getByLabel('主代理模型').inputValue(), 'desktop-test-alt');
   await teamPage.locator('.team-member-list button:has(span[title="main"])').click();
   await page.locator('.team-agent-surface').waitFor({ state: 'visible' });
   await approveProfileIfNeeded(page, teamProfilePath);
@@ -514,6 +522,64 @@ try {
     provider.requests.some((request) => request.toolName === 'AgentProfileCreate'),
     'Team leader did not create the reusable fixture profile',
   );
+  await page.waitForFunction(async (id) => (
+    (await window.kimiDesktop.host.snapshot()).teams[id]?.snapshot.assignments
+      .filter((assignment) => assignment.status === 'running').length ?? 0
+  ) >= 2, teamSessionId, { timeout: 30_000 });
+  await returnToTeamChannel(page, teamPage);
+  try {
+    await page.waitForFunction(() => {
+      const text = [...document.querySelectorAll('.team-activity-bubble')]
+        .map((element) => element.textContent ?? '')
+        .join('\n');
+      return text.includes('界面侦察') && text.includes('构建专家');
+    }, undefined, { timeout: 30_000 });
+  } catch (error) {
+    const diagnostic = await page.evaluate(async (id) => {
+      const snapshot = await window.kimiDesktop.host.snapshot();
+      const directSnapshot = await window.kimiDesktop.team.snapshot(id);
+      const operations = await window.kimiDesktop.team.operations(id, 0, 100);
+      return {
+        activeSessionId: snapshot.activeSessionId,
+        team: snapshot.teams[id],
+        directSnapshot,
+        operations,
+        transcriptAgents: snapshot.transcript?.agents,
+        activityText: [...document.querySelectorAll('.team-activity-bubble')]
+          .map((element) => element.textContent ?? ''),
+        visibleSurface: document.querySelector('.team-page') !== null
+          ? 'team'
+          : document.querySelector('.team-agent-surface') !== null ? 'agent' : 'other',
+      };
+    }, teamSessionId);
+    assert.fail(`Team activity bubbles did not appear: ${JSON.stringify({
+      error: error instanceof Error ? error.message : String(error),
+      diagnostic,
+      providerRequests: provider.requests.slice(-20),
+    })}`);
+  }
+  const activityBubbles = teamPage.locator('.team-activity-bubble');
+  assert.ok(await activityBubbles.count() >= 2, 'active Team members are missing from the channel activity strip');
+  for (const displayName of ['界面侦察', '构建专家']) {
+    const bubble = activityBubbles.filter({ hasText: displayName }).first();
+    assert.ok((await bubble.locator('.team-activity-action').innerText()).trim().length > 0, `${displayName} has no live action`);
+  }
+  const activityMetrics = await teamPage.locator('.team-activity-strip').evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    bubbleHeights: [...element.querySelectorAll('.team-activity-bubble')]
+      .map((bubble) => bubble.getBoundingClientRect().height),
+  }));
+  assert.equal(activityMetrics.clientHeight, 34, JSON.stringify(activityMetrics));
+  assert.ok(activityMetrics.bubbleHeights.every((height) => height === 28), JSON.stringify(activityMetrics));
+  await auditTeamAndScreenshot(firstApp, page, 1_620, 1_040, join(artifactDir, 'team-activity-1620x1040.png'));
+  await auditTeamAndScreenshot(firstApp, page, 1_180, 760, join(artifactDir, 'team-activity-1180x760.png'));
+  await activityBubbles.filter({ hasText: '构建专家' }).first().click();
+  await page.locator('.team-agent-surface').waitFor({ state: 'visible' });
+  assert.match(await page.locator('.team-agent-surface .conversation-header').innerText(), /构建专家/);
+  await returnToTeamChannel(page, teamPage);
+  provider.releaseTeamWorkers();
+  await teamPage.locator('.team-member-list button:has(span[title="main"])').click();
+  await page.locator('.team-agent-surface').waitFor({ state: 'visible' });
   try {
     await waitForAssistant(page, 'Team coordination resumed after a live message.', 45_000);
   } catch (error) {
@@ -527,8 +593,8 @@ try {
       providerRequests: provider.requests.slice(-12),
     })}`);
   }
-  await page.locator('.team-channel-back').click();
-  await teamPage.waitFor({ state: 'visible' });
+  await returnToTeamChannel(page, teamPage);
+  await page.waitForFunction(() => document.querySelectorAll('.team-activity-strip').length === 0);
   const teamWaitOutput = await page.evaluate(async () => {
     const items = (await window.kimiDesktop.host.snapshot()).transcript?.transcripts.main?.items ?? [];
     let latest;
@@ -562,6 +628,8 @@ try {
   assert.match(teamText, /构建专家/);
   assert.match(teamText, /explore/);
   assert.match(teamText, /fixture-researcher/);
+  assert.match(teamText, /desktop-test/);
+  assert.match(teamText, /desktop-test-alt/);
   assert.ok(await teamPage.locator('.team-message.agent').count() >= 2, 'Agent messages are not rendered as agent bubbles');
   assert.ok(await teamPage.locator('.team-message.agent .team-message-bubble br').count() >= 2, 'single newlines were not rendered');
   const mention = teamPage.locator('.team-mention').filter({ hasText: '@构建专家' }).first();
@@ -578,8 +646,7 @@ try {
   await mention.click();
   await page.locator('.team-agent-surface').waitFor({ state: 'visible' });
   assert.match(await page.locator('.team-agent-surface .conversation-header').innerText(), /构建专家/);
-  await page.locator('.team-channel-back').click();
-  await teamPage.waitFor({ state: 'visible' });
+  await returnToTeamChannel(page, teamPage);
   const teamComposer = teamPage.locator('.team-composer textarea');
   await teamComposer.fill('User follow-up from the Team channel.');
   await teamPage.locator('.team-composer button').click();
@@ -592,6 +659,21 @@ try {
   assert.ok(persistedTeamTabs.length > 0, `Team tab was not persisted: ${JSON.stringify(persistedTeamTabs)}`);
   await auditTeamAndScreenshot(firstApp, page, 1_620, 1_040, join(artifactDir, 'team-running-1620x1040.png'));
   await auditTeamAndScreenshot(firstApp, page, 1_180, 760, join(artifactDir, 'team-running-1180x760.png'));
+  const temporaryTeamId = await page.evaluate(() => window.kimiDesktop.session.create({
+    surface: 'team',
+    model: 'desktop-test',
+  }));
+  await page.evaluate((id) => window.kimiDesktop.session.rename(id, 'Desktop Delete Team E2E'), temporaryTeamId);
+  const temporaryTeamRow = page.locator('.team-task-row-shell').filter({ hasText: 'Desktop Delete Team E2E' });
+  await temporaryTeamRow.waitFor({ state: 'visible' });
+  await temporaryTeamRow.getByRole('button', { name: '删除团队任务：Desktop Delete Team E2E' }).click();
+  const deleteTeamDialog = page.locator('.action-dialog').filter({ hasText: '永久删除团队任务' });
+  await deleteTeamDialog.waitFor({ state: 'visible' });
+  await deleteTeamDialog.getByRole('button', { name: '确认', exact: true }).click();
+  await temporaryTeamRow.waitFor({ state: 'hidden' });
+  assert.equal(await page.evaluate(async (id) => (
+    await window.kimiDesktop.session.list()
+  ).some((session) => session.id === id), temporaryTeamId), false);
   await selectSessionByTitle(page, 'Desktop E2E Session');
   assert.equal(await page.locator('.agent-select select').inputValue(), 'main');
   await assertActiveSessionSettings(page, {
@@ -1040,18 +1122,22 @@ try {
       join(artifactDir, 'swarm-completed-1180x760.png'),
       join(artifactDir, 'timeline-history-1620x1040.png'),
       join(artifactDir, 'timeline-history-1180x760.png'),
+      join(artifactDir, 'team-activity-1620x1040.png'),
+      join(artifactDir, 'team-activity-1180x760.png'),
       join(artifactDir, 'team-running-1620x1040.png'),
       join(artifactDir, 'team-running-1180x760.png'),
     ],
     processLogs,
   };
   assert.equal(report.providerAuthorizationObserved, true);
+  assert.equal(provider.unsupportedSchemaCount, 0, 'provider rejected an unsupported Unicode tool pattern');
   await writeFile(join(artifactDir, 'e2e-report.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } catch (error) {
   process.stderr.write(`${JSON.stringify({ processLogs, pageErrors }, null, 2)}\n`);
   throw error;
 } finally {
+  provider?.releaseTeamWorkers();
   await bootstrapApp?.evaluate(({ app }) => app.exit(0)).catch(() => undefined);
   await firstApp?.evaluate(({ app }) => app.exit(0)).catch(() => undefined);
   await secondApp?.evaluate(({ app }) => app.exit(0)).catch(() => undefined);
@@ -1283,6 +1369,12 @@ async function approveProfileIfNeeded(page, path) {
   })}`);
 }
 
+async function returnToTeamChannel(page, teamPage) {
+  const back = page.locator('.team-channel-back');
+  if (await back.isVisible().catch(() => false)) await back.click();
+  await teamPage.waitFor({ state: 'visible', timeout: 30_000 });
+}
+
 async function selectSessionByTitle(page, title) {
   await page.locator('.surface-switcher').getByRole('button', { name: '会话', exact: true }).click();
   await page.locator('.session-row').filter({ hasText: title }).locator('.session-main').click();
@@ -1311,11 +1403,31 @@ async function openSettingsAndVerify(page) {
   await page.locator('.top-actions button').last().click();
   const dialog = page.locator('.settings-dialog');
   await dialog.waitFor({ state: 'visible' });
-  await dialog.locator('.settings-nav button').nth(3).click();
+  await dialog.locator('.settings-nav').getByRole('button', { name: '扩展', exact: true }).click();
   await dialog.getByText('desktop-fixture', { exact: false }).waitFor();
-  await dialog.locator('.settings-nav button').last().click();
+  await dialog.locator('.settings-nav').getByRole('button', { name: 'Agent 职业', exact: true }).click();
+  await dialog.getByText('fixture-researcher', { exact: true }).waitFor();
+  await dialog.getByRole('button', { name: '新建职业', exact: true }).click();
+  await dialog.getByLabel('名称（kebab-case）').fill('desktop-reviewer');
+  await dialog.getByLabel('职业描述').fill('Reviews Desktop changes');
+  await dialog.getByLabel('何时使用（可选）').fill('Use for Desktop regressions.');
+  await dialog.getByLabel('系统提示词').fill('Review Desktop changes and report focused risks.');
+  await dialog.getByLabel('默认模型角色').selectOption('primary');
+  await dialog.getByRole('button', { name: '创建职业', exact: true }).click();
+  const managedProfile = dialog.locator('.profile-list-item').filter({ hasText: 'desktop-reviewer' });
+  await managedProfile.waitFor({ state: 'visible' });
+  await dialog.getByLabel('职业描述').fill('Reviews Desktop changes and tests');
+  await dialog.getByRole('button', { name: '保存修改', exact: true }).click();
+  await managedProfile.getByText('Reviews Desktop changes and tests', { exact: true }).waitFor();
+  page.once('dialog', (confirmation) => void confirmation.accept());
+  await dialog.getByRole('button', { name: '删除', exact: true }).click();
+  await managedProfile.waitFor({ state: 'hidden' });
+  assert.equal(await page.evaluate(async () => (
+    await window.kimiDesktop.profile.list()
+  ).profiles.some((profile) => profile.id === 'workspace:desktop-reviewer')), false);
+  await dialog.locator('.settings-nav').getByRole('button', { name: '诊断', exact: true }).click();
   assert.equal(await dialog.getByLabel(/团队协作/).count(), 0, 'Desktop-owned Team capability must not appear as an experimental toggle');
-  await dialog.locator('.settings-nav button').first().click();
+  await dialog.locator('.settings-nav').getByRole('button', { name: '账户', exact: true }).click();
   await dialog.getByText('未登录', { exact: true }).waitFor();
   await dialog.locator('.dialog-header .icon-button').click();
 }
@@ -1468,6 +1580,11 @@ async function startProvider() {
   let responseId = 0;
   let transientAttempts = 0;
   let cancelledStreams = 0;
+  let unsupportedSchemaCount = 0;
+  let releaseTeamWorkers;
+  const teamWorkersGate = new Promise((resolvePromise) => {
+    releaseTeamWorkers = resolvePromise;
+  });
   const handleRequest = async (request, response) => {
     try {
       if (request.method === 'POST' && request.url === '/api/oauth/device_authorization') {
@@ -1522,6 +1639,14 @@ async function startProvider() {
       const chunks = [];
       for await (const chunk of request) chunks.push(chunk);
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      if (containsUnsupportedUnicodePattern(body.tools)) {
+        unsupportedSchemaCount += 1;
+        response.writeHead(400, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({
+          error: { message: 'Invalid schema: Unicode property escapes are not supported in tool patterns.' },
+        }));
+        return;
+      }
       const messages = Array.isArray(body.messages) ? body.messages : [];
       const last = messages.at(-1) ?? {};
       const lastText = messageText(last);
@@ -1551,13 +1676,13 @@ async function startProvider() {
         }
       }
       if (historyText.includes('team-alpha') && !hasToolCall(messages, 'TeamSend')) {
-        await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
+        await teamWorkersGate;
         return sendTool(response, 'TeamSend', {
           message: '界面检查完成\n换行可见\n@构建专家 请继续验证',
         }, 'team-send-alpha', ++responseId);
       }
       if (historyText.includes('team-beta') && !hasToolCall(messages, 'TeamSend')) {
-        await new Promise((resolvePromise) => setTimeout(resolvePromise, 900));
+        await teamWorkersGate;
         return sendTool(response, 'TeamSend', {
           message: ['@界面侦察 已收到', ...Array.from({ length: 32 }, (_, index) => `验证行 ${String(index + 1).padStart(2, '0')}`)].join('\n'),
         }, 'team-send-beta', ++responseId);
@@ -1658,19 +1783,19 @@ async function startProvider() {
           description: 'Coordinate Team Mode fixtures',
           prompt_template: 'Inspect {{item}}, send one update with TeamSend, then finish.',
           items: [
-            { item: 'team-alpha', display_name: '界面侦察', subagent_type: 'explore' },
-            { item: 'team-beta', display_name: '构建专家', subagent_type: 'fixture-researcher' },
+            { item: 'team-alpha', display_name: '界面侦察', subagent_type: 'explore', model: 'desktop-test' },
+            { item: 'team-beta', display_name: '构建专家', subagent_type: 'fixture-researcher', model: 'desktop-test-alt' },
           ],
         }, 'team-swarm-call-1', ++responseId);
       }
       if (promptText.includes('Inspect team-alpha, send one update with TeamSend, then finish.')) {
-        await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
+        await teamWorkersGate;
         return sendTool(response, 'TeamSend', {
           message: '界面检查完成\n换行可见\n@构建专家 请继续验证',
         }, 'team-send-alpha', ++responseId);
       }
       if (promptText.includes('Inspect team-beta, send one update with TeamSend, then finish.')) {
-        await new Promise((resolvePromise) => setTimeout(resolvePromise, 900));
+        await teamWorkersGate;
         return sendTool(response, 'TeamSend', {
           message: ['@界面侦察 已收到', ...Array.from({ length: 32 }, (_, index) => `验证行 ${String(index + 1).padStart(2, '0')}`)].join('\n'),
         }, 'team-send-beta', ++responseId);
@@ -1734,8 +1859,17 @@ async function startProvider() {
     oauthRequests,
     get transientAttempts() { return transientAttempts; },
     get cancelledStreams() { return cancelledStreams; },
+    get unsupportedSchemaCount() { return unsupportedSchemaCount; },
+    releaseTeamWorkers: () => { releaseTeamWorkers(); },
     close: () => new Promise((resolvePromise, reject) => server.close((error) => error === undefined ? resolvePromise() : reject(error))),
   };
+}
+
+function containsUnsupportedUnicodePattern(value) {
+  if (Array.isArray(value)) return value.some(containsUnsupportedUnicodePattern);
+  if (value === null || typeof value !== 'object') return false;
+  if (typeof value.pattern === 'string' && value.pattern.includes('\\p{')) return true;
+  return Object.values(value).some(containsUnsupportedUnicodePattern);
 }
 
 function messageText(message) {

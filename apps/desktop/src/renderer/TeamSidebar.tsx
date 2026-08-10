@@ -1,4 +1,4 @@
-import { CircleDashed, Plus, Users } from 'lucide-react';
+import { CircleDashed, Plus, Trash2, Users } from 'lucide-react';
 
 import type { SessionListItem, SessionStatusSnapshot, WorkspaceSnapshot } from '../shared/desktop-api';
 import { basename, classNames, formatTime } from './ui-utils';
@@ -18,6 +18,7 @@ export function TeamSidebar({
   badges,
   onCreate,
   onSelect,
+  onDelete,
 }: {
   readonly workspace: WorkspaceSnapshot;
   readonly sessions: readonly SessionListItem[];
@@ -27,6 +28,7 @@ export function TeamSidebar({
   readonly badges: Readonly<Record<string, TeamBadge>>;
   readonly onCreate: () => void;
   readonly onSelect: (sessionId: string) => void;
+  readonly onDelete: (session: SessionListItem) => void;
 }) {
   return (
     <aside className="team-task-sidebar" aria-label="团队任务">
@@ -44,24 +46,35 @@ export function TeamSidebar({
           const badge = badges[session.id];
           const status = statuses[session.id];
           const busy = status?.busy === true;
+          const selected = session.id === activeWorkbenchSessionId;
           return (
-            <button
-              className={classNames('team-task-row', session.id === activeWorkbenchSessionId && 'selected')}
-              onClick={() => onSelect(session.id)}
-              key={session.id}
-            >
-              <span className={classNames('session-presence', (session.id === activeSessionId || busy) && 'active', busy && 'busy')} />
-              <span className="team-task-copy">
-                <strong>{session.title || session.lastPrompt || '未命名团队任务'}</strong>
-                <small>{formatTime(session.updatedAt)} · {basename(session.id)}</small>
-              </span>
-              <span className="team-task-badges">
-                {busy && <CircleDashed className="spin" size={12} />}
-                {(badge?.running ?? 0) > 0 && <em className="running">{badge?.running} 运行</em>}
-                {(badge?.failed ?? 0) > 0 && <em className="failed">{badge?.failed} 失败</em>}
-                {(badge?.unread ?? 0) > 0 && <em className="unread">{badge?.unread}</em>}
-              </span>
-            </button>
+            <div className={classNames('team-task-row-shell', selected && 'selected')} key={session.id}>
+              <button
+                className={classNames('team-task-row', selected && 'selected')}
+                onClick={() => onSelect(session.id)}
+              >
+                <span className={classNames('session-presence', (session.id === activeSessionId || busy) && 'active', busy && 'busy')} />
+                <span className="team-task-copy">
+                  <strong>{session.title || session.lastPrompt || '未命名团队任务'}</strong>
+                  <small>{formatTime(session.updatedAt)} · {basename(session.id)}</small>
+                </span>
+                <span className="team-task-badges">
+                  {busy && <CircleDashed className="spin" size={12} />}
+                  {(badge?.running ?? 0) > 0 && <em className="running">{badge?.running} 运行</em>}
+                  {(badge?.failed ?? 0) > 0 && <em className="failed">{badge?.failed} 失败</em>}
+                  {(badge?.unread ?? 0) > 0 && <em className="unread">{badge?.unread}</em>}
+                </span>
+              </button>
+              <button
+                className="team-task-delete"
+                type="button"
+                title={busy ? '终止并删除团队任务' : '删除团队任务'}
+                aria-label={`删除团队任务：${session.title || session.lastPrompt || session.id}`}
+                onClick={() => { onDelete(session); }}
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
           );
         })}
       </div>

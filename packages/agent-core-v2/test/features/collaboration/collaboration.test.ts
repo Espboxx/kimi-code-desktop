@@ -99,7 +99,7 @@ describe('SessionCollaborationService', () => {
       service.prepareSwarmBatch({
         callerAgentId: 'main',
         assignments: [
-          { assignmentId: 'a1', displayName: 'builder', profileName: 'coder', description: 'Implement A' },
+          { assignmentId: 'a1', displayName: 'builder', profileName: 'coder', model: 'fast', description: 'Implement A' },
           { assignmentId: 'a2', displayName: 'scout', profileName: 'explore', description: 'Inspect B' },
         ],
       }),
@@ -125,9 +125,14 @@ describe('SessionCollaborationService', () => {
     });
 
     expect(receipt.batchId).toMatch(/^batch_/);
-    expect((await service.snapshot()).members).toContainEqual(expect.objectContaining({
+    const snapshot = await service.snapshot();
+    expect(snapshot.members).toContainEqual(expect.objectContaining({
       agentId: 'agent-1',
       displayName: 'builder',
+    }));
+    expect(snapshot.assignments).toContainEqual(expect.objectContaining({
+      id: 'a1',
+      model: 'fast',
     }));
     expect(retriedLeaderMessage).toEqual(leaderMessage);
     expect(memberMessage.channelSeq).toBe(leaderMessage.channelSeq + 1);

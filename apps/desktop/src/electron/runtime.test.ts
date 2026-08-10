@@ -131,6 +131,79 @@ describe('workspace freshness', () => {
 });
 
 describe('desktop runtime boundary', () => {
+  it('routes Agent profession commands through the harness with the active workspace', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'kimi-desktop-profiles-work-'));
+    const homeDir = await mkdtemp(join(tmpdir(), 'kimi-desktop-profiles-home-'));
+    const runtime = new KimiDesktopRuntime({
+      workspaceRoot: workspace,
+      homeDir,
+      host: {
+        chooseDirectory: async () => null,
+        openExternal: async () => {},
+        openPath: async () => {},
+        setDirtyFiles: () => {},
+        resolveClose: () => {},
+        rememberWorkspace: async () => {},
+        notify: () => {},
+      },
+    });
+    const revision = 'a'.repeat(64);
+    const draft = {
+      name: 'reviewer',
+      description: 'Reviews changes',
+      prompt: 'Review the change.',
+      scope: 'workspace' as const,
+    };
+    const descriptor = {
+      id: 'workspace:reviewer',
+      name: 'reviewer',
+      description: 'Reviews changes',
+      prompt: 'Review the change.',
+      override: false,
+      modelPreference: 'auto' as const,
+      sourceId: 'workspace',
+      scope: 'workspace' as const,
+      editable: true,
+      effective: true,
+      revision,
+    };
+    const list = vi.spyOn(runtime.harness, 'listAgentProfiles').mockResolvedValue({
+      profiles: [],
+      diagnostics: [],
+    });
+    const create = vi.spyOn(runtime.harness, 'createAgentProfile').mockResolvedValue({
+      profile: descriptor,
+      created: true,
+    });
+    const update = vi.spyOn(runtime.harness, 'updateAgentProfile').mockResolvedValue({
+      profile: descriptor,
+    });
+    const remove = vi.spyOn(runtime.harness, 'deleteAgentProfile').mockResolvedValue({
+      id: 'workspace:reviewer',
+      name: 'reviewer',
+      scope: 'workspace',
+      deleted: true,
+    });
+
+    try {
+      await runtime.execute({ domain: 'profile', action: 'list', name: 'profile.list' });
+      await runtime.execute({ domain: 'profile', action: 'create', name: 'profile.create', payload: draft });
+      await runtime.execute({ domain: 'profile', action: 'update', name: 'profile.update', payload: { ...draft, revision } });
+      await runtime.execute({ domain: 'profile', action: 'delete', name: 'profile.delete', payload: { name: draft.name, scope: draft.scope, revision } });
+
+      expect(list).toHaveBeenCalledWith(workspace);
+      expect(create).toHaveBeenCalledWith(workspace, draft);
+      expect(update).toHaveBeenCalledWith(workspace, { ...draft, revision });
+      expect(remove).toHaveBeenCalledWith(workspace, { name: draft.name, scope: draft.scope, revision });
+    } finally {
+      await runtime.close();
+      await Promise.all([
+        rm(workspace, { recursive: true, force: true }),
+        rm(homeDir, { recursive: true, force: true }),
+      ]);
+    }
+  });
+
   it('classifies explicit and live Team sessions without guessing from unrelated metadata', () => {
     expect(desktopSessionSurface(TEAM_SESSION_METADATA)).toBe('team');
     expect(desktopSessionSurface(undefined, true)).toBe('team');

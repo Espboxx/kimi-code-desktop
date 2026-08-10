@@ -50,6 +50,7 @@ export const teamAssignmentSchema = z.object({
   agentId: z.string().min(1).optional(),
   displayName: teamDisplayNameSchema.optional(),
   profileName: z.string().min(1),
+  model: z.string().min(1).optional(),
   description: z.string().min(1),
   item: z.string().optional(),
   status: teamAssignmentStatusSchema,

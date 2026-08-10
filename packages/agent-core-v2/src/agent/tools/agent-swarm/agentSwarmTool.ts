@@ -46,6 +46,8 @@ import { IAgentScopeContext } from '#/agent/scopeContext/scopeContext';
 import { IAgentSwarmService } from '#/agent/swarm/swarm';
 import {
   buildSubagentModelDescriptions,
+  buildTeamSubagentModelDescriptions,
+  listRoutableSubagentModels,
   resolveSubagentBinding,
   resolveSubagentTimeoutMs,
   stripSubagentModelParameter,
@@ -75,7 +77,7 @@ interface AgentSwarmSpawnSpec {
   readonly prompt: string;
   readonly displayName?: string;
   readonly profileName: string;
-  readonly model?: 'secondary' | 'primary';
+  readonly model?: string;
 }
 
 interface AgentSwarmResumeSpec {
@@ -102,7 +104,7 @@ export class AgentSwarmTool implements IAgentSwarmTool {
   readonly name = 'AgentSwarm' as const;
 
   get parameters(): Record<string, unknown> {
-    return this.flags.enabled(SECONDARY_MODEL_FLAG_ID)
+    return this.teamModeEnabled() || this.flags.enabled(SECONDARY_MODEL_FLAG_ID)
       ? AGENT_SWARM_PARAMETERS
       : AGENT_SWARM_PARAMETERS_NO_MODEL;
   }
@@ -124,12 +126,17 @@ export class AgentSwarmTool implements IAgentSwarmTool {
   }
 
   get description(): string {
-    const modelLines = buildSubagentModelDescriptions(
-      this.config,
-      this.flags,
-      this.profile.data().modelAlias,
-      this.modelCatalog,
-    );
+    const callerModelAlias = this.profile.data().modelAlias;
+    const modelLines = this.teamModeEnabled()
+      ? buildTeamSubagentModelDescriptions(
+          listRoutableSubagentModels(this.config, this.modelCatalog, callerModelAlias),
+        )
+      : buildSubagentModelDescriptions(
+          this.config,
+          this.flags,
+          callerModelAlias,
+          this.modelCatalog,
+        );
     const profileLines = this.availableProfileLines();
     return [AGENT_SWARM_DESCRIPTION, profileLines, modelLines].filter(
       (part): part is string => part !== undefined,
@@ -174,7 +181,7 @@ export class AgentSwarmTool implements IAgentSwarmTool {
     signal: AbortSignal,
     toolCallId: string,
   ): Promise<string> {
-    const teamMode = this.collaboration !== undefined && this.flags.enabled(TEAM_COLLABORATION_FLAG_ID);
+    const teamMode = this.teamModeEnabled();
     const timeoutMs = resolveSubagentTimeoutMs(this.config);
     const specs = await createAgentSwarmSpecs(args, (agentId) =>
       this.swarmService.getSwarmItem({ callerAgentId: this.callerAgentId, agentId }),
@@ -185,11 +192,42 @@ export class AgentSwarmTool implements IAgentSwarmTool {
         'Team Mode requires every new AgentSwarm item to provide display_name and subagent_type.',
       );
     }
-    const bindings = new Map<number, { model: string; thinking?: string }>();
+    const bindings = new Map<
+      number,
+      { readonly model: string; readonly thinking?: string; readonly displayModel: string }
+    >();
     const spawnSpecs = specs.filter((spec): spec is AgentSwarmSpawnSpec => spec.kind === 'spawn');
     if (spawnSpecs.length > 0) {
       await this.catalog.ready;
       const own = this.profile.data();
+      const teamModels = teamMode
+        ? listRoutableSubagentModels(this.config, this.modelCatalog, own.modelAlias)
+        : [];
+      if (teamMode && teamModels.length === 0) {
+        throw new Error2(
+          ErrorCodes.MODEL_NOT_CONFIGURED,
+          'Team Mode cannot assign subagents because no configured model alias is routable.',
+        );
+      }
+      if (teamMode && teamModels.length > 1) {
+        const missingModelItems = (args.items ?? []).flatMap((item, index) =>
+          typeof item !== 'string' && normalizeOptionalString(item.model) === undefined
+            ? [index + 1]
+            : [],
+        );
+        if (missingModelItems.length > 0) {
+          throw new Error2(
+            ErrorCodes.VALIDATION_FAILED,
+            'Team Mode requires every new AgentSwarm item to provide an exact model alias when multiple models are available.',
+            {
+              details: {
+                missingModelItems,
+                availableModels: teamModels.map((model) => model.alias),
+              },
+            },
+          );
+        }
+      }
       const allowlist = teamMode && this.callerAgentId === 'main'
         ? undefined
         : subagentAllowlistFor(this.catalog, own);
@@ -207,19 +245,42 @@ export class AgentSwarmTool implements IAgentSwarmTool {
             details: { profileName: spec.profileName },
           });
         }
-        if (own.modelAlias !== undefined) {
+        if (teamMode) {
+          const requestedModel = normalizeOptionalString(spec.model) ?? teamModels[0]?.alias;
+          const route = teamModels.find((model) => model.alias === requestedModel);
+          if (route === undefined) {
+            throw new Error2(
+              ErrorCodes.VALIDATION_FAILED,
+              `Unknown Team subagent model alias: "${requestedModel ?? ''}".`,
+              {
+                details: {
+                  requestedModel,
+                  availableModels: teamModels.map((model) => model.alias),
+                },
+              },
+            );
+          }
+          bindings.set(spec.index, {
+            model: route.alias,
+            thinking: undefined,
+            displayModel: route.alias,
+          });
+        } else if (own.modelAlias !== undefined) {
           const resolved = resolveSubagentBinding(
             this.config,
             this.flags,
             { modelAlias: own.modelAlias, thinkingLevel: own.thinkingLevel },
             spec.model ?? targetProfile.modelPreference,
           );
-          bindings.set(spec.index, { model: resolved.model, thinking: resolved.thinking });
+          bindings.set(spec.index, resolved);
         }
       }
     }
     let teamReceipt: Awaited<ReturnType<ISessionCollaborationService['prepareSwarmBatch']>> | undefined;
-    const resumeMetadata = new Map<string, { readonly displayName?: string; readonly profileName: string }>();
+    const resumeMetadata = new Map<
+      string,
+      { readonly displayName?: string; readonly profileName: string; readonly model?: string }
+    >();
     if (teamMode) {
       const collaboration = this.requireCollaboration();
       const snapshot = await collaboration.snapshot();
@@ -232,6 +293,7 @@ export class AgentSwarmTool implements IAgentSwarmTool {
         resumeMetadata.set(spec.agentId, {
           displayName: member?.displayName ?? latestAssignment?.displayName,
           profileName: latestAssignment?.profileName ?? 'subagent',
+          model: latestAssignment?.model,
         });
       }
       teamReceipt = await collaboration.prepareSwarmBatch({
@@ -243,6 +305,9 @@ export class AgentSwarmTool implements IAgentSwarmTool {
             assignmentId: `assignment_${randomUUID()}`,
             displayName: spec.kind === 'spawn' ? spec.displayName : metadata?.displayName,
             profileName,
+            model: spec.kind === 'spawn'
+              ? bindings.get(spec.index)?.displayModel
+              : metadata?.model,
             description: childDescription(args.description, spec.index, profileName),
             item: spec.item,
             resumeAgentId: spec.kind === 'resume' ? spec.agentId : undefined,
@@ -283,10 +348,13 @@ export class AgentSwarmTool implements IAgentSwarmTool {
           resumeAgentId: spec.agentId,
         };
       }
+      const binding = bindings.get(spec.index);
       return {
         ...common,
         kind: 'spawn' as const,
-        binding: bindings.get(spec.index),
+        binding: binding === undefined
+          ? undefined
+          : { model: binding.model, thinking: binding.thinking },
       };
     });
     if (teamReceipt !== undefined) {
@@ -357,6 +425,10 @@ export class AgentSwarmTool implements IAgentSwarmTool {
     return this.collaboration;
   }
 
+  private teamModeEnabled(): boolean {
+    return this.collaboration !== undefined && this.flags.enabled(TEAM_COLLABORATION_FLAG_ID);
+  }
+
   private availableProfileLines(): string {
     const own = this.profile.data();
     const allowlist = this.collaboration !== undefined
@@ -385,6 +457,7 @@ function renderSwarmLaunchReceipt(
     readonly description: string;
     readonly displayName?: string;
     readonly profileName: string;
+    readonly model?: string;
   }[],
 ): string {
   return [
@@ -395,7 +468,10 @@ function renderSwarmLaunchReceipt(
       const name = assignment.displayName === undefined
         ? ''
         : ` display_name="${escapeXmlAttribute(assignment.displayName)}"`;
-      return `<assignment id="${escapeXmlAttribute(assignment.id)}"${name} profile="${escapeXmlAttribute(assignment.profileName)}">${escapeXmlAttribute(assignment.description)}</assignment>`;
+      const model = assignment.model === undefined
+        ? ''
+        : ` model="${escapeXmlAttribute(assignment.model)}"`;
+      return `<assignment id="${escapeXmlAttribute(assignment.id)}"${name} profile="${escapeXmlAttribute(assignment.profileName)}"${model}>${escapeXmlAttribute(assignment.description)}</assignment>`;
     }),
     '<coordination>Use TeamStatus, TeamSend, and TeamWait to coordinate this running batch.</coordination>',
     '</agent_swarm_started>',

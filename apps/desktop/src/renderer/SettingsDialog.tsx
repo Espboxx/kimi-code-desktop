@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   Blocks,
   Bot,
+  BriefcaseBusiness,
   Check,
   CircleAlert,
   Cloud,
@@ -15,6 +16,7 @@ import {
   Plug,
   Plus,
   RefreshCw,
+  Save,
   Settings2,
   ShieldCheck,
   Sparkles,
@@ -23,7 +25,13 @@ import {
   X,
 } from 'lucide-react';
 
-import type { DesktopSnapshot, JsonRecord } from '../shared/desktop-api';
+import type {
+  AgentProfileDescriptor,
+  AgentProfileDraft,
+  AgentProfileListResult,
+  DesktopSnapshot,
+  JsonRecord,
+} from '../shared/desktop-api';
 import {
   experimentalFeatureSourceLabel,
   isVisibleDesktopExperimentalFeature,
@@ -31,13 +39,14 @@ import {
 } from './experimental-features';
 import { array, bool, classNames, formatJson, number, record, text } from './ui-utils';
 
-type SettingsTab = 'account' | 'models' | 'mcp' | 'extensions' | 'workspace' | 'diagnostics';
+type SettingsTab = 'account' | 'models' | 'profiles' | 'mcp' | 'extensions' | 'workspace' | 'diagnostics';
 
 export function SettingsDialog({ snapshot, onClose }: { readonly snapshot: DesktopSnapshot; readonly onClose: () => void }) {
   const [tab, setTab] = useState<SettingsTab>('account');
   const tabs: Array<{ id: SettingsTab; label: string; icon: React.ReactNode }> = [
     { id: 'account', label: '账户', icon: <UserRound size={15} /> },
     { id: 'models', label: '模型与 Provider', icon: <Bot size={15} /> },
+    { id: 'profiles', label: 'Agent 职业', icon: <BriefcaseBusiness size={15} /> },
     { id: 'mcp', label: 'MCP', icon: <Plug size={15} /> },
     { id: 'extensions', label: '扩展', icon: <Blocks size={15} /> },
     { id: 'workspace', label: '工作区', icon: <ShieldCheck size={15} /> },
@@ -57,6 +66,7 @@ export function SettingsDialog({ snapshot, onClose }: { readonly snapshot: Deskt
           <main className="settings-content">
             {tab === 'account' && <AccountSettings snapshot={snapshot} />}
             {tab === 'models' && <ModelSettings snapshot={snapshot} />}
+            {tab === 'profiles' && <ProfileSettings snapshot={snapshot} />}
             {tab === 'mcp' && <McpSettings snapshot={snapshot} />}
             {tab === 'extensions' && <ExtensionSettings snapshot={snapshot} />}
             {tab === 'workspace' && <WorkspaceSettings snapshot={snapshot} />}
@@ -168,6 +178,253 @@ function ModelSettings({ snapshot }: { readonly snapshot: DesktopSnapshot }) {
       </section>
     </SettingsPage>
   );
+}
+
+interface ProfileFormState {
+  readonly name: string;
+  readonly description: string;
+  readonly whenToUse: string;
+  readonly prompt: string;
+  readonly scope: 'workspace' | 'user';
+  readonly override: boolean;
+  readonly tools: string;
+  readonly disallowedTools: string;
+  readonly subagents: string;
+  readonly modelPreference: 'auto' | 'primary' | 'secondary';
+}
+
+const EMPTY_PROFILE_FORM: ProfileFormState = {
+  name: '',
+  description: '',
+  whenToUse: '',
+  prompt: '',
+  scope: 'workspace',
+  override: false,
+  tools: '',
+  disallowedTools: '',
+  subagents: '',
+  modelPreference: 'auto',
+};
+
+function ProfileSettings({ snapshot }: { readonly snapshot: DesktopSnapshot }) {
+  const [catalog, setCatalog] = useState<AgentProfileListResult>({ profiles: [], diagnostics: [] });
+  const [selectedId, setSelectedId] = useState<string>();
+  const [creating, setCreating] = useState(false);
+  const [form, setForm] = useState<ProfileFormState>(EMPTY_PROFILE_FORM);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const selected = catalog.profiles.find((profile) => profile.id === selectedId);
+
+  const load = async (nextId?: string) => {
+    if (snapshot.workspace.root.length === 0) return;
+    setLoading(true);
+    setError('');
+    try {
+      const result = await window.kimiDesktop.profile.list();
+      setCatalog(result);
+      if (nextId !== undefined) {
+        const next = result.profiles.find((profile) => profile.id === nextId);
+        setSelectedId(next?.id);
+        if (next !== undefined) setForm(profileToForm(next));
+      }
+    } catch (loadError) {
+      setError(errorText(loadError));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, [snapshot.workspace.root]);
+
+  const choose = (profile: AgentProfileDescriptor) => {
+    setCreating(false);
+    setSelectedId(profile.id);
+    setForm(profileToForm(profile));
+    setError('');
+  };
+
+  const create = () => {
+    setCreating(true);
+    setSelectedId(undefined);
+    setForm(EMPTY_PROFILE_FORM);
+    setError('');
+  };
+
+  const save = async () => {
+    const draft = profileDraft(form);
+    if (draft.name.length === 0 || draft.description.length === 0 || draft.prompt.length === 0) {
+      setError('名称、描述和系统提示词不能为空。');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const result = creating
+        ? await window.kimiDesktop.profile.create(draft)
+        : selected?.editable === true && selected.revision !== undefined
+          ? await window.kimiDesktop.profile.update({ ...draft, revision: selected.revision })
+          : undefined;
+      if (result === undefined) return;
+      setCreating(false);
+      await load(result.profile.id);
+    } catch (saveError) {
+      setError(errorText(saveError));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async () => {
+    if (
+      selected?.editable !== true ||
+      selected.scope === undefined ||
+      selected.revision === undefined ||
+      !window.confirm(`删除 Agent 职业「${selected.name}」？此操作会删除对应 Markdown 文件。`)
+    ) {
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await window.kimiDesktop.profile.delete({
+        name: selected.name,
+        scope: selected.scope,
+        revision: selected.revision,
+      });
+      setSelectedId(undefined);
+      setForm(EMPTY_PROFILE_FORM);
+      await load();
+    } catch (deleteError) {
+      setError(errorText(deleteError));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (snapshot.workspace.root.length === 0) {
+    return (
+      <SettingsPage title="Agent 职业" description="为主代理和团队子代理维护可复用的专业角色。">
+        <section className="settings-section">
+          <div className="settings-empty">选择工作区后才能管理 Agent 职业。</div>
+        </section>
+      </SettingsPage>
+    );
+  }
+
+  return (
+    <SettingsPage title="Agent 职业" description="工作区职业保存在 .kimi-code/agents；用户职业可跨工作区复用。插件与内置职业只读。">
+      <section className="settings-section profile-manager-section">
+        <div className="section-title-row">
+          <h3><BriefcaseBusiness size={14} />职业目录</h3>
+          <div className="row-actions">
+            <button disabled={loading || saving} onClick={() => void load(selectedId)}><RefreshCw size={13} />刷新</button>
+            <button className="button-primary" disabled={saving} onClick={create}><Plus size={13} />新建职业</button>
+          </div>
+        </div>
+        <div className="profile-manager">
+          <div className="profile-list" aria-label="Agent 职业列表">
+            {catalog.profiles.map((profile) => (
+              <button
+                className={classNames('profile-list-item', !creating && selectedId === profile.id && 'active')}
+                key={profile.id}
+                onClick={() => choose(profile)}
+              >
+                <span className="profile-list-heading">
+                  <strong>{profile.name}</strong>
+                  <em className={classNames('profile-effective', profile.effective && 'active')}>{profile.effective ? '生效' : '被覆盖'}</em>
+                </span>
+                <small>{profile.description || '无描述'}</small>
+                <span className="profile-meta"><code>{profile.sourceId}</code>{profile.editable ? '可编辑' : '只读'}</span>
+              </button>
+            ))}
+            {catalog.profiles.length === 0 && <div className="settings-empty">没有可用职业</div>}
+          </div>
+          <div className="profile-editor">
+            {(creating || selected?.editable === true) && (
+              <>
+                <div className="form-grid profile-form-grid">
+                  <label><span>名称（kebab-case）</span><input disabled={!creating} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="code-reviewer" /></label>
+                  <label><span>保存范围</span><select disabled={!creating} value={form.scope} onChange={(event) => setForm({ ...form, scope: event.target.value as ProfileFormState['scope'] })}><option value="workspace">当前工作区</option><option value="user">所有工作区</option></select></label>
+                  <label className="span-two"><span>职业描述</span><input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="负责审查实现质量和回归风险" /></label>
+                  <label className="span-two"><span>何时使用（可选）</span><input value={form.whenToUse} onChange={(event) => setForm({ ...form, whenToUse: event.target.value })} placeholder="在提交代码前执行" /></label>
+                  <label><span>默认模型角色</span><select value={form.modelPreference} onChange={(event) => setForm({ ...form, modelPreference: event.target.value as ProfileFormState['modelPreference'] })}><option value="auto">自动</option><option value="primary">主模型</option><option value="secondary">辅助模型</option></select></label>
+                  <label className="profile-checkbox"><span>覆盖同名内置职业</span><input type="checkbox" checked={form.override} onChange={(event) => setForm({ ...form, override: event.target.checked })} /></label>
+                  <label className="span-two"><span>允许的工具（逗号或换行分隔，空白表示不限制）</span><textarea rows={2} value={form.tools} onChange={(event) => setForm({ ...form, tools: event.target.value })} placeholder="Read, Grep, Bash" /></label>
+                  <label className="span-two"><span>禁用的工具</span><textarea rows={2} value={form.disallowedTools} onChange={(event) => setForm({ ...form, disallowedTools: event.target.value })} placeholder="Write" /></label>
+                  <label className="span-two"><span>允许委派的子职业</span><textarea rows={2} value={form.subagents} onChange={(event) => setForm({ ...form, subagents: event.target.value })} placeholder="test-engineer, docs-writer" /></label>
+                  <label className="span-two"><span>系统提示词</span><textarea className="code-input profile-prompt" rows={10} value={form.prompt} onChange={(event) => setForm({ ...form, prompt: event.target.value })} placeholder="定义这个 Agent 的职责、工作方式与交付标准。" /></label>
+                </div>
+                <div className="settings-actions profile-editor-actions">
+                  {!creating && <button className="danger" disabled={saving} onClick={() => void remove()}><Trash2 size={13} />删除</button>}
+                  <button className="button-primary" disabled={saving} onClick={() => void save()}><Save size={13} />{creating ? '创建职业' : '保存修改'}</button>
+                </div>
+              </>
+            )}
+            {!creating && selected !== undefined && !selected.editable && (
+              <div className="profile-readonly">
+                <BriefcaseBusiness size={24} />
+                <h3>{selected.name}</h3>
+                <p>{selected.description || '无描述'}</p>
+                {selected.whenToUse !== undefined && <p><strong>使用时机：</strong>{selected.whenToUse}</p>}
+                <dl><dt>来源</dt><dd>{selected.sourceId}</dd><dt>状态</dt><dd>{selected.effective ? '当前生效' : '被更高优先级职业覆盖'}</dd><dt>模型偏好</dt><dd>{selected.modelPreference}</dd></dl>
+                <div className="dialog-notice">该职业来自内置代码、插件、兼容目录或显式启动参数，只能查看，不能在此修改。</div>
+              </div>
+            )}
+            {!creating && selected === undefined && <div className="profile-editor-placeholder"><BriefcaseBusiness size={28} /><span>选择一个职业查看详情，或新建职业。</span></div>}
+          </div>
+        </div>
+        {catalog.diagnostics.length > 0 && (
+          <div className="profile-diagnostics">
+            <strong>有 {catalog.diagnostics.length} 个职业文件未加载</strong>
+            {catalog.diagnostics.map((diagnostic) => <small key={`${diagnostic.sourceId}:${diagnostic.path}:${diagnostic.message}`}>{diagnostic.path ?? diagnostic.sourceId} · {diagnostic.message}</small>)}
+          </div>
+        )}
+        {error.length > 0 && <div className="form-error"><CircleAlert size={13} />{error}</div>}
+      </section>
+    </SettingsPage>
+  );
+}
+
+function profileToForm(profile: AgentProfileDescriptor): ProfileFormState {
+  return {
+    name: profile.name,
+    description: profile.description,
+    whenToUse: profile.whenToUse ?? '',
+    prompt: profile.prompt ?? '',
+    scope: profile.scope ?? 'workspace',
+    override: profile.override,
+    tools: profile.tools?.join(', ') ?? '',
+    disallowedTools: profile.disallowedTools?.join(', ') ?? '',
+    subagents: profile.subagents?.join(', ') ?? '',
+    modelPreference: profile.modelPreference,
+  };
+}
+
+function profileDraft(form: ProfileFormState): AgentProfileDraft {
+  return {
+    name: form.name.trim(),
+    description: form.description.trim(),
+    whenToUse: form.whenToUse.trim() || undefined,
+    prompt: form.prompt.trim(),
+    scope: form.scope,
+    override: form.override,
+    tools: profileList(form.tools),
+    disallowedTools: profileList(form.disallowedTools),
+    subagents: profileList(form.subagents),
+    modelPreference: form.modelPreference,
+  };
+}
+
+function profileList(value: string): readonly string[] | undefined {
+  const items = [...new Set(value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean))];
+  return items.length === 0 ? undefined : items;
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function McpSettings({ snapshot }: { readonly snapshot: DesktopSnapshot }) {

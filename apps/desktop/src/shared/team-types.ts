@@ -34,6 +34,7 @@ export interface TeamAssignment {
   readonly agentId?: string;
   readonly displayName?: string;
   readonly profileName: string;
+  readonly model?: string;
   readonly description: string;
   readonly item?: string;
   readonly status: TeamAssignmentStatus;

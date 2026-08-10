@@ -19,6 +19,9 @@ import {
 
 import type {
   ConfigSnapshot,
+  AgentProfileDeleteInput,
+  AgentProfileDraft,
+  AgentProfileUpdateInput,
   DesktopSessionCreateOptions,
   DesktopCommand,
   DesktopSnapshot,
@@ -324,6 +327,24 @@ export class KimiDesktopRuntime {
         return this.harness.getConfigDiagnostics();
       case 'config.features':
         return this.harness.getExperimentalFeatures();
+
+      case 'profile.list':
+        return this.harness.listAgentProfiles(this.requireWorkspaceRoot());
+      case 'profile.create':
+        return this.harness.createAgentProfile(
+          this.requireWorkspaceRoot(),
+          payload<AgentProfileDraft>(command),
+        );
+      case 'profile.update':
+        return this.harness.updateAgentProfile(
+          this.requireWorkspaceRoot(),
+          payload<AgentProfileUpdateInput>(command),
+        );
+      case 'profile.delete':
+        return this.harness.deleteAgentProfile(
+          this.requireWorkspaceRoot(),
+          payload<AgentProfileDeleteInput>(command),
+        );
 
       case 'session.list':
         await this.refreshSessions();
@@ -1223,6 +1244,7 @@ function commandRequiresWorkspace(name: DesktopCommandName): boolean {
     domain === 'turn' ||
     domain === 'interaction' ||
     domain === 'context' ||
+    domain === 'profile' ||
     domain === 'task' ||
     domain === 'team' ||
     domain === 'goal' ||

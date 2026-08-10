@@ -82,6 +82,22 @@ describe('KimiHarness capability facade', () => {
   });
 });
 
+describe('KimiHarness Agent profession facade', () => {
+  it('reports profile management as unavailable on the v1 engine', async () => {
+    const harness = makeHarnessWithRpc(new StubRpc());
+
+    await expect(harness.listAgentProfiles('/workspace')).rejects.toMatchObject({
+      code: 'not_implemented',
+    });
+    await expect(harness.createAgentProfile('/workspace', {
+      name: 'reviewer',
+      description: 'Reviews changes',
+      prompt: 'Review the change.',
+      scope: 'workspace',
+    })).rejects.toMatchObject({ code: 'not_implemented' });
+  });
+});
+
 describe('KimiHarness imageLimits', () => {
   it('exposes the in-process core [image] limits loaded from config.toml', async () => {
     const homeDir = await mkdtemp(join(tmpdir(), 'kimi-sdk-harness-'));

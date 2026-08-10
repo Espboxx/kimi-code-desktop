@@ -1,5 +1,11 @@
 import type { AgentDescriptor, TranscriptInteraction, TranscriptStore } from '@moonshot-ai/transcript';
 
+import type { TeamMember } from '../shared/desktop-api';
+import {
+  agentActivityIsActive,
+  type AgentActivityForest,
+  type AgentActivityStatus,
+} from './agent-activity';
 import { array, record, text } from './ui-utils';
 
 export interface PendingAgentInteraction {
@@ -7,6 +13,24 @@ export interface PendingAgentInteraction {
   readonly agent: AgentDescriptor;
   readonly interaction: TranscriptInteraction;
   readonly summary: string;
+}
+
+export interface TeamAgentActivity {
+  readonly agentId: string;
+  readonly status: AgentActivityStatus;
+  readonly action: string;
+}
+
+export function collectTeamAgentActivities(
+  forest: AgentActivityForest | undefined,
+  members: readonly TeamMember[],
+): readonly TeamAgentActivity[] {
+  if (forest === undefined) return [];
+  return members.flatMap((member) => {
+    const node = forest.byId.get(member.agentId);
+    if (node === undefined || !agentActivityIsActive(node.status)) return [];
+    return [{ agentId: member.agentId, status: node.status, action: node.action }];
+  });
 }
 
 export function collectPendingAgentInteractions(

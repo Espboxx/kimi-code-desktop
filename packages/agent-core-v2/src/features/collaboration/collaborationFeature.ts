@@ -14,6 +14,8 @@ import { Feature } from '#/features/feature';
 import { registerFeature } from '#/features/featureRegistry';
 import { IAgentProfileWriter } from '#/workspace/workspaceAgentProfileLoader/agentProfileWriter';
 import { AgentProfileWriterService } from '#/workspace/workspaceAgentProfileLoader/agentProfileWriterService';
+import { IWorkspaceAgentProfileManager } from '#/workspace/workspaceAgentProfileLoader/workspaceAgentProfileManager';
+import { WorkspaceAgentProfileManagerService } from '#/workspace/workspaceAgentProfileLoader/workspaceAgentProfileManagerService';
 
 import { ISessionCollaborationService } from './collaboration';
 import { SessionCollaborationService } from './collaborationService';
@@ -42,6 +44,12 @@ export class CollaborationFeature extends Feature {
     this.contributeAgentService(
       IAgentCollaborationDeliveryService,
       AgentCollaborationDeliveryService,
+    );
+    this.contributeService(
+      LifecycleScope.Workspace,
+      IWorkspaceAgentProfileManager,
+      WorkspaceAgentProfileManagerService,
+      { activation: ScopeActivation.OnScopeCreated },
     );
     this.contributeService(
       LifecycleScope.Workspace,

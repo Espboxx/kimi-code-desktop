@@ -10,13 +10,14 @@
  * timeouts resolve through `resolveSubagentTimeoutMs`, and the timeout
  * message renders with `formatSubagentTimeoutDescription`.
  *
- * The model half of the spawn binding is the secondary model (the
- * `[secondary_model]` section on disk): when its
- * experiment is enabled and the model is set, newly spawned subagents bind to
- * it by default instead of inheriting the caller's model, and the
- * `Agent`/`AgentSwarm` tools let the parent model pick per spawn via their
- * `model` parameter. When unset, spawning behavior is unchanged (subagents
- * inherit the caller's model). A recipe with patch fields binds the
+ * The model half of a regular spawn binding is the secondary model (the
+ * `[secondary_model]` section on disk): when its experiment is enabled and the
+ * model is set, newly spawned subagents bind to it by default instead of
+ * inheriting the caller's model, and the `Agent` tool lets the parent model
+ * pick between the primary and secondary entries. Team-mode `AgentSwarm`
+ * assignments instead select an exact configured model alias per task. When
+ * no secondary model is set, regular spawning behavior is unchanged
+ * (subagents inherit the caller's model). A recipe with patch fields binds the
  * synthesized derived entry (`SECONDARY_DERIVED_MODEL_ID`); a pointer-only
  * recipe binds the pointed entry directly. `default_effort` is passed as the
  * explicit subagent thinking; without it the subagent resolves thinking
@@ -40,10 +41,10 @@
 import { z } from 'zod';
 
 import { Error2, ErrorCodes, isError2 } from '#/errors';
-import type { AgentModelPreference } from '#/app/agentProfileCatalog/agentProfileCatalog';
 import { isPlainObject } from '#/app/config/toml';
 import type { IFlagService } from '#/app/flag/flag';
 import {
+  MODELS_SECTION,
   SECONDARY_MODEL_ENV,
   SECONDARY_MODEL_SECTION,
 } from '#/app/kosongConfig/configSection';
@@ -103,7 +104,16 @@ export function resolveSubagentTimeoutMs(config: IConfigService): number {
   );
 }
 
-export type SubagentModelChoice = AgentModelPreference;
+export type SubagentModelChoice = string;
+
+export interface RoutableSubagentModel {
+  readonly alias: string;
+  readonly displayName: string;
+  readonly providerName: string;
+  readonly maxContextSize: number;
+  readonly capabilities: ModelCapability;
+  readonly current: boolean;
+}
 
 export function resolveSecondaryModel(
   config: IConfigService,
@@ -119,6 +129,13 @@ export function resolveSubagentBinding(
   own: { modelAlias: string; thinkingLevel: string },
   requested?: SubagentModelChoice,
 ): { model: string; thinking?: string; displayModel: string } {
+  if (requested !== undefined && requested !== 'primary' && requested !== 'secondary') {
+    return {
+      model: requested,
+      thinking: undefined,
+      displayModel: requested,
+    };
+  }
   const secondary = resolveSecondaryModel(config, flags);
   if (requested !== 'primary' && secondary?.model !== undefined) {
     const model =
@@ -134,6 +151,49 @@ export function resolveSubagentBinding(
     thinking: own.thinkingLevel,
     displayModel: subagentDisplayModel(config, own.modelAlias),
   };
+}
+
+export function listRoutableSubagentModels(
+  config: IConfigService,
+  modelCatalog: IModelCatalog,
+  callerModelAlias?: string,
+): readonly RoutableSubagentModel[] {
+  const configured = config.get<Readonly<Record<string, unknown>> | undefined>(MODELS_SECTION);
+  const aliases = new Set(Object.keys(configured ?? {}));
+  if (callerModelAlias !== undefined) aliases.add(callerModelAlias);
+  aliases.delete(SECONDARY_DERIVED_MODEL_ID);
+
+  const models: RoutableSubagentModel[] = [];
+  for (const alias of [...aliases].toSorted()) {
+    try {
+      const model = modelCatalog.get(alias);
+      models.push({
+        alias,
+        displayName: model.displayName ?? model.name ?? alias,
+        providerName: model.providerName,
+        maxContextSize: model.maxContextSize,
+        capabilities: model.capabilities,
+        current: alias === callerModelAlias,
+      });
+    } catch {
+      continue;
+    }
+  }
+  return models;
+}
+
+export function buildTeamSubagentModelDescriptions(
+  models: readonly RoutableSubagentModel[],
+): string | undefined {
+  if (models.length === 0) return undefined;
+  return [
+    'Available configured model aliases (Team items must pass one via model):',
+    ...models.map((model) => {
+      const current = model.current ? '; current leader model' : '';
+      return `- ${model.alias}: ${model.displayName} (${model.providerName}); context: ${String(model.maxContextSize)}${current}${capabilitiesSuffix(model.capabilities)}`;
+    }),
+    'Choose the least expensive/fastest model that still satisfies the task\'s capability, context, and quality requirements. It is valid for several tasks to choose the same alias when justified.',
+  ].join('\n');
 }
 
 export function subagentDisplayModel(
@@ -209,14 +269,34 @@ export function wrapSubagentModelError(
   error: unknown,
   boundModel: string,
   callerModelAlias: string | undefined,
+  config?: IConfigService,
 ): unknown {
   if (boundModel === callerModelAlias) return error;
   if (!isError2(error) || error.code !== ErrorCodes.CONFIG_INVALID) return error;
   if (error.details?.['model'] !== boundModel) return error;
-  const displayModel =
-    boundModel === SECONDARY_DERIVED_MODEL_ID
-      ? `the derived entry "${SECONDARY_DERIVED_MODEL_ID}"`
-      : `"${boundModel}"`;
+  const secondary = config?.get<SecondaryModelConfig | undefined>(SECONDARY_MODEL_SECTION);
+  const configuredSecondary = secondary?.model;
+  const isSecondary =
+    config === undefined ||
+    boundModel === SECONDARY_DERIVED_MODEL_ID ||
+    boundModel === configuredSecondary;
+  const displayModel = boundModel === SECONDARY_DERIVED_MODEL_ID
+    ? `the derived entry "${SECONDARY_DERIVED_MODEL_ID}"`
+    : `"${boundModel}"`;
+  if (!isSecondary) {
+    return new Error2(
+      error.code,
+      `${error.message} (subagent model ${displayModel} came from the requested Agent/AgentSwarm model alias)`,
+      {
+        cause: error,
+        name: error.name,
+        details: {
+          ...error.details,
+          subagentModel: boundModel,
+        },
+      },
+    );
+  }
   return new Error2(
     error.code,
     `${error.message} (secondary model ${displayModel} comes from [secondary_model].model / ${SECONDARY_MODEL_ENV} — check that it names a valid [models] entry)`,

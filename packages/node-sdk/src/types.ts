@@ -18,6 +18,18 @@ export type Unsubscribe = () => void;
 
 export type { CapabilityStatus } from '@moonshot-ai/agent-core-v2/app/capability/types';
 export type {
+  AgentProfileDeleteInput,
+  AgentProfileDeleteResult,
+  AgentProfileDescriptor,
+  AgentProfileDiagnostic,
+  AgentProfileDraft,
+  AgentProfileListResult,
+  AgentProfileManagedModelPreference,
+  AgentProfileManageScope,
+  AgentProfileMutationResult,
+  AgentProfileUpdateInput,
+} from '@moonshot-ai/agent-core-v2/workspace/workspaceAgentProfileLoader/workspaceAgentProfileManager';
+export type {
   Team,
   TeamAssignment,
   TeamAssignmentStatus,

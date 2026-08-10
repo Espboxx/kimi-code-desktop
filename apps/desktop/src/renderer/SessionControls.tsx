@@ -8,6 +8,33 @@ export interface SessionModelOption {
   readonly label: string;
 }
 
+export function ModelSelect({ value, models, disabled, onChange, title = '模型' }: {
+  readonly value?: string;
+  readonly models: readonly SessionModelOption[];
+  readonly disabled?: boolean;
+  readonly onChange: (model: string) => void;
+  readonly title?: string;
+}) {
+  return (
+    <label className="select-control model-control" title={title}>
+      <Bot size={13} />
+      <select
+        aria-label={title}
+        value={value ?? ''}
+        disabled={disabled}
+        onChange={(event) => { onChange(event.target.value); }}
+      >
+        {value !== undefined && !models.some((model) => model.id === value) && (
+          <option value={value}>{value}</option>
+        )}
+        {models.length === 0 && <option value="">未配置模型</option>}
+        {models.map((model) => <option value={model.id} key={model.id}>{model.label}</option>)}
+      </select>
+      <ChevronDown size={12} />
+    </label>
+  );
+}
+
 interface SessionControlsProps {
   readonly sessionId?: string;
   readonly status?: SessionStatusSnapshot;
@@ -28,20 +55,12 @@ export function SessionControls({
   const disabled = sessionId === undefined;
   return (
     <div className={classNames('session-controls', placement === 'composer' && 'composer-session-controls')} data-placement={placement}>
-      <label className="select-control model-control" title="模型">
-        <Bot size={13} />
-        <select
-          aria-label="模型"
-          value={status?.model ?? ''}
-          disabled={disabled}
-          onChange={(event) => void window.kimiDesktop.turn.setModel(event.target.value, sessionId)}
-        >
-          {status?.model !== undefined && !models.some((model) => model.id === status.model) && <option value={status.model}>{status.model}</option>}
-          {models.length === 0 && <option value="">未配置模型</option>}
-          {models.map((model) => <option value={model.id} key={model.id}>{model.label}</option>)}
-        </select>
-        <ChevronDown size={12} />
-      </label>
+      <ModelSelect
+        value={status?.model}
+        models={models}
+        disabled={disabled}
+        onChange={(model) => { void window.kimiDesktop.turn.setModel(model, sessionId); }}
+      />
       <label className="select-control" title="Thinking">
         <Sparkles size={13} />
         <select

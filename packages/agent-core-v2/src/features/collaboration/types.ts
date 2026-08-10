@@ -23,10 +23,9 @@ export const teamDisplayNameSchema = z
   .trim()
   .min(1)
   .max(24)
-  .regex(
-    TEAM_DISPLAY_NAME_PATTERN,
-    'Team display names may contain only letters, numbers, underscores, and hyphens',
-  )
+  .refine((name) => TEAM_DISPLAY_NAME_PATTERN.test(name), {
+    message: 'Team display names may contain only letters, numbers, underscores, and hyphens',
+  })
   .refine((name) => name.toLowerCase() !== 'main' && !/^agent-\d+$/i.test(name), {
     message: 'Team display names must not use reserved agent identifiers',
   });
@@ -89,6 +88,7 @@ export const teamAssignmentSchema = z.object({
   agentId: z.string().min(1).optional(),
   displayName: teamDisplayNameSchema.optional(),
   profileName: z.string().min(1),
+  model: z.string().min(1).optional(),
   description: z.string().min(1),
   item: z.string().optional(),
   status: teamAssignmentStatusSchema,
@@ -176,6 +176,7 @@ export interface TeamBatchAssignmentInput {
   readonly assignmentId: string;
   readonly displayName?: string;
   readonly profileName: string;
+  readonly model?: string;
   readonly description: string;
   readonly item?: string;
   readonly resumeAgentId?: string;

@@ -76,6 +76,7 @@ import {
 interface SessionDialogState {
   readonly session: SessionListItem;
   readonly action: SessionAction;
+  readonly running?: boolean;
 }
 
 interface RendererError {
@@ -651,12 +652,17 @@ export function App() {
     setSurface('team');
     setTeamCreation({ clientMessageId: crypto.randomUUID() });
   };
-  const createTeamTask = async (objective: string, permission: 'current' | 'yolo') => {
+  const createTeamTask = async (
+    objective: string,
+    permission: 'current' | 'yolo',
+    model?: string,
+  ) => {
     if (teamCreation === undefined) return;
     let sessionId = teamCreation.sessionId;
     if (sessionId === undefined) {
       sessionId = await window.kimiDesktop.session.create({
         surface: 'team',
+        model,
         permission: permission === 'yolo' ? 'yolo' : undefined,
       });
       setTeamCreation((current) => current === undefined ? current : { ...current, sessionId });
@@ -889,6 +895,15 @@ export function App() {
             badges={teamBadges}
             onCreate={beginTeamCreation}
             onSelect={openTeam}
+            onDelete={(session) => {
+              setSessionDialog({
+                session,
+                action: 'delete',
+                running:
+                  state.sessionStatuses[session.id]?.busy === true ||
+                  (teamBadges[session.id]?.running ?? 0) > 0,
+              });
+            }}
           />
           <main className="team-detail-pane editor-group">
             <WorkbenchTabs
@@ -911,6 +926,9 @@ export function App() {
               <TeamPage
                 sessionId={activeTab.sessionId}
                 state={state.teams[activeTab.sessionId]!}
+                activity={snapshot.activeSessionId === activeTab.sessionId ? agentActivity : undefined}
+                status={state.sessionStatuses[activeTab.sessionId]}
+                models={modelOptions}
                 onSeen={(channelSeq) => markTeamSeen(activeTab.sessionId, channelSeq)}
                 onSelectAgent={(agentId) => selectTeamAgent(activeTab.sessionId, agentId)}
               />
@@ -969,6 +987,8 @@ export function App() {
       {teamCreation !== undefined && (
         <CreateTeamDialog
           currentPermission={defaultPermission(snapshot.config.value)}
+          models={modelOptions}
+          defaultModel={text(snapshot.config.value['defaultModel']) || modelOptions[0]?.id}
           onCreate={createTeamTask}
           onCancel={() => setTeamCreation(undefined)}
         />
@@ -1103,9 +1123,11 @@ function SessionActionDialog({
       setBusy(false);
     }
   };
+  const teamDelete = state.action === 'delete' && state.session.surface === 'team';
   const titleByAction: Record<SessionAction, string> = {
     rename: '重命名会话', fork: '分叉会话', export: '导出会话', close: '关闭活动会话', delete: '永久删除会话',
   };
+  if (teamDelete) titleByAction.delete = '永久删除团队任务';
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div className="action-dialog" role="dialog" aria-modal="true">
@@ -1116,7 +1138,15 @@ function SessionActionDialog({
           {state.action === 'fork' && <label><span>保留到历史轮次</span><input type="number" min={0} step={1} value={turnIndex} onChange={(event) => setTurnIndex(event.target.value)} placeholder="留空表示完整分叉" /></label>}
           {state.action === 'export' && <label><span>输出路径</span><input value={outputPath} onChange={(event) => setOutputPath(event.target.value)} placeholder="留空使用默认导出路径" /></label>}
           {state.action === 'close' && <div className="dialog-notice">关闭只结束当前活动 runtime，会话历史仍保留。</div>}
-          {state.action === 'delete' && <div className="dialog-danger">该会话的持久化历史将被永久删除，无法撤销。</div>}
+          {state.action === 'delete' && (
+            <div className="dialog-danger">
+              {teamDelete && state.running === true
+                ? '该团队任务仍在运行。确认后会立即终止全部 Agent，并永久删除频道和持久化历史，无法撤销。'
+                : teamDelete
+                  ? '该团队任务的频道和持久化历史将被永久删除，无法撤销。'
+                  : '该会话的持久化历史将被永久删除，无法撤销。'}
+            </div>
+          )}
           {actionError !== undefined && <div className="dialog-danger">{actionError}</div>}
         </div>
         <footer className="dialog-footer"><button onClick={onClose}>取消</button><button className={state.action === 'delete' ? 'button-danger' : 'button-primary'} disabled={busy || (state.action === 'rename' && title.trim().length === 0)} onClick={() => void run()}>{busy ? <CircleDashed className="spin" size={13} /> : state.action === 'delete' ? <Trash2 size={13} /> : <Check size={13} />}确认</button></footer>

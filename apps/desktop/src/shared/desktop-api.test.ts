@@ -128,4 +128,55 @@ describe('desktop IPC schema', () => {
       sessionId: 's1', body: 'Coordinate', clientMessageId: 'retry-2',
     });
   });
+
+  it('validates and routes structured Agent profession management commands', async () => {
+    const draft = {
+      name: 'code-reviewer',
+      description: 'Reviews implementation quality',
+      whenToUse: 'Use before merging.',
+      prompt: 'Review the implementation and report concrete risks.',
+      scope: 'workspace' as const,
+      override: false,
+      tools: ['Read', 'Grep'],
+      modelPreference: 'secondary' as const,
+    };
+    const revision = 'a'.repeat(64);
+    expect(parseDesktopCommand({ domain: 'profile', action: 'create', payload: draft }))
+      .toMatchObject({ name: 'profile.create', payload: draft });
+    expect(parseDesktopCommand({
+      domain: 'profile', action: 'update', payload: { ...draft, revision },
+    })).toMatchObject({ name: 'profile.update' });
+    expect(parseDesktopCommand({
+      domain: 'profile',
+      action: 'delete',
+      payload: { name: draft.name, scope: draft.scope, revision },
+    })).toMatchObject({ name: 'profile.delete' });
+    expect(() => parseDesktopCommand({
+      domain: 'profile', action: 'create', payload: { ...draft, name: '../reviewer' },
+    })).toThrow();
+    expect(() => parseDesktopCommand({
+      domain: 'profile', action: 'update', payload: { ...draft, revision: 'stale' },
+    })).toThrow();
+
+    const calls = vi.fn();
+    const invoke: Parameters<typeof createKimiDesktopApi>[0] = async <T>(
+      domain: DesktopDomain,
+      action: string,
+      payload?: unknown,
+    ) => {
+      calls(domain, action, payload);
+      return undefined as T;
+    };
+    const api = createKimiDesktopApi(invoke, () => () => undefined);
+    await api.profile.list();
+    await api.profile.create(draft);
+    await api.profile.update({ ...draft, revision });
+    await api.profile.delete({ name: draft.name, scope: draft.scope, revision });
+    expect(calls.mock.calls).toEqual([
+      ['profile', 'list', undefined],
+      ['profile', 'create', draft],
+      ['profile', 'update', { ...draft, revision }],
+      ['profile', 'delete', { name: draft.name, scope: draft.scope, revision }],
+    ]);
+  });
 });

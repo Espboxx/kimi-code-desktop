@@ -12,6 +12,12 @@ import type { KimiAuthFacade } from '#/auth';
 import type { SDKRpcClientBase } from '#/rpc';
 import type {
   AuthenticateMcpServerOptions,
+  AgentProfileDeleteInput,
+  AgentProfileDeleteResult,
+  AgentProfileDraft,
+  AgentProfileListResult,
+  AgentProfileMutationResult,
+  AgentProfileUpdateInput,
   CapabilityStatus,
   ConfigDiagnostics,
   CreateSessionOptions,
@@ -261,6 +267,31 @@ export class KimiHarness {
   /** Skills visible to a new session in `workDir`, without creating that session. */
   async listWorkspaceSkills(workDir: string): Promise<readonly SkillSummary[]> {
     return this.rpc.listWorkspaceSkills(workDir);
+  }
+
+  async listAgentProfiles(workDir: string): Promise<AgentProfileListResult> {
+    return this.rpc.listAgentProfiles(workDir);
+  }
+
+  async createAgentProfile(
+    workDir: string,
+    input: AgentProfileDraft,
+  ): Promise<AgentProfileMutationResult> {
+    return this.rpc.createAgentProfile(workDir, input);
+  }
+
+  async updateAgentProfile(
+    workDir: string,
+    input: AgentProfileUpdateInput,
+  ): Promise<AgentProfileMutationResult> {
+    return this.rpc.updateAgentProfile(workDir, input);
+  }
+
+  async deleteAgentProfile(
+    workDir: string,
+    input: AgentProfileDeleteInput,
+  ): Promise<AgentProfileDeleteResult> {
+    return this.rpc.deleteAgentProfile(workDir, input);
   }
 
   /**

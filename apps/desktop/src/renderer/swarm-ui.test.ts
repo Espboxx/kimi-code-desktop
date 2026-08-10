@@ -16,6 +16,7 @@ import {
   buildAgentActivityForest,
 } from './agent-activity';
 import {
+  collectTeamAgentActivities,
   collectPendingAgentInteractions,
   interactionSummary,
 } from './swarm-ui';
@@ -136,6 +137,31 @@ describe('Agent activity view model', () => {
     expect(node?.status).toBe('waiting');
     expect(node?.action).toBe('等待权限确认');
     expect(buildAgentActivityForest(store).roots[0]?.counts.waiting).toBe(1);
+  });
+
+  it('returns active Team members in roster order with their current actions', () => {
+    const store = new TranscriptStore('s1');
+    const main = store.ensureAgent('main', { agentId: 'main', type: 'main' });
+    const worker = store.ensureAgent('agent-1', { agentId: 'agent-1', type: 'sub', parentAgentId: 'main' });
+    const completed = store.ensureAgent('agent-2', { agentId: 'agent-2', type: 'sub', parentAgentId: 'main' });
+    main.apply([upsert({ interactionId: 'approval:main', interactionKind: 'approval', state: 'pending' })]);
+    worker.apply([{
+      op: 'meta.merge',
+      meta: { agent: { phase: { kind: 'streaming', turnId: 1, step: 1, stepId: '1.1', stream: 'assistant', since: 1 } } },
+    }]);
+    completed.apply([{
+      op: 'meta.merge',
+      meta: { agent: { phase: { kind: 'ended', turnId: 1, reason: 'completed', at: 2 } } },
+    }]);
+
+    expect(collectTeamAgentActivities(buildAgentActivityForest(store), [
+      { agentId: 'main', role: 'leader', joinedAt: 1, joinedSeq: 1 },
+      { agentId: 'agent-2', role: 'member', joinedAt: 2, joinedSeq: 2 },
+      { agentId: 'agent-1', role: 'member', joinedAt: 3, joinedSeq: 3 },
+    ])).toEqual([
+      { agentId: 'main', status: 'waiting', action: '等待权限确认' },
+      { agentId: 'agent-1', status: 'running', action: '生成回复' },
+    ]);
   });
 });
 

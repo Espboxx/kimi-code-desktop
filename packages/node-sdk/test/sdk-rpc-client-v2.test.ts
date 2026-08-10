@@ -7,7 +7,7 @@
  * Wiring: real v2 engine bootstrapped on a temp KIMI_CODE_HOME; no provider calls.
  * Run: pnpm exec vitest run test/sdk-rpc-client-v2.test.ts
  */
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -168,6 +168,66 @@ describe('SDKRpcClientV2 (agent-core-v2 wiring MVP)', () => {
         description: 'Skill demo-project-skill for the escape-hatch test',
         source: 'project',
       });
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('manages canonical Agent professions through the public harness facade', async () => {
+    const { harness } = await makeHarness();
+    const workDir = await mkdtemp(join(tmpdir(), 'kimi-sdk-v2-work-'));
+    tempDirs.push(workDir);
+    try {
+      const created = await harness.createAgentProfile(workDir, {
+        name: 'release-reviewer',
+        description: 'Reviews release readiness',
+        whenToUse: 'Use before publishing a release.',
+        prompt: 'Inspect the release inputs and report concrete blockers.',
+        scope: 'workspace',
+        modelPreference: 'secondary',
+      });
+      expect(created).toMatchObject({
+        created: true,
+        profile: {
+          id: 'workspace:release-reviewer',
+          editable: true,
+          effective: true,
+          path: '.kimi-code/agents/release-reviewer.md',
+        },
+      });
+      expect(created.profile.path).not.toContain(workDir);
+      expect(await readFile(join(workDir, '.kimi-code', 'agents', 'release-reviewer.md'), 'utf8'))
+        .toContain('model_preference: secondary');
+
+      const listed = await harness.listAgentProfiles(workDir);
+      expect(listed.profiles).toContainEqual(expect.objectContaining({
+        id: 'workspace:release-reviewer',
+        prompt: 'Inspect the release inputs and report concrete blockers.',
+      }));
+      expect(listed.profiles).toContainEqual(expect.objectContaining({
+        sourceId: 'builtin',
+        editable: false,
+      }));
+
+      const updated = await harness.updateAgentProfile(workDir, {
+        name: 'release-reviewer',
+        description: 'Reviews release readiness and checks artifacts',
+        prompt: 'Inspect the release inputs, artifacts, and report concrete blockers.',
+        scope: 'workspace',
+        modelPreference: 'auto',
+        revision: created.profile.revision!,
+      });
+      expect(updated.profile.description).toContain('checks artifacts');
+      expect(updated.profile.revision).not.toBe(created.profile.revision);
+
+      await harness.deleteAgentProfile(workDir, {
+        name: 'release-reviewer',
+        scope: 'workspace',
+        revision: updated.profile.revision!,
+      });
+      expect((await harness.listAgentProfiles(workDir)).profiles).not.toContainEqual(
+        expect.objectContaining({ id: 'workspace:release-reviewer' }),
+      );
     } finally {
       await harness.close();
     }

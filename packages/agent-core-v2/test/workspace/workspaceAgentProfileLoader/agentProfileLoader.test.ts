@@ -68,6 +68,8 @@ import { IExtraAgentProfileLoader } from '#/workspace/workspaceAgentProfileLoade
 import { IExplicitAgentProfileLoader } from '#/workspace/workspaceAgentProfileLoader/explicitAgentProfileLoader';
 import { IAgentProfileWriter } from '#/workspace/workspaceAgentProfileLoader/agentProfileWriter';
 import { AgentProfileWriterService } from '#/workspace/workspaceAgentProfileLoader/agentProfileWriterService';
+import { IWorkspaceAgentProfileManager } from '#/workspace/workspaceAgentProfileLoader/workspaceAgentProfileManager';
+import { WorkspaceAgentProfileManagerService } from '#/workspace/workspaceAgentProfileLoader/workspaceAgentProfileManagerService';
 
 import { stubBootstrap } from '../../app/bootstrap/stubs';
 
@@ -244,6 +246,17 @@ function failingReaddirFs(
   return failing;
 }
 
+function symbolicLinkTargetFs(hostFs: HostFileSystem, suffix: string): HostFileSystem {
+  const wrapped = Object.create(hostFs) as HostFileSystem;
+  wrapped.lstat = async (path: string) => {
+    if (path.endsWith(suffix)) {
+      return { isFile: true, isDirectory: false, isSymbolicLink: true, size: 0 };
+    }
+    return hostFs.lstat(path);
+  };
+  return wrapped;
+}
+
 interface StackOptions {
   readonly extraAgentDirs?: readonly string[];
   readonly explicitFiles?: readonly string[];
@@ -281,6 +294,7 @@ function makeStack(fixture: Fixture, opts?: StackOptions) {
       [IWorkspaceAgentProfileLoader, new SyncDescriptor(WorkspaceAgentProfileLoaderService)],
       [IExtraAgentProfileLoader, new SyncDescriptor(ExtraAgentProfileLoaderService)],
       [IExplicitAgentProfileLoader, new SyncDescriptor(ExplicitAgentProfileLoaderService)],
+      [IWorkspaceAgentProfileManager, new SyncDescriptor(WorkspaceAgentProfileManagerService)],
       [IAgentProfileWriter, new SyncDescriptor(AgentProfileWriterService)],
     ),
     true,
@@ -295,6 +309,7 @@ function makeStack(fixture: Fixture, opts?: StackOptions) {
   const extraLoader = get(IExtraAgentProfileLoader);
   const explicitLoader = get(IExplicitAgentProfileLoader);
   const profileWriter = get(IAgentProfileWriter);
+  const profileManager = get(IWorkspaceAgentProfileManager);
   const seed: ISessionAgentProfileCatalogSeed = {
     _serviceBrand: undefined,
     workspaceKey: workspaceContext.workspaceId,
@@ -310,6 +325,7 @@ function makeStack(fixture: Fixture, opts?: StackOptions) {
     extraLoader,
     explicitLoader,
     profileWriter,
+    profileManager,
     catalog,
     config,
     warnings,
@@ -453,6 +469,116 @@ describe('agent profile loaders + session catalog', () => {
         );
         expect(stack.catalog.inspect('docs-editor')?.sourceId).toBe('user');
       });
+    });
+  });
+
+  it('lists, updates, and deletes canonical profiles with optimistic revisions', async () => {
+    await withFixture(async (fixture) => {
+      await withStack(fixture, undefined, async (stack) => {
+        await stack.ready();
+
+        const created = await stack.profileManager.create({
+          name: 'quality-engineer',
+          description: 'Checks implementation quality',
+          whenToUse: 'Use before merging changes.',
+          prompt: 'Inspect the change and run focused verification.',
+          scope: 'workspace',
+          tools: ['Read', 'Bash'],
+          disallowedTools: ['Write'],
+          subagents: ['test-specialist'],
+          modelPreference: 'secondary',
+        });
+
+        expect(created).toMatchObject({
+          created: true,
+          profile: {
+            id: 'workspace:quality-engineer',
+            sourceId: 'workspace',
+            scope: 'workspace',
+            editable: true,
+            effective: true,
+            modelPreference: 'secondary',
+          },
+        });
+        expect(created.profile.path).toBe('.kimi-code/agents/quality-engineer.md');
+        expect(created.profile.revision).toMatch(/^[a-f0-9]{64}$/);
+
+        const listed = await stack.profileManager.list();
+        expect(listed.profiles).toContainEqual(
+          expect.objectContaining({
+            id: 'builtin:agent',
+            sourceId: 'builtin',
+            editable: false,
+            effective: true,
+          }),
+        );
+
+        const revision = created.profile.revision!;
+        const updated = await stack.profileManager.update({
+          name: 'quality-engineer',
+          description: 'Checks implementation and regression quality',
+          prompt: 'Review the implementation, run tests, and report concrete risks.',
+          scope: 'workspace',
+          override: false,
+          modelPreference: 'auto',
+          revision,
+        });
+        expect(updated.profile.description).toBe('Checks implementation and regression quality');
+        expect(updated.profile.modelPreference).toBe('auto');
+        expect(updated.profile.revision).not.toBe(revision);
+        expect(stack.catalog.get('quality-engineer')?.description).toBe(
+          'Checks implementation and regression quality',
+        );
+
+        await expect(
+          stack.profileManager.update({
+            name: 'quality-engineer',
+            description: 'Stale update',
+            prompt: 'This must not overwrite the newer content.',
+            scope: 'workspace',
+            revision,
+          }),
+        ).rejects.toMatchObject({ code: 'profile.update_conflict' });
+
+        await expect(
+          stack.profileManager.delete({
+            name: 'quality-engineer',
+            scope: 'workspace',
+            revision,
+          }),
+        ).rejects.toMatchObject({ code: 'profile.update_conflict' });
+        await stack.profileManager.delete({
+          name: 'quality-engineer',
+          scope: 'workspace',
+          revision: updated.profile.revision!,
+        });
+        expect(stack.catalog.get('quality-engineer')).toBeUndefined();
+        await expect(
+          readFile(join(fixture.workDir, '.kimi-code/agents/quality-engineer.md'), 'utf8'),
+        ).rejects.toMatchObject({ code: 'ENOENT' });
+      });
+    });
+  });
+
+  it('rejects a canonical profile target exposed through a symbolic link', async () => {
+    await withFixture(async (fixture) => {
+      const hostFs = new HostFileSystem();
+      const unsafe = join('.kimi-code', 'agents', 'unsafe-profile.md');
+      await withStack(
+        fixture,
+        { hostFs: symbolicLinkTargetFs(hostFs, unsafe) },
+        async (stack) => {
+          await stack.ready();
+          await expect(
+            stack.profileManager.create({
+              name: 'unsafe-profile',
+              description: 'Must not follow symbolic links',
+              prompt: 'Never write through this target.',
+              scope: 'workspace',
+            }),
+          ).rejects.toMatchObject({ code: 'profile.manage_forbidden' });
+        },
+      );
     });
   });
 

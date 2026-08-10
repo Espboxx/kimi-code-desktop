@@ -447,6 +447,11 @@ progress {
 
 .team-task-list { min-height: 0; overflow: auto; }
 
+.team-task-row-shell {
+  position: relative;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+}
+
 .team-task-row {
   display: flex;
   width: 100%;
@@ -454,9 +459,8 @@ progress {
   min-height: 58px;
   align-items: center;
   gap: 7px;
-  padding: 7px 9px;
+  padding: 7px 38px 7px 9px;
   border: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
   border-radius: 0;
   background: transparent;
   text-align: left;
@@ -464,6 +468,34 @@ progress {
 
 .team-task-row:hover { background: var(--surface-hover); }
 .team-task-row.selected { background: var(--surface-active); box-shadow: inset 2px 0 var(--accent); }
+
+.team-task-delete {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  display: grid;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  opacity: 0;
+  transform: translateY(-50%);
+}
+
+.team-task-row-shell:hover .team-task-delete,
+.team-task-row-shell:focus-within .team-task-delete,
+.team-task-row-shell.selected .team-task-delete {
+  opacity: 1;
+}
+
+.team-task-delete:hover {
+  border-color: color-mix(in srgb, var(--red) 42%, var(--border));
+  background: var(--red-bg);
+  color: var(--red);
+}
 
 .team-task-copy {
   display: grid;
@@ -3028,6 +3060,227 @@ progress {
   grid-column: span 2;
 }
 
+.profile-manager-section {
+  padding-top: 10px;
+}
+
+.profile-manager {
+  display: grid;
+  min-height: 430px;
+  grid-template-columns: minmax(190px, 0.72fr) minmax(300px, 1.4fr);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--panel-2);
+}
+
+.profile-list {
+  min-width: 0;
+  max-height: 520px;
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  scrollbar-width: thin;
+}
+
+.profile-list-item {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 78px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 10px 11px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.profile-list-item:hover,
+.profile-list-item.active {
+  background: var(--surface-active);
+}
+
+.profile-list-item.active {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.profile-list-heading,
+.profile-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.profile-list-heading strong {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-list-item > small {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.profile-meta {
+  justify-content: flex-start;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.profile-meta code {
+  color: var(--accent);
+  font-size: 9px;
+}
+
+.profile-effective {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: var(--surface-active);
+  color: var(--muted);
+  font-size: 8px;
+  font-style: normal;
+}
+
+.profile-effective.active {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.profile-editor {
+  min-width: 0;
+  padding: 13px;
+  background: var(--panel);
+}
+
+.profile-form-grid {
+  margin: 0;
+}
+
+.profile-form-grid textarea {
+  margin: 0;
+  resize: vertical;
+}
+
+.profile-form-grid .profile-prompt {
+  min-height: 150px;
+}
+
+.profile-checkbox {
+  justify-content: flex-end;
+  align-items: flex-start;
+}
+
+.profile-checkbox input {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+}
+
+.profile-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.profile-editor-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.profile-readonly,
+.profile-editor-placeholder {
+  display: flex;
+  min-height: 370px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.profile-readonly {
+  align-items: stretch;
+  justify-content: flex-start;
+  color: var(--text);
+  text-align: left;
+}
+
+.profile-readonly > svg {
+  color: var(--accent);
+}
+
+.profile-readonly h3,
+.profile-readonly p {
+  margin: 0;
+}
+
+.profile-readonly p {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.profile-readonly dl {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 5px 10px;
+  margin: 8px 0;
+  font-size: 10px;
+}
+
+.profile-readonly dt {
+  color: var(--muted);
+}
+
+.profile-readonly dd {
+  margin: 0;
+}
+
+.profile-diagnostics {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 9px;
+  padding: 8px;
+  border-radius: 4px;
+  background: var(--amber-bg);
+  color: var(--amber);
+  font-size: 10px;
+}
+
+.profile-diagnostics small {
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
+@media (max-width: 760px) {
+  .profile-manager {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-list {
+    max-height: 210px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
 .provider-row,
 .extension-row,
 .capability-row,
@@ -3644,6 +3897,82 @@ progress {
   white-space: pre-wrap;
 }
 
+.team-activity-strip {
+  display: flex;
+  width: 100%;
+  height: 34px;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.team-activity-strip::-webkit-scrollbar {
+  height: 0;
+}
+
+.team-activity-bubble {
+  display: flex;
+  min-width: 0;
+  max-width: min(460px, 82%);
+  height: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent-bg) 70%, var(--panel-2));
+  box-shadow: 0 3px 12px color-mix(in srgb, var(--border) 24%, transparent);
+  color: var(--text-soft);
+  font-size: 10px;
+  text-align: left;
+}
+
+.team-activity-bubble:hover {
+  border-color: color-mix(in srgb, var(--accent) 65%, var(--border));
+  background: color-mix(in srgb, var(--accent-bg) 82%, var(--surface-hover));
+}
+
+.team-activity-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--accent);
+}
+
+.team-activity-bubble.status-waiting .team-activity-icon {
+  color: var(--amber);
+}
+
+.team-activity-bubble > strong,
+.team-activity-bubble > em,
+.team-activity-action {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.team-activity-bubble > em {
+  padding: 1px 4px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  color: var(--muted);
+  font-size: 9px;
+  font-style: normal;
+}
+
+.team-activity-action {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+}
+
 .team-mention {
   display: inline-flex;
   align-items: center;
@@ -3672,6 +4001,27 @@ progress {
   padding: 9px 12px 11px;
   border-top: 1px solid var(--border);
   background: var(--panel-2);
+}
+
+.team-composer-toolbar {
+  display: flex;
+  min-width: 0;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: 8px;
+}
+
+.team-composer-toolbar > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-composer-toolbar .model-control {
+  max-width: min(310px, 58%);
 }
 
 .team-composer textarea {
@@ -3917,6 +4267,27 @@ progress {
   width: 100%;
   min-height: 120px;
   resize: vertical;
+}
+
+.team-create-model {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px 10px;
+  margin-top: 14px;
+}
+
+.team-create-model > span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.team-create-model > small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 9px;
 }
 
 .team-permission-options {

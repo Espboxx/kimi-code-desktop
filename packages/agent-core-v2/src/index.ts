@@ -189,6 +189,7 @@ import '#/kosong/provider/bases/openai/index';
 import '#/kosong/provider/providers/kimi/kimi.contrib';
 import '#/kosong/provider/providers/standard.contrib';
 export * from '#/app/agentProfileCatalog/agentProfileCatalog';
+export * from '#/app/agentProfileCatalog/profileProjection';
 export * from '#/app/agentProfileCatalog/agentProfileContribution';
 export * from '#/app/agentProfileCatalog/agentProfileRegistry';
 export * from '#/app/agentProfileCatalog/agentProfileRegistryService';
@@ -204,6 +205,8 @@ export {
 export * from '#/workspace/workspaceAgentProfileLoader/configSection';
 export * from '#/workspace/workspaceAgentProfileLoader/agentProfileWriter';
 export * from '#/workspace/workspaceAgentProfileLoader/agentProfileWriterService';
+export * from '#/workspace/workspaceAgentProfileLoader/workspaceAgentProfileManager';
+export * from '#/workspace/workspaceAgentProfileLoader/workspaceAgentProfileManagerService';
 export { parseAgentFileText } from '#/workspace/workspaceAgentProfileLoader/internal/agentFile';
 export { resolveAgentPath } from '#/workspace/workspaceAgentProfileLoader/internal/paths';
 export * from '#/workspace/workspaceAgentProfileLoader/userAgentProfileLoader';

@@ -21,23 +21,33 @@ import type {
   TeamMember,
   TeamMessage,
   TeamStateSnapshot,
+  SessionStatusSnapshot,
 } from '../shared/desktop-api';
+import { agentActivityLabel, type AgentActivityForest } from './agent-activity';
+import { collectTeamAgentActivities, type TeamAgentActivity } from './swarm-ui';
+import { ModelSelect, type SessionModelOption } from './SessionControls';
 import { classNames } from './ui-utils';
 import { buildTeamMentionAliases, rehypeTeamMentions } from './team-message-markdown';
 
-export function TeamPage({ sessionId, state, onSeen, onSelectAgent }: {
+export function TeamPage({ sessionId, state, activity, status, models, onSeen, onSelectAgent }: {
   readonly sessionId: string;
   readonly state: TeamStateSnapshot;
+  readonly activity?: AgentActivityForest;
+  readonly status?: SessionStatusSnapshot;
+  readonly models: readonly SessionModelOption[];
   readonly onSeen: (channelSeq: number) => void;
   readonly onSelectAgent: (agentId: string) => void;
 }) {
   const [body, setBody] = useState('');
   const [clientMessageId, setClientMessageId] = useState<string>();
   const [sending, setSending] = useState(false);
+  const [modelPending, setModelPending] = useState(false);
+  const [selectedModel, setSelectedModel] = useState(status?.model);
   const [error, setError] = useState<string>();
   const [assignmentsOpen, setAssignmentsOpen] = useState(true);
   const streamRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
+  const modelChangeRef = useRef<Promise<boolean>>(Promise.resolve(true));
   const snapshot = state.snapshot;
   const team = snapshot.team;
   const activeBatches = snapshot.batches.filter((batch) => batch.status === 'running').length;
@@ -51,6 +61,13 @@ export function TeamPage({ sessionId, state, onSeen, onSelectAgent }: {
     () => buildTeamMentionAliases(snapshot.members, snapshot.assignments),
     [snapshot.assignments, snapshot.members],
   );
+  const activeAgents = useMemo(
+    () => collectTeamAgentActivities(activity, snapshot.members),
+    [activity, snapshot.members],
+  );
+  const activityKey = activeAgents
+    .map((item) => `${item.agentId}:${item.status}:${item.action}`)
+    .join('|');
   const leader = agentPresentation(team?.leaderAgentId ?? 'main', snapshot.members, snapshot.assignments);
 
   useEffect(() => {
@@ -58,7 +75,29 @@ export function TeamPage({ sessionId, state, onSeen, onSelectAgent }: {
     if (element === null || !nearBottomRef.current) return;
     element.scrollTop = element.scrollHeight;
     onSeen(snapshot.latestChannelSeq);
-  }, [onSeen, snapshot.latestChannelSeq, state.messages.length]);
+  }, [activityKey, onSeen, snapshot.latestChannelSeq, state.messages.length]);
+
+  useEffect(() => {
+    if (!modelPending) setSelectedModel(status?.model);
+  }, [modelPending, status?.model]);
+
+  const changeModel = (model: string) => {
+    setSelectedModel(model);
+    setModelPending(true);
+    setError(undefined);
+    const operation = window.kimiDesktop.turn.setModel(model, sessionId).then(
+      () => true,
+      (reason: unknown) => {
+        setSelectedModel(status?.model);
+        setError(reason instanceof Error ? reason.message : String(reason));
+        modelChangeRef.current = Promise.resolve(true);
+        return false;
+      },
+    ).finally(() => {
+      setModelPending(false);
+    });
+    modelChangeRef.current = operation;
+  };
 
   const send = async () => {
     const message = body.trim();
@@ -68,6 +107,7 @@ export function TeamPage({ sessionId, state, onSeen, onSelectAgent }: {
     setSending(true);
     setError(undefined);
     try {
+      if (!(await modelChangeRef.current)) return;
       await window.kimiDesktop.team.submit(sessionId, message, id);
       setBody('');
       setClientMessageId(undefined);
@@ -120,8 +160,26 @@ export function TeamPage({ sessionId, state, onSeen, onSelectAgent }: {
                 key={message.id}
               />
             ))}
+            {activeAgents.length > 0 && (
+              <TeamActivityStrip
+                activities={activeAgents}
+                assignments={snapshot.assignments}
+                members={snapshot.members}
+                onSelectAgent={onSelectAgent}
+              />
+            )}
           </div>
           <div className="team-composer">
+            <div className="team-composer-toolbar">
+              <ModelSelect
+                value={selectedModel}
+                models={models}
+                disabled={snapshot.state === 'degraded' || modelPending || models.length === 0}
+                title="主代理模型"
+                onChange={changeModel}
+              />
+              <span>{modelPending ? '正在切换模型…' : '主代理将为每个新子 Agent 单独选择执行模型'}</span>
+            </div>
             <textarea
               value={body}
               onChange={(event) => {
@@ -136,7 +194,7 @@ export function TeamPage({ sessionId, state, onSeen, onSelectAgent }: {
               placeholder="发送消息到 general…"
               disabled={snapshot.state === 'degraded'}
             />
-            <button onClick={() => void send()} disabled={sending || body.trim().length === 0 || snapshot.state === 'degraded'} title="发送团队消息">
+            <button onClick={() => void send()} disabled={sending || modelPending || body.trim().length === 0 || snapshot.state === 'degraded'} title="发送团队消息">
               {sending ? <CircleDashed className="spin" size={16} /> : <Send size={16} />}
             </button>
             {error !== undefined && <div className="team-send-error"><CircleAlert size={13} /><span>{error}</span><button onClick={() => void send()}>重试原请求</button></div>}
@@ -175,6 +233,43 @@ export function TeamPage({ sessionId, state, onSeen, onSelectAgent }: {
         </aside>
       </div>
     </section>
+  );
+}
+
+function TeamActivityStrip({ activities, members, assignments, onSelectAgent }: {
+  readonly activities: readonly TeamAgentActivity[];
+  readonly members: readonly TeamMember[];
+  readonly assignments: readonly TeamAssignment[];
+  readonly onSelectAgent: (agentId: string) => void;
+}) {
+  return (
+    <div className="team-activity-strip" aria-label="团队实时动态" aria-live="polite">
+      {activities.map((activity) => {
+        const member = members.find((candidate) => candidate.agentId === activity.agentId);
+        const presentation = agentPresentation(activity.agentId, members, assignments);
+        const profession = member?.role === 'leader' ? '组长' : presentation.profileName ?? '成员';
+        const status = agentActivityLabel(activity.status);
+        return (
+          <button
+            className={classNames('team-activity-bubble', `status-${activity.status}`)}
+            type="button"
+            onClick={() => { onSelectAgent(activity.agentId); }}
+            title={`${presentation.displayName} · ${profession} · ${status} · ${activity.action}`}
+            aria-label={`${presentation.displayName}，${profession}，${status}：${activity.action}`}
+            key={activity.agentId}
+          >
+            <span className="team-activity-icon">
+              {activity.status === 'waiting'
+                ? <Clock3 size={12} />
+                : <CircleDashed className="spin" size={12} />}
+            </span>
+            <strong>{presentation.displayName}</strong>
+            <em>{profession}</em>
+            <span className="team-activity-action">{activity.action}</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -226,7 +321,13 @@ function AssignmentNode({ node, depth, onSelectAgent }: {
         title={assignment.description}
       >
         <AssignmentStatusIcon status={assignment.status} />
-        <span><strong>{assignment.description}</strong><small>{assignment.profileName} · {assignment.displayName ?? assignment.agentId ?? '等待 Agent'}</small></span>
+        <span>
+          <strong>{assignment.description}</strong>
+          <small>
+            {assignment.profileName} · {assignment.displayName ?? assignment.agentId ?? '等待 Agent'}
+            {assignment.model === undefined ? '' : ` · ${assignment.model}`}
+          </small>
+        </span>
         <em className={`assignment-${assignment.status}`}>{assignmentStatusLabel(assignment.status)}</em>
       </button>
       {node.children.map((child) => <AssignmentNode node={child} depth={depth + 1} onSelectAgent={onSelectAgent} key={child.assignment.id} />)}
