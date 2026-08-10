@@ -10,6 +10,9 @@ import { z } from 'zod';
 export const TEAM_CHANNEL_ID = 'general' as const;
 export const TEAM_OPERATION_VERSION = 1 as const;
 export const TEAM_MESSAGE_MAX_BYTES = 8 * 1024;
+export const TEAM_MESSAGE_MAX_ATTACHMENTS = 8;
+export const TEAM_MESSAGE_ATTACHMENT_URL_MAX_LENGTH = 4_096;
+export const TEAM_MESSAGE_ATTACHMENT_NAME_MAX_LENGTH = 255;
 export const TEAM_HISTORY_DEFAULT_LIMIT = 100;
 export const TEAM_HISTORY_MAX_LIMIT = 200;
 export const TEAM_OPERATION_MAX_LIMIT = 1_000;
@@ -105,6 +108,13 @@ export const teamMessageSenderSchema = z.object({
 }).strict();
 export type TeamMessageSender = z.infer<typeof teamMessageSenderSchema>;
 
+export const teamMessageAttachmentSchema = z.object({
+  type: z.literal('image_url'),
+  url: z.string().min(1).max(TEAM_MESSAGE_ATTACHMENT_URL_MAX_LENGTH),
+  name: z.string().min(1).max(TEAM_MESSAGE_ATTACHMENT_NAME_MAX_LENGTH).optional(),
+}).strict();
+export type TeamMessageAttachment = z.infer<typeof teamMessageAttachmentSchema>;
+
 export const teamMessageSchema = z.object({
   id: z.string().min(1),
   teamId: z.string().min(1),
@@ -113,6 +123,7 @@ export const teamMessageSchema = z.object({
   channelSeq: z.number().int().positive(),
   sender: teamMessageSenderSchema,
   body: z.string().min(1),
+  attachments: z.array(teamMessageAttachmentSchema).max(TEAM_MESSAGE_MAX_ATTACHMENTS).optional(),
   clientMessageId: z.string().min(1),
   assignmentId: z.string().min(1).optional(),
   createdAt: z.number().nonnegative(),

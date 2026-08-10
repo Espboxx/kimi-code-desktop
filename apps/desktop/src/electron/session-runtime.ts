@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import {
   type ApprovalRequest,
@@ -9,6 +9,7 @@ import {
   type QuestionResult,
   type Session,
   type TeamMessage,
+  type TeamMessageAttachment,
   type TeamOperation,
   type TeamSnapshot,
   type TodoItem,
@@ -104,7 +105,7 @@ export class SessionRuntime {
   private teamDetected = false;
   private readonly teamSubmissions = new Map<
     string,
-    { readonly body: string; readonly result: Promise<TeamSubmitResult> }
+    { readonly fingerprint: string; readonly result: Promise<TeamSubmitResult> }
   >();
 
   constructor(options: SessionRuntimeOptions) {
@@ -315,23 +316,32 @@ export class SessionRuntime {
     return this.session.getTeamHistory({ beforeChannelSeq, limit });
   }
 
-  sendTeamMessage(body: string, clientMessageId: string): Promise<TeamMessage> {
+  sendTeamMessage(
+    body: string,
+    clientMessageId: string,
+    attachments?: readonly TeamMessageAttachment[],
+  ): Promise<TeamMessage> {
     this.ensureOpen();
-    return this.session.sendTeamMessage({ body, clientMessageId });
+    return this.session.sendTeamMessage({ body, clientMessageId, attachments });
   }
 
-  submitTeamMessage(body: string, clientMessageId: string): Promise<TeamSubmitResult> {
+  submitTeamMessage(
+    body: string,
+    clientMessageId: string,
+    media: readonly DesktopMediaInput[] = [],
+  ): Promise<TeamSubmitResult> {
     this.ensureOpen();
+    const fingerprint = teamSubmissionFingerprint(body, media);
     const existing = this.teamSubmissions.get(clientMessageId);
     if (existing !== undefined) {
-      if (existing.body !== body) throw teamSubmissionConflict(clientMessageId);
+      if (existing.fingerprint !== fingerprint) throw teamSubmissionConflict(clientMessageId);
       return existing.result;
     }
-    const result = this.performTeamSubmission(body, clientMessageId).catch((error) => {
+    const result = this.performTeamSubmission(body, clientMessageId, media).catch((error) => {
       this.teamSubmissions.delete(clientMessageId);
       throw error;
     });
-    this.teamSubmissions.set(clientMessageId, { body, result });
+    this.teamSubmissions.set(clientMessageId, { fingerprint, result });
     if (this.teamSubmissions.size > 256) {
       this.teamSubmissions.delete(this.teamSubmissions.keys().next().value as string);
     }
@@ -632,13 +642,23 @@ export class SessionRuntime {
   private async performTeamSubmission(
     body: string,
     clientMessageId: string,
+    media: readonly DesktopMediaInput[],
   ): Promise<TeamSubmitResult> {
-    const message = await this.sendTeamMessage(body, clientMessageId);
+    const attachments = media.map((item): TeamMessageAttachment => ({
+      type: 'image_url',
+      url: item.displayUrl,
+      name: item.name,
+    }));
+    const message = await this.sendTeamMessage(
+      body,
+      clientMessageId,
+      attachments.length === 0 ? undefined : attachments,
+    );
     const wake = this.busy ? 'steer' : 'swarm';
     await this.submit({
       mode: wake,
       text: teamWakePrompt(message.channelSeq, message.body),
-      media: [],
+      media,
     });
     return { message, wake };
   }
@@ -753,10 +773,21 @@ export function teamWakePrompt(channelSeq: number, body: string): string {
 }
 
 function teamSubmissionConflict(clientMessageId: string): Error {
-  return Object.assign(new Error(`Team message id ${clientMessageId} was reused with a different body`), {
+  return Object.assign(new Error(`Team message id ${clientMessageId} was reused with different content`), {
     code: 'collaboration.idempotency_conflict',
     details: { clientMessageId },
   });
+}
+
+function teamSubmissionFingerprint(body: string, media: readonly DesktopMediaInput[]): string {
+  const hash = createHash('sha256').update(body);
+  for (const item of media) {
+    hash.update('\0').update(item.type);
+    hash.update('\0').update(item.url);
+    hash.update('\0').update(item.displayUrl);
+    hash.update('\0').update(item.name ?? '');
+  }
+  return hash.digest('hex');
 }
 
 function emptyDetails(): SessionDetailsSnapshot {

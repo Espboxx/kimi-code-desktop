@@ -493,6 +493,24 @@ try {
   await page.locator('.team-create-button').click();
   const createTeamDialog = page.locator('.create-team-dialog');
   await createTeamDialog.waitFor({ state: 'visible' });
+  const createTeamLayout = await createTeamDialog.evaluate((dialog) => {
+    const modelControl = dialog.querySelector('.team-create-model .model-control');
+    const permissionOptions = [...dialog.querySelectorAll('.team-permission-option')];
+    if (!(modelControl instanceof HTMLElement)) throw new Error('Team model control is missing');
+    return {
+      modelDirection: getComputedStyle(modelControl).flexDirection,
+      modelHeight: modelControl.getBoundingClientRect().height,
+      permissionDirections: permissionOptions.map((option) => getComputedStyle(option).flexDirection),
+      permissionHeights: permissionOptions.map((option) => option.getBoundingClientRect().height),
+    };
+  });
+  assert.equal(createTeamLayout.modelDirection, 'row', 'Team model control must not stack its icon and select');
+  assert.ok(createTeamLayout.modelHeight <= 36, `Team model control is too tall: ${createTeamLayout.modelHeight}`);
+  assert.deepEqual(createTeamLayout.permissionDirections, ['row', 'row']);
+  assert.ok(
+    createTeamLayout.permissionHeights.every((height) => height <= 64),
+    `Team permission options are too tall: ${createTeamLayout.permissionHeights.join(', ')}`,
+  );
   await createTeamDialog.locator('.team-objective-field textarea').fill(
     'Desktop Team E2E\nLaunch a Team Mode batch and wait for live updates.',
   );
@@ -648,10 +666,47 @@ try {
   assert.match(await page.locator('.team-agent-surface .conversation-header').innerText(), /构建专家/);
   await returnToTeamChannel(page, teamPage);
   const teamComposer = teamPage.locator('.team-composer textarea');
+  assert.match(await teamPage.locator('.team-image-support').innerText(), /支持图片/);
+  const teamImagePastePrevented = await page.evaluate(() => {
+    const encoded = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+    const bytes = Uint8Array.from(atob(encoded), (character) => character.codePointAt(0) ?? 0);
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], 'team-clipboard.png', { type: 'image/png' }));
+    const event = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer });
+    document.querySelector('.team-composer textarea')?.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  assert.equal(teamImagePastePrevented, true, 'Team image-only paste should suppress the browser default');
+  await teamPage.locator('.team-composer-image').filter({ hasText: 'team-clipboard.png' }).waitFor();
+  await teamPage.getByLabel('主代理模型').selectOption('desktop-test');
+  await page.waitForFunction(async (id) => (
+    (await window.kimiDesktop.host.snapshot()).session.status?.model === 'desktop-test'
+      && (await window.kimiDesktop.host.snapshot()).activeSessionId === id
+  ), teamSessionId);
+  assert.match(await teamPage.locator('.team-image-support').innerText(), /不支持图片输入/);
+  assert.equal(await teamPage.locator('.team-message-send').isDisabled(), true);
+  await teamPage.getByLabel('主代理模型').selectOption('desktop-test-alt');
+  await page.waitForFunction(async (id) => (
+    (await window.kimiDesktop.host.snapshot()).session.status?.model === 'desktop-test-alt'
+      && (await window.kimiDesktop.host.snapshot()).activeSessionId === id
+  ), teamSessionId);
+  const requestsBeforeTeamImage = provider.requests.length;
   await teamComposer.fill('User follow-up from the Team channel.');
-  await teamPage.locator('.team-composer button').click();
+  await teamPage.locator('.team-message-send').click();
   const userMessage = teamPage.locator('.team-message.user').filter({ hasText: 'User follow-up from the Team channel.' });
   await userMessage.waitFor();
+  const teamMessageImage = userMessage.locator('.team-message-attachments img');
+  await teamMessageImage.waitFor({ state: 'attached', timeout: 30_000 });
+  assert.equal(await teamMessageImage.evaluate((image) => image.naturalWidth > 0), true);
+  assert.equal(await teamMessageImage.evaluate((image) => image.getBoundingClientRect().width >= 64), true);
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    if (provider.requests.slice(requestsBeforeTeamImage).some((request) => request.hasImage === true)) break;
+    await new Promise((resolvePromise) => { setTimeout(resolvePromise, 100); });
+  }
+  assert.ok(
+    provider.requests.slice(requestsBeforeTeamImage).some((request) => request.hasImage === true),
+    'Team channel image did not reach the selected vision model',
+  );
   assert.equal(await userMessage.evaluate((element) => getComputedStyle(element).flexDirection), 'row-reverse');
   assert.equal(await page.locator('.approval-panel').count(), 0, 'Team messaging must not request tool approval');
   const persistedTeamTabs = await page.evaluate(() => Object.values(localStorage)
@@ -1037,7 +1092,12 @@ try {
     assert.fail(`Team tab did not restore: ${JSON.stringify({ error: error instanceof Error ? error.message : String(error), restoreDiagnostic })}`);
   }
   await restoredTeamTab.click();
-  await restoredPage.locator('.team-page').getByText('User follow-up from the Team channel.', { exact: true }).waitFor();
+  const restoredTeamMessage = restoredPage.locator('.team-message.user').filter({ hasText: 'User follow-up from the Team channel.' });
+  await restoredTeamMessage.getByText('User follow-up from the Team channel.', { exact: true }).waitFor();
+  const restoredTeamImage = restoredTeamMessage.locator('.team-message-attachments img');
+  await restoredTeamImage.waitFor({ state: 'attached', timeout: 30_000 });
+  assert.equal(await restoredTeamImage.evaluate((image) => image.naturalWidth > 0), true);
+  assert.equal(await restoredTeamImage.evaluate((image) => image.getBoundingClientRect().width >= 64), true);
   assert.match(await restoredPage.locator('.team-page').innerText(), /界面侦察/);
   assert.match(await restoredPage.locator('.team-page').innerText(), /构建专家/);
   await selectSessionByTitle(restoredPage, 'Desktop E2E Session');
@@ -1222,7 +1282,7 @@ support_efforts = ["off", "low", "high"]
 provider = "local"
 model = "mock-model-alt"
 max_context_size = 128000
-capabilities = ["thinking", "tool_use"]
+capabilities = ["image_in", "thinking", "tool_use"]
 support_efforts = ["off", "low", "high"]
 
 [loop_control]
@@ -1409,14 +1469,14 @@ async function openSettingsAndVerify(page) {
   await dialog.getByText('fixture-researcher', { exact: true }).waitFor();
   await dialog.getByRole('button', { name: '新建职业', exact: true }).click();
   await dialog.getByLabel('名称（kebab-case）').fill('desktop-reviewer');
-  await dialog.getByLabel('职业描述').fill('Reviews Desktop changes');
-  await dialog.getByLabel('何时使用（可选）').fill('Use for Desktop regressions.');
+  await dialog.getByLabel('子 Agent 简介（主代理分配时可见）').fill('Reviews Desktop changes');
+  await dialog.getByLabel('适用任务（主代理分配时可见，可选）').fill('Use for Desktop regressions.');
   await dialog.getByLabel('系统提示词').fill('Review Desktop changes and report focused risks.');
   await dialog.getByLabel('默认模型角色').selectOption('primary');
   await dialog.getByRole('button', { name: '创建职业', exact: true }).click();
   const managedProfile = dialog.locator('.profile-list-item').filter({ hasText: 'desktop-reviewer' });
   await managedProfile.waitFor({ state: 'visible' });
-  await dialog.getByLabel('职业描述').fill('Reviews Desktop changes and tests');
+  await dialog.getByLabel('子 Agent 简介（主代理分配时可见）').fill('Reviews Desktop changes and tests');
   await dialog.getByRole('button', { name: '保存修改', exact: true }).click();
   await managedProfile.getByText('Reviews Desktop changes and tests', { exact: true }).waitFor();
   page.once('dialog', (confirmation) => void confirmation.accept());

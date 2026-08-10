@@ -16,6 +16,7 @@ import type {
   TeamBatchStatus,
   TeamDelivery,
   TeamMessage,
+  TeamMessageAttachment,
   TeamOperation,
   TeamSnapshot,
 } from './types';
@@ -30,7 +31,11 @@ export interface ISessionCollaborationService {
   snapshot(): Promise<TeamSnapshot>;
   operations(input: { readonly afterSeq: number; readonly limit?: number }): Promise<readonly TeamOperation[]>;
   history(input?: { readonly beforeChannelSeq?: number; readonly limit?: number }): Promise<readonly TeamMessage[]>;
-  sendUserMessage(input: { readonly body: string; readonly clientMessageId: string }): Promise<TeamMessage>;
+  sendUserMessage(input: {
+    readonly body: string;
+    readonly clientMessageId: string;
+    readonly attachments?: readonly TeamMessageAttachment[];
+  }): Promise<TeamMessage>;
   sendAgentMessage(input: {
     readonly agentId: string;
     readonly body: string;

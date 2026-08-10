@@ -59,6 +59,12 @@ export const teamAssignmentSchema = z.object({
   error: z.string().optional(),
 }).strict();
 export type TeamAssignment = z.infer<typeof teamAssignmentSchema>;
+export const teamMessageAttachmentSchema = z.object({
+  type: z.literal('image_url'),
+  url: z.string().min(1).max(4_096),
+  name: z.string().min(1).max(255).optional(),
+}).strict();
+export type TeamMessageAttachment = z.infer<typeof teamMessageAttachmentSchema>;
 export const teamMessageSchema = z.object({
   id: z.string().min(1),
   teamId: z.string().min(1),
@@ -71,6 +77,7 @@ export const teamMessageSchema = z.object({
     role: z.enum(['leader', 'member', 'user']),
   }).strict(),
   body: z.string().min(1),
+  attachments: z.array(teamMessageAttachmentSchema).max(8).optional(),
   clientMessageId: z.string().min(1),
   assignmentId: z.string().min(1).optional(),
   createdAt: z.number().nonnegative(),
@@ -145,7 +152,11 @@ export const sessionCollaborationContract = {
     output: z.array(teamMessageSchema),
   },
   sendUserMessage: {
-    input: z.tuple([z.object({ body: z.string().min(1), clientMessageId: z.string().min(1) }).strict()]),
+    input: z.tuple([z.object({
+      body: z.string().min(1),
+      clientMessageId: z.string().min(1),
+      attachments: z.array(teamMessageAttachmentSchema).max(8).optional(),
+    }).strict()]),
     output: teamMessageSchema,
   },
 } satisfies ServiceContract;

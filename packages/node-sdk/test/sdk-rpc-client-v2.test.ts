@@ -411,8 +411,13 @@ describe('SDKRpcClientV2 (agent-core-v2 wiring MVP)', () => {
         state: 'ready', latestSeq: 1, team: { sessionId: session.id, leaderAgentId: 'main' },
       });
       await expect(session.ensureTeam()).resolves.toMatchObject({ latestSeq: 1, team: team.team });
-      await expect(session.sendTeamMessage({ body: 'hello', clientMessageId: 'client-1' }))
-        .resolves.toMatchObject({ body: 'hello', channelSeq: 1 });
+      const attachments = [{
+        type: 'image_url' as const,
+        url: 'file:///cache/desktop-media/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.png',
+        name: 'image.png',
+      }];
+      await expect(session.sendTeamMessage({ body: 'hello', clientMessageId: 'client-1', attachments }))
+        .resolves.toMatchObject({ body: 'hello', channelSeq: 1, attachments });
     } finally {
       await harness.close();
     }

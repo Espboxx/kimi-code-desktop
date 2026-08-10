@@ -14,6 +14,11 @@ const todoItem = z.object({
   status: z.enum(['pending', 'in_progress', 'done']),
 }).strict();
 const todoItems = z.array(todoItem).max(1_000);
+const teamImageInput = z.object({
+  type: z.literal('image_url'),
+  url: nonEmptyString,
+  name: z.string().trim().min(1).max(255),
+}).strict();
 const profileName = z
   .string()
   .trim()
@@ -165,6 +170,7 @@ export const desktopCommandSchemas = {
     sessionId: nonEmptyString,
     body: z.string().min(1).max(8_192),
     clientMessageId: nonEmptyString,
+    media: z.array(teamImageInput).max(8).default([]),
   }).strict(),
 
   'goal.get': optionalSessionId,

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CircleDashed, ShieldAlert, Users, X } from 'lucide-react';
+import { CircleDashed, ShieldAlert, ShieldCheck, Users, X } from 'lucide-react';
 
 import { classNames } from './ui-utils';
 import { ModelSelect, type SessionModelOption } from './SessionControls';
@@ -80,6 +80,7 @@ export function CreateTeamDialog({ currentPermission, models, defaultModel, onCr
             <legend>工具权限</legend>
             <label className={classNames('team-permission-option', permission === 'current' && 'selected')}>
               <input type="radio" name="team-permission" checked={permission === 'current'} onChange={() => setPermission('current')} />
+              <ShieldCheck className="team-permission-current-icon" size={15} />
               <span><strong>使用当前默认权限</strong><small>{permissionLabel(currentPermission)}；需要时会请求确认。</small></span>
             </label>
             <label className={classNames('team-permission-option', permission === 'yolo' && 'selected')}>

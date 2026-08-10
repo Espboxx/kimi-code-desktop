@@ -29,10 +29,12 @@ import {
   TEAM_DELIVERY_MAX_MESSAGES,
   TEAM_HISTORY_DEFAULT_LIMIT,
   TEAM_HISTORY_MAX_LIMIT,
+  TEAM_MESSAGE_MAX_ATTACHMENTS,
   TEAM_MESSAGE_MAX_BYTES,
   TEAM_OPERATION_MAX_LIMIT,
   TEAM_OPERATION_VERSION,
   teamDisplayNameSchema,
+  teamMessageAttachmentSchema,
   teamOperationSchema,
   type Team,
   type TeamAssignment,
@@ -44,6 +46,7 @@ import {
   type TeamDelivery,
   type TeamMember,
   type TeamMessage,
+  type TeamMessageAttachment,
   type TeamMessageSender,
   type TeamOperation,
   type TeamSnapshot,
@@ -143,8 +146,18 @@ export class SessionCollaborationService extends Service implements ISessionColl
     return this.messages.filter((message) => message.channelSeq < before).slice(-limit);
   }
 
-  sendUserMessage(input: { readonly body: string; readonly clientMessageId: string }): Promise<TeamMessage> {
-    return this.sendMessage({ actorKind: 'user', actorId: USER_ACTOR_ID, body: input.body, clientMessageId: input.clientMessageId });
+  sendUserMessage(input: {
+    readonly body: string;
+    readonly clientMessageId: string;
+    readonly attachments?: readonly TeamMessageAttachment[];
+  }): Promise<TeamMessage> {
+    return this.sendMessage({
+      actorKind: 'user',
+      actorId: USER_ACTOR_ID,
+      body: input.body,
+      clientMessageId: input.clientMessageId,
+      attachments: input.attachments,
+    });
   }
 
   async sendAgentMessage(input: {
@@ -360,7 +373,8 @@ export class SessionCollaborationService extends Service implements ISessionColl
         toSeq = operation.seq;
         continue;
       }
-      const messageBytes = Buffer.byteLength(message.body, 'utf8');
+      const messageBytes = Buffer.byteLength(message.body, 'utf8')
+        + Buffer.byteLength(JSON.stringify(message.attachments ?? []), 'utf8');
       if (
         messages.length >= TEAM_DELIVERY_MAX_MESSAGES ||
         (messages.length > 0 && bytes + messageBytes > TEAM_DELIVERY_MAX_BYTES)
@@ -389,6 +403,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
     readonly actorId: string;
     readonly body: string;
     readonly clientMessageId: string;
+    readonly attachments?: readonly TeamMessageAttachment[];
   }): Promise<TeamMessage> {
     await this.readReady();
     return this.runWrite(async () => {
@@ -402,7 +417,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
       const idempotencyKey = `${sender.actorKind}:${sender.actorId}:${input.clientMessageId}`;
       const existing = this.messageByIdempotencyKey.get(idempotencyKey);
       if (existing !== undefined) {
-        if (existing.body === input.body) return existing;
+        if (existing.body === input.body && sameAttachments(existing.attachments, input.attachments)) return existing;
         throw new Error2(
           ErrorCodes.COLLABORATION_IDEMPOTENCY_CONFLICT,
           'The collaboration message id was already used with different content',
@@ -420,6 +435,14 @@ export class SessionCollaborationService extends Service implements ISessionColl
           { details: { bytes, maxBytes: TEAM_MESSAGE_MAX_BYTES } },
         );
       }
+      const parsedAttachments = teamMessageAttachmentSchema.array().max(TEAM_MESSAGE_MAX_ATTACHMENTS).safeParse(
+        input.attachments ?? [],
+      );
+      if (!parsedAttachments.success) {
+        throw new Error2(ErrorCodes.REQUEST_INVALID, 'Team message attachments are invalid', {
+          details: { issues: parsedAttachments.error.issues },
+        });
+      }
       this.consumeRateToken(`${sender.actorKind}:${sender.actorId}`);
       let committed: TeamMessage | undefined;
       await this.append((seq) => {
@@ -431,6 +454,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
           channelSeq: this.latestChannelSeq + 1,
           sender,
           body: input.body,
+          attachments: parsedAttachments.data.length === 0 ? undefined : parsedAttachments.data,
           clientMessageId: input.clientMessageId,
           assignmentId: input.actorKind === 'agent'
             ? this.activeAssignmentForAgent(input.actorId)?.id
@@ -776,4 +800,19 @@ export class SessionCollaborationService extends Service implements ISessionColl
 function clampInteger(value: number, min: number, max: number): number {
   if (!Number.isInteger(value)) return min;
   return Math.min(max, Math.max(min, value));
+}
+
+function sameAttachments(
+  left: readonly TeamMessageAttachment[] | undefined,
+  right: readonly TeamMessageAttachment[] | undefined,
+): boolean {
+  const first = left ?? [];
+  const second = right ?? [];
+  return first.length === second.length && first.every((attachment, index) => {
+    const candidate = second[index];
+    return candidate !== undefined
+      && attachment.type === candidate.type
+      && attachment.url === candidate.url
+      && attachment.name === candidate.name;
+  });
 }

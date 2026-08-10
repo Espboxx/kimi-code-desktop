@@ -20,6 +20,7 @@ import type { GitDiffArea, SessionListItem } from '../shared/desktop-api';
 import type { DesktopSurface } from '../shared/team-session';
 import { buildAgentActivityForest } from './agent-activity';
 import { Composer } from './Composer';
+import { modelImageInputSupport } from './composer-utils';
 import { CreateTeamDialog } from './CreateTeamDialog';
 import {
   assignWorkbenchTabSurface,
@@ -554,6 +555,7 @@ export function App() {
   const modelOptions = Object.entries(record(snapshot.config.value['models'])).map(([id, raw]) => ({
     id,
     label: text(record(raw)['displayName'], id),
+    imageInput: modelImageInputSupport(raw),
   }));
   const legacyTeamSessionIds = new Set(workbench.tabs.flatMap((tab) => (
     tab.kind === 'team' || tab.kind === 'agent' ? [tab.sessionId] : []

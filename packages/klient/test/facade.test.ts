@@ -298,14 +298,20 @@ describe('session collaboration routing', () => {
     const message = {
       id: 'm1', teamId: 'team-1', channelId: 'general' as const, seq: 2, channelSeq: 1,
       sender: { actorKind: 'user' as const, actorId: 'desktop-user', role: 'user' as const },
-      body: 'Coordinate', clientMessageId: 'retry-1', createdAt: 2,
+      body: 'Coordinate',
+      attachments: [{ type: 'image_url' as const, url: 'file:///cache/desktop-media/image.png', name: 'image.png' }],
+      clientMessageId: 'retry-1', createdAt: 2,
     };
     channel.result = message;
-    await expect(session.collaboration.sendUserMessage({ body: 'Coordinate', clientMessageId: 'retry-1' }))
+    await expect(session.collaboration.sendUserMessage({
+      body: 'Coordinate',
+      clientMessageId: 'retry-1',
+      attachments: message.attachments,
+    }))
       .resolves.toEqual(message);
     expect(channel.calls[2]).toEqual({
       scope: { sessionId: 's1' }, service: 'sessionCollaborationService', method: 'sendUserMessage',
-      args: [{ body: 'Coordinate', clientMessageId: 'retry-1' }],
+      args: [{ body: 'Coordinate', clientMessageId: 'retry-1', attachments: message.attachments }],
     });
 
     const operation = { version: 1 as const, type: 'message.sent' as const, seq: 2, at: 2, message };

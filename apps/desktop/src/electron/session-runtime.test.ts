@@ -300,18 +300,40 @@ describe('SessionRuntime interactions', () => {
     const runtime = createRuntime(fixture);
     await runtime.initialize();
 
-    const first = runtime.submitTeamMessage('Coordinate the implementation', 'client-1');
-    const retry = runtime.submitTeamMessage('Coordinate the implementation', 'client-1');
+    const media = [{
+      type: 'image_url' as const,
+      url: 'data:image/png;base64,iVBORw0KGgo=',
+      displayUrl: 'file:///cache/desktop-media/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.png',
+      name: 'diagram.png',
+    }];
+    const first = runtime.submitTeamMessage('Coordinate the implementation', 'client-1', media);
+    const retry = runtime.submitTeamMessage('Coordinate the implementation', 'client-1', media);
 
     await expect(first).resolves.toMatchObject({ wake: 'swarm', message: { channelSeq: 1 } });
     await expect(retry).resolves.toMatchObject({ wake: 'swarm', message: { channelSeq: 1 } });
     expect(fixture.sendTeamMessage).toHaveBeenCalledOnce();
+    expect(fixture.sendTeamMessage).toHaveBeenCalledWith({
+      body: 'Coordinate the implementation',
+      clientMessageId: 'client-1',
+      attachments: [{
+        type: 'image_url',
+        url: media[0]!.displayUrl,
+        name: 'diagram.png',
+      }],
+    });
     expect(fixture.swarm).toHaveBeenCalledWith([
       { type: 'text', text: teamWakePrompt(1, 'Coordinate the implementation') },
+      { type: 'image_url', imageUrl: { url: media[0]!.url } },
     ]);
     expect(fixture.steer).not.toHaveBeenCalled();
     expect(() => runtime.submitTeamMessage('A different message', 'client-1')).toThrow(
-      /reused with a different body/,
+      /reused with different content/,
+    );
+    expect(() => runtime.submitTeamMessage('Coordinate the implementation', 'client-1', [{
+      ...media[0]!,
+      name: 'other.png',
+    }])).toThrow(
+      /reused with different content/,
     );
     await runtime.close();
   });
@@ -387,9 +409,14 @@ function createSessionFixture(options: SessionFixtureOptions = {}): {
     latestChannelSeq: 0,
   };
   const ensureTeam = vi.fn(async () => ensuredTeam);
-  const sendTeamMessage = vi.fn(async ({ body, clientMessageId }: {
+  const sendTeamMessage = vi.fn(async ({ body, clientMessageId, attachments }: {
     readonly body: string;
     readonly clientMessageId: string;
+    readonly attachments?: readonly {
+      readonly type: 'image_url';
+      readonly url: string;
+      readonly name?: string;
+    }[];
   }) => ({
     id: `message-${clientMessageId}`,
     teamId: ensuredTeam.team?.id ?? 'team-1',
@@ -398,6 +425,7 @@ function createSessionFixture(options: SessionFixtureOptions = {}): {
     channelSeq: 1,
     sender: { actorKind: 'user' as const, actorId: 'desktop-user', role: 'user' as const },
     body,
+    attachments,
     clientMessageId,
     createdAt: 2,
   }));

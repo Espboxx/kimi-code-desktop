@@ -4490,7 +4490,7 @@ describe('v1↔v2 residual surface parity', () => {
     }
   });
 
-  it('setSwarmMode toggles swarm mode with the same reminder lifecycle on both engines', async () => {
+  it('setSwarmMode preserves the v2 Team coordination reminder for tool-triggered teams', async () => {
     const pair = await makeSessionParityPair();
     try {
       await createOnBoth(pair, { id: 'session_parity_swarm' });
@@ -4547,7 +4547,9 @@ describe('v1↔v2 residual surface parity', () => {
       expect(v1Idle.history).toHaveLength(0);
       expect(v2Idle.history).toHaveLength(0);
 
-      // The `tool` trigger injects no reminder on either engine.
+      // v1 keeps the `tool` trigger silent. v2 deliberately injects its Team
+      // coordination protocol so an AgentSwarm-launched leader knows to use
+      // TeamStatus, TeamSend, and TeamWait while the mode is active.
       await Promise.all([
         pair.v1.setSwarmMode({ ...input, enabled: true, trigger: 'tool' }),
         pair.v2.setSwarmMode({ ...input, enabled: true, trigger: 'tool' }),
@@ -4557,11 +4559,15 @@ describe('v1↔v2 residual surface parity', () => {
       expect(v2Tool.swarmMode).toBe(true);
       const [v1ToolHistory, v2ToolHistory] = await historyOnBoth();
       expect(v1ToolHistory.history).toHaveLength(0);
-      expect(v2ToolHistory.history).toHaveLength(0);
+      expect(v2ToolHistory.history).toHaveLength(1);
+      expect(JSON.stringify(v2ToolHistory.history[0])).toContain('TeamWait');
       await Promise.all([
         pair.v1.setSwarmMode({ ...input, enabled: false }),
         pair.v2.setSwarmMode({ ...input, enabled: false }),
       ]);
+      const [v1ToolExited, v2ToolExited] = await historyOnBoth();
+      expect(v1ToolExited.history).toHaveLength(0);
+      expect(v2ToolExited.history).toHaveLength(0);
     } finally {
       await closeSessionPair(pair);
     }

@@ -1,11 +1,13 @@
 import { Bot, ChevronDown, Pencil, Shield, Sparkles } from 'lucide-react';
 
 import type { SessionStatusSnapshot } from '../shared/desktop-api';
+import type { ImageInputSupport } from './composer-utils';
 import { classNames } from './ui-utils';
 
 export interface SessionModelOption {
   readonly id: string;
   readonly label: string;
+  readonly imageInput?: ImageInputSupport;
 }
 
 export function ModelSelect({ value, models, disabled, onChange, title = '模型' }: {

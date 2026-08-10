@@ -25,6 +25,7 @@ import {
 import type { SessionStatusSnapshot } from '../shared/desktop-api';
 import {
   cacheMetrics,
+  attachmentProblem,
   clampComposerHeight,
   COMPOSER_HEIGHT_STORAGE_KEY,
   COMPOSER_IMAGE_ACCEPT,
@@ -32,9 +33,10 @@ import {
   contextPercentage,
   contextProgress,
   formatTokenCount,
-  imageFileError,
   MIN_COMPOSER_HEIGHT,
   parseComposerHeight,
+  readImageAttachment,
+  type ComposerAttachmentError,
 } from './composer-utils';
 import { SessionControls, type SessionModelOption } from './SessionControls';
 import { classNames, record, text } from './ui-utils';
@@ -49,11 +51,6 @@ interface ComposerMedia {
 interface ComposerAttachment extends ComposerMedia {
   readonly id: string;
   readonly label: string;
-}
-
-interface ComposerAttachmentError {
-  readonly code: string;
-  readonly message: string;
 }
 
 interface CommandSuggestion {
@@ -433,36 +430,6 @@ function initialEditorHeight(): number {
     return parseComposerHeight(window.localStorage.getItem(COMPOSER_HEIGHT_STORAGE_KEY), window.innerHeight);
   } catch {
     return parseComposerHeight(null, window.innerHeight);
-  }
-}
-
-async function readImageAttachment(file: File): Promise<ComposerAttachment> {
-  const validationError = imageFileError(file);
-  if (validationError !== undefined) throw new MediaAttachmentError(validationError.code, validationError.message);
-  const url = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.addEventListener('load', () => {
-      if (typeof reader.result === 'string') resolve(reader.result);
-      else reject(new Error(`无法读取图片：${file.name}`));
-    }, { once: true });
-    reader.addEventListener('error', () => {
-      reject(new Error(`无法读取图片：${file.name}`));
-    }, { once: true });
-    reader.readAsDataURL(file);
-  });
-  return { id: attachmentId(), type: 'image_url', url, label: file.name };
-}
-
-function attachmentProblem(reason: unknown): ComposerAttachmentError {
-  if (reason instanceof MediaAttachmentError) return { code: reason.code, message: reason.message };
-  if (reason instanceof Error) return { code: 'media.read_failed', message: reason.message };
-  return { code: 'media.read_failed', message: String(reason) };
-}
-
-class MediaAttachmentError extends Error {
-  constructor(readonly code: string, message: string) {
-    super(message);
-    this.name = 'MediaAttachmentError';
   }
 }
 

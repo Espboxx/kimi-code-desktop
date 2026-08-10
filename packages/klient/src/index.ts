@@ -149,6 +149,7 @@ export type {
   TeamBatchStatus,
   TeamMember,
   TeamMessage,
+  TeamMessageAttachment,
   TeamOperation,
   TeamSnapshot,
 } from './contract/session/collaboration.js';

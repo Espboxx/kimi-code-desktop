@@ -24,7 +24,7 @@ export const AgentSwarmStructuredItemSchema = z.object({
     'Short unique persistent name for this Team member. Required for new agents in Team Mode. Use 1-24 letters or numbers, with underscores and hyphens allowed after the first character. Do not use main or agent-N.',
   ),
   subagent_type: z.string().trim().min(1).describe(
-    'Agent profile selected for this specific task.',
+    'Agent profession selected for this task. Compare the listed Introduction and Best for guidance before choosing.',
   ),
   model: z.string().trim().min(1).optional().describe(
     'Exact configured model alias for this task. Required per new item in Team Mode when more than one model is available; overrides the batch-level model.',
@@ -64,7 +64,7 @@ export const AgentSwarmToolInputSchema = z
       .max(MAX_AGENT_SWARM_SUBAGENTS)
       .optional()
       .describe(
-        `Values used to fill ${PROMPT_TEMPLATE_PLACEHOLDER}. Each item launches one new subagent. Team Mode requires object items with display_name and subagent_type so every assignment has a persistent name and an explicitly selected profession.`,
+        `Values used to fill ${PROMPT_TEMPLATE_PLACEHOLDER}. Each item launches one new subagent. Team Mode requires object items with display_name and subagent_type so every assignment has a persistent name and a profession selected from its Introduction and Best for guidance.`,
       ),
     resume_agent_ids: z
       .record(z.string().trim().min(1), z.string().trim().min(1))

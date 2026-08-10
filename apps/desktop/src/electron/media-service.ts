@@ -9,6 +9,7 @@ export interface DesktopMediaInput {
   readonly type: 'image_url' | 'video_url';
   readonly url: string;
   readonly displayUrl: string;
+  readonly name?: string;
 }
 
 interface PrepareDesktopMediaOptions {
@@ -38,25 +39,25 @@ const EXTENSION_BY_MIME: Readonly<Record<string, string>> = {
 };
 
 export async function prepareDesktopMedia(
-  input: { readonly type: DesktopMediaInput['type']; readonly url: string },
+  input: { readonly type: DesktopMediaInput['type']; readonly url: string; readonly name?: string },
   options: PrepareDesktopMediaOptions,
 ): Promise<DesktopMediaInput> {
   const value = input.url.trim();
   if (value.length === 0) throw new Error('Media URL or path must not be empty');
 
   if (isAbsolute(value)) {
-    return prepareLocalMedia(input.type, value, options.allowedRoots);
+    return prepareLocalMedia(input, value, options.allowedRoots);
   }
 
   let url: URL | undefined;
   try {
     url = new URL(value);
   } catch {
-    return prepareLocalMedia(input.type, resolve(options.workspaceRoot, value), options.allowedRoots);
+    return prepareLocalMedia(input, resolve(options.workspaceRoot, value), options.allowedRoots);
   }
 
   if (url.protocol === 'file:') {
-    return prepareLocalMedia(input.type, fileURLToPath(url), options.allowedRoots);
+    return prepareLocalMedia(input, fileURLToPath(url), options.allowedRoots);
   }
   if (url.protocol === 'data:') {
     const decoded = decodeInlineMedia(value, input.type);
@@ -115,13 +116,13 @@ export async function resolveAllowedPath(
 }
 
 async function prepareLocalMedia(
-  type: DesktopMediaInput['type'],
-  input: string,
+  media: { readonly type: DesktopMediaInput['type']; readonly name?: string },
+  inputPath: string,
   allowedRoots: readonly string[],
 ): Promise<DesktopMediaInput> {
-  const path = await resolveAllowedPath(input, allowedRoots);
+  const path = await resolveAllowedPath(inputPath, allowedRoots);
   const displayUrl = pathToFileURL(path).href;
-  if (type === 'video_url') return { type, url: displayUrl, displayUrl };
+  if (media.type === 'video_url') return { ...media, url: displayUrl, displayUrl };
 
   const mimeType = IMAGE_MIME_BY_EXTENSION[extname(path).toLowerCase()];
   if (mimeType === undefined) {
@@ -132,7 +133,7 @@ async function prepareLocalMedia(
     throw new Error(`Image size must be between 1 byte and ${String(MAX_INLINE_MEDIA_BYTES)} bytes`);
   }
   return {
-    type,
+    ...media,
     url: `data:${mimeType};base64,${bytes.toString('base64')}`,
     displayUrl,
   };

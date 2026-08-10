@@ -14,6 +14,7 @@ export type {
   TeamBatchStatus,
   TeamMember,
   TeamMessage,
+  TeamMessageAttachment,
   TeamOperation,
   TeamSnapshot,
 } from './team-types';
@@ -213,6 +214,12 @@ export interface DesktopSessionCreateOptions {
 export interface TeamSubmitResult {
   readonly message: TeamMessage;
   readonly wake: 'swarm' | 'steer';
+}
+
+export interface TeamImageInput {
+  readonly type: 'image_url';
+  readonly url: string;
+  readonly name: string;
 }
 
 export interface TokenUsageSnapshot {
@@ -465,7 +472,12 @@ export interface KimiDesktopApi {
     operations(sessionId: string, afterSeq: number, limit?: number): Promise<readonly TeamOperation[]>;
     history(sessionId: string, beforeChannelSeq?: number, limit?: number): Promise<readonly TeamMessage[]>;
     send(sessionId: string, body: string, clientMessageId: string): Promise<TeamMessage>;
-    submit(sessionId: string, body: string, clientMessageId: string): Promise<TeamSubmitResult>;
+    submit(
+      sessionId: string,
+      body: string,
+      clientMessageId: string,
+      media?: readonly TeamImageInput[],
+    ): Promise<TeamSubmitResult>;
   };
   readonly goal: {
     get(sessionId?: string): Promise<unknown>;
@@ -594,7 +606,8 @@ export function createKimiDesktopApi(invoke: Invoke, subscribe: KimiDesktopApi['
       operations: (sessionId, afterSeq, limit) => call('team', 'operations', { sessionId, afterSeq, limit }),
       history: (sessionId, beforeChannelSeq, limit) => call('team', 'history', { sessionId, beforeChannelSeq, limit }),
       send: (sessionId, body, clientMessageId) => call('team', 'send', { sessionId, body, clientMessageId }),
-      submit: (sessionId, body, clientMessageId) => call('team', 'submit', { sessionId, body, clientMessageId }),
+      submit: (sessionId, body, clientMessageId, media = []) =>
+        call('team', 'submit', { sessionId, body, clientMessageId, media }),
     },
     goal: {
       get: (sessionId) => call('goal', 'get', { sessionId }),

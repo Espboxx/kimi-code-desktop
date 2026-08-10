@@ -22,6 +22,20 @@ export interface ComposerImageValidationError {
   readonly message: string;
 }
 
+export interface ComposerImageAttachment {
+  readonly id: string;
+  readonly type: 'image_url';
+  readonly url: string;
+  readonly label: string;
+}
+
+export interface ComposerAttachmentError {
+  readonly code: string;
+  readonly message: string;
+}
+
+export type ImageInputSupport = 'supported' | 'unsupported' | 'unknown';
+
 export function contextPercentage(ratio: number): number {
   if (!Number.isFinite(ratio)) return 0;
   return Math.max(0, Math.round(ratio * 100));
@@ -88,6 +102,50 @@ export function imageFileError(file: Pick<File, 'name' | 'size' | 'type'>): Comp
     };
   }
   return undefined;
+}
+
+export async function readImageAttachment(file: File): Promise<ComposerImageAttachment> {
+  const validationError = imageFileError(file);
+  if (validationError !== undefined) {
+    throw new MediaAttachmentError(validationError.code, validationError.message);
+  }
+  const url = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => {
+      if (typeof reader.result === 'string') resolve(reader.result);
+      else reject(new Error(`无法读取图片：${file.name}`));
+    }, { once: true });
+    reader.addEventListener('error', () => {
+      reject(new Error(`无法读取图片：${file.name}`));
+    }, { once: true });
+    reader.readAsDataURL(file);
+  });
+  return { id: globalThis.crypto.randomUUID(), type: 'image_url', url, label: file.name };
+}
+
+export function attachmentProblem(reason: unknown): ComposerAttachmentError {
+  if (reason instanceof MediaAttachmentError) return { code: reason.code, message: reason.message };
+  if (reason instanceof Error) return { code: 'media.read_failed', message: reason.message };
+  return { code: 'media.read_failed', message: String(reason) };
+}
+
+export function modelImageInputSupport(raw: unknown): ImageInputSupport {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return 'unknown';
+  const model = raw as Record<string, unknown>;
+  const overrides = model['overrides'];
+  const overrideCapabilities = overrides !== null && typeof overrides === 'object' && !Array.isArray(overrides)
+    ? (overrides as Record<string, unknown>)['capabilities']
+    : undefined;
+  const capabilities = Array.isArray(overrideCapabilities) ? overrideCapabilities : model['capabilities'];
+  if (!Array.isArray(capabilities)) return 'unknown';
+  return capabilities.includes('image_in') ? 'supported' : 'unsupported';
+}
+
+class MediaAttachmentError extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message);
+    this.name = 'MediaAttachmentError';
+  }
 }
 
 function tokenCount(value: number): number {

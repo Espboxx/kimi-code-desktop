@@ -38,6 +38,7 @@ import { IModelCatalog } from '#/kosong/model/catalog';
 import { ISessionSwarmService, type SessionSwarmTask } from '#/session/swarm/sessionSwarm';
 import { ISessionAgentProfileCatalog } from '#/session/sessionAgentProfileCatalog/sessionAgentProfileCatalog';
 import { IAgentProfileService } from '#/agent/profile/profile';
+import type { AgentProfile } from '#/app/agentProfileCatalog/agentProfileCatalog';
 import {
   subagentAllowlistFor,
   subagentTypeNotAllowedMessage,
@@ -440,14 +441,23 @@ export class AgentSwarmTool implements IAgentSwarmTool {
       (candidate) => allowlist === undefined || allowlist.includes(candidate.name),
     );
     return [
-      'Available profession profiles (choose subagent_type independently for each Team item):',
-      ...profiles.map((candidate) => {
-        const guidance = candidate.whenToUse ?? candidate.description ?? 'No usage guidance provided.';
-        return `- ${candidate.name}: ${guidance}`;
-      }),
+      'Available profession profiles (compare each Introduction and Best for before choosing subagent_type for a Team item):',
+      ...profiles.map(renderAvailableProfile),
       '- In Team Mode, if none fits, the leader can call AgentProfileCreate first and then use the newly created profile name.',
     ].join('\n');
   }
+}
+
+function renderAvailableProfile(
+  profile: Pick<AgentProfile, 'name' | 'description' | 'whenToUse'>,
+): string {
+  const introduction = profile.description?.trim() || 'No introduction provided.';
+  const bestFor = profile.whenToUse?.trim();
+  return [
+    `- ${profile.name}`,
+    `  Introduction: ${introduction}`,
+    bestFor === undefined || bestFor.length === 0 ? undefined : `  Best for: ${bestFor}`,
+  ].filter((line): line is string => line !== undefined).join('\n');
 }
 
 function renderSwarmLaunchReceipt(

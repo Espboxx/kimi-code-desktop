@@ -37,6 +37,7 @@ export type {
   TeamBatchStatus,
   TeamMember,
   TeamMessage,
+  TeamMessageAttachment,
   TeamOperation,
   TeamSnapshot,
 } from '@moonshot-ai/klient';

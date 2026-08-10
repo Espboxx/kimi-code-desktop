@@ -256,7 +256,7 @@ function ProfileSettings({ snapshot }: { readonly snapshot: DesktopSnapshot }) {
   const save = async () => {
     const draft = profileDraft(form);
     if (draft.name.length === 0 || draft.description.length === 0 || draft.prompt.length === 0) {
-      setError('名称、描述和系统提示词不能为空。');
+      setError('名称、子 Agent 简介和系统提示词不能为空。');
       return;
     }
     setSaving(true);
@@ -315,7 +315,7 @@ function ProfileSettings({ snapshot }: { readonly snapshot: DesktopSnapshot }) {
   }
 
   return (
-    <SettingsPage title="Agent 职业" description="工作区职业保存在 .kimi-code/agents；用户职业可跨工作区复用。插件与内置职业只读。">
+    <SettingsPage title="Agent 职业" description="每个职业的子 Agent 简介和适用任务会直接提供给主代理用于分工。工作区职业保存在 .kimi-code/agents；用户职业可跨工作区复用；插件与内置职业只读。">
       <section className="settings-section profile-manager-section">
         <div className="section-title-row">
           <h3><BriefcaseBusiness size={14} />职业目录</h3>
@@ -336,7 +336,7 @@ function ProfileSettings({ snapshot }: { readonly snapshot: DesktopSnapshot }) {
                   <strong>{profile.name}</strong>
                   <em className={classNames('profile-effective', profile.effective && 'active')}>{profile.effective ? '生效' : '被覆盖'}</em>
                 </span>
-                <small>{profile.description || '无描述'}</small>
+                <small>{profile.description || '暂无简介'}</small>
                 <span className="profile-meta"><code>{profile.sourceId}</code>{profile.editable ? '可编辑' : '只读'}</span>
               </button>
             ))}
@@ -348,8 +348,8 @@ function ProfileSettings({ snapshot }: { readonly snapshot: DesktopSnapshot }) {
                 <div className="form-grid profile-form-grid">
                   <label><span>名称（kebab-case）</span><input disabled={!creating} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="code-reviewer" /></label>
                   <label><span>保存范围</span><select disabled={!creating} value={form.scope} onChange={(event) => setForm({ ...form, scope: event.target.value as ProfileFormState['scope'] })}><option value="workspace">当前工作区</option><option value="user">所有工作区</option></select></label>
-                  <label className="span-two"><span>职业描述</span><input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="负责审查实现质量和回归风险" /></label>
-                  <label className="span-two"><span>何时使用（可选）</span><input value={form.whenToUse} onChange={(event) => setForm({ ...form, whenToUse: event.target.value })} placeholder="在提交代码前执行" /></label>
+                  <label className="span-two"><span>子 Agent 简介（主代理分配时可见）</span><input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="擅长审查实现质量、定位回归风险并给出修复建议" /></label>
+                  <label className="span-two"><span>适用任务（主代理分配时可见，可选）</span><input value={form.whenToUse} onChange={(event) => setForm({ ...form, whenToUse: event.target.value })} placeholder="代码审查、回归分析和合并前质量检查" /></label>
                   <label><span>默认模型角色</span><select value={form.modelPreference} onChange={(event) => setForm({ ...form, modelPreference: event.target.value as ProfileFormState['modelPreference'] })}><option value="auto">自动</option><option value="primary">主模型</option><option value="secondary">辅助模型</option></select></label>
                   <label className="profile-checkbox"><span>覆盖同名内置职业</span><input type="checkbox" checked={form.override} onChange={(event) => setForm({ ...form, override: event.target.checked })} /></label>
                   <label className="span-two"><span>允许的工具（逗号或换行分隔，空白表示不限制）</span><textarea rows={2} value={form.tools} onChange={(event) => setForm({ ...form, tools: event.target.value })} placeholder="Read, Grep, Bash" /></label>
@@ -367,7 +367,7 @@ function ProfileSettings({ snapshot }: { readonly snapshot: DesktopSnapshot }) {
               <div className="profile-readonly">
                 <BriefcaseBusiness size={24} />
                 <h3>{selected.name}</h3>
-                <p>{selected.description || '无描述'}</p>
+                <p>{selected.description || '暂无简介'}</p>
                 {selected.whenToUse !== undefined && <p><strong>使用时机：</strong>{selected.whenToUse}</p>}
                 <dl><dt>来源</dt><dd>{selected.sourceId}</dd><dt>状态</dt><dd>{selected.effective ? '当前生效' : '被更高优先级职业覆盖'}</dd><dt>模型偏好</dt><dd>{selected.modelPreference}</dd></dl>
                 <div className="dialog-notice">该职业来自内置代码、插件、兼容目录或显式启动参数，只能查看，不能在此修改。</div>

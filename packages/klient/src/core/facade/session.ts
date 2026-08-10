@@ -29,6 +29,7 @@ import type { SkillSummary } from '@moonshot-ai/agent-core-v2/app/skillCatalog/t
 import type { TodoItem } from '@moonshot-ai/agent-core-v2/session/todo/todoItem';
 import type {
   TeamMessage,
+  TeamMessageAttachment,
   TeamOperation,
   TeamSnapshot,
 } from '../../contract/session/collaboration.js';
@@ -93,7 +94,11 @@ export interface SessionCollaborationFacade {
   snapshot(): Promise<TeamSnapshot>;
   operations(input: { readonly afterSeq: number; readonly limit?: number }): Promise<readonly TeamOperation[]>;
   history(input?: { readonly beforeChannelSeq?: number; readonly limit?: number }): Promise<readonly TeamMessage[]>;
-  sendUserMessage(input: { readonly body: string; readonly clientMessageId: string }): Promise<TeamMessage>;
+  sendUserMessage(input: {
+    readonly body: string;
+    readonly clientMessageId: string;
+    readonly attachments?: readonly TeamMessageAttachment[];
+  }): Promise<TeamMessage>;
 }
 
 /**

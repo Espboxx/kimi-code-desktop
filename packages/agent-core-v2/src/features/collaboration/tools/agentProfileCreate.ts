@@ -19,8 +19,12 @@ const profileStringListSchema = z.array(z.string().trim().min(1)).max(128);
 
 export const AgentProfileCreateInputSchema = z.object({
   name: profileNameSchema.describe('Reusable kebab-case profile name.'),
-  description: z.string().trim().min(1).max(240),
-  when_to_use: z.string().trim().min(1).max(500),
+  description: z.string().trim().min(1).max(240).describe(
+    'Short introduction describing the strengths of this profession. The Team leader reads it before assigning work.',
+  ),
+  when_to_use: z.string().trim().min(1).max(500).describe(
+    'Tasks and situations this profession is best suited for. The Team leader uses it together with the introduction.',
+  ),
   prompt: z.string().trim().min(1).max(64 * 1024),
   scope: z.enum(['workspace', 'user']).optional().default('workspace'),
   tools: profileStringListSchema.optional(),

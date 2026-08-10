@@ -43,6 +43,12 @@ export interface TeamAssignment {
   readonly error?: string;
 }
 
+export interface TeamMessageAttachment {
+  readonly type: 'image_url';
+  readonly url: string;
+  readonly name?: string;
+}
+
 export interface TeamMessage {
   readonly id: string;
   readonly teamId: string;
@@ -55,6 +61,7 @@ export interface TeamMessage {
     readonly role: 'leader' | 'member' | 'user';
   };
   readonly body: string;
+  readonly attachments?: readonly TeamMessageAttachment[];
   readonly clientMessageId: string;
   readonly assignmentId?: string;
   readonly createdAt: number;

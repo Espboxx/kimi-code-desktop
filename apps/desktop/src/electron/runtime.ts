@@ -685,9 +685,20 @@ export class KimiDesktopRuntime {
         return this.runtimeFor(input.sessionId).sendTeamMessage(input.body, input.clientMessageId);
       }
       case 'team.submit': {
-        const input = payload<{ sessionId: string; body: string; clientMessageId: string }>(command);
+        const input = payload<{
+          sessionId: string;
+          body: string;
+          clientMessageId: string;
+          media: { type: 'image_url'; url: string; name: string }[];
+        }>(command);
         await this.ensureDesktopTeamCollaboration();
-        return this.runtimeFor(input.sessionId).submitTeamMessage(input.body, input.clientMessageId);
+        const runtime = this.runtimeFor(input.sessionId);
+        const media = await Promise.all(input.media.map((item) => prepareDesktopMedia(item, {
+          workspaceRoot: this.requireWorkspaceRoot(),
+          allowedRoots: this.allowedRoots(runtime),
+          cacheDir: join(this.harness.homeDir, 'cache', 'desktop-media'),
+        })));
+        return runtime.submitTeamMessage(input.body, input.clientMessageId, media);
       }
 
       case 'goal.get':

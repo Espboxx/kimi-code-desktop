@@ -310,6 +310,7 @@ import type {
   TelemetryClient,
   TodoItem,
   TeamMessage,
+  TeamMessageAttachment,
   TeamOperation,
   TeamSnapshot,
   Unsubscribe,
@@ -1558,12 +1559,17 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
   }
 
   async sendTeamMessage(
-    input: SessionIdRpcInput & { readonly body: string; readonly clientMessageId: string },
+    input: SessionIdRpcInput & {
+      readonly body: string;
+      readonly clientMessageId: string;
+      readonly attachments?: readonly TeamMessageAttachment[];
+    },
   ): Promise<TeamMessage> {
     await this.agentFacade(input.sessionId);
     return this.klient.session(input.sessionId).collaboration.sendUserMessage({
       body: input.body,
       clientMessageId: input.clientMessageId,
+      attachments: input.attachments,
     });
   }
 

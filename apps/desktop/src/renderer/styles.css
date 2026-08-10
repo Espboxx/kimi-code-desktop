@@ -3891,6 +3891,26 @@ progress {
   line-height: 1.58;
 }
 
+.team-message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.team-message-attachments img {
+  display: block;
+  width: min(280px, 100%);
+  max-width: min(320px, 100%);
+  height: auto;
+  min-height: 64px;
+  max-height: 220px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 8px;
+  background: var(--panel);
+  object-fit: contain;
+}
+
 .team-message-bubble.markdown-body p,
 .team-message-bubble.markdown-body li,
 .team-message-bubble.markdown-body blockquote {
@@ -3996,7 +4016,7 @@ progress {
 .team-composer {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 36px;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px;
   padding: 9px 12px 11px;
   border-top: 1px solid var(--border);
@@ -4020,6 +4040,84 @@ progress {
   white-space: nowrap;
 }
 
+.team-composer-toolbar > .team-image-support.support-supported {
+  color: var(--accent-strong);
+}
+
+.team-composer-toolbar > .team-image-support.support-unsupported {
+  color: var(--red);
+}
+
+.team-composer-images {
+  display: flex;
+  min-width: 0;
+  grid-column: 1 / -1;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.team-composer-image {
+  position: relative;
+  display: grid;
+  min-width: 128px;
+  max-width: 180px;
+  height: 46px;
+  grid-template-columns: 42px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 5px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel);
+}
+
+.team-composer-image img {
+  width: 42px;
+  height: 40px;
+  border-radius: 5px;
+  object-fit: cover;
+}
+
+.team-composer-image span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-composer-image button,
+.team-attachment-error button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.team-attachment-error {
+  display: flex;
+  min-width: 0;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: 6px;
+  color: var(--red);
+  font-size: 9px;
+}
+
+.team-attachment-error span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-attachment-error strong {
+  margin-right: 5px;
+  font-family: var(--mono);
+}
+
 .team-composer-toolbar .model-control {
   max-width: min(310px, 58%);
 }
@@ -4030,10 +4128,23 @@ progress {
   resize: vertical;
 }
 
-.team-composer > button {
+.team-composer-actions {
+  display: flex;
   align-self: end;
+  gap: 5px;
+}
+
+.team-composer-actions button {
+  width: 34px;
   height: 34px;
   padding: 0;
+}
+
+.team-composer-actions .team-image-picker {
+  color: var(--muted);
+}
+
+.team-composer-actions .team-message-send {
   color: var(--accent-strong);
 }
 
@@ -4247,7 +4358,14 @@ progress {
 }
 
 .create-team-dialog {
+  grid-template-rows: 43px minmax(0, 1fr) 48px;
   width: min(560px, calc(100vw - 36px));
+  max-height: min(640px, calc(100vh - 36px));
+}
+
+.create-team-dialog .dialog-body {
+  gap: 16px;
+  overflow-y: auto;
 }
 
 .team-objective-field {
@@ -4274,7 +4392,6 @@ progress {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 7px 10px;
-  margin-top: 14px;
 }
 
 .team-create-model > span {
@@ -4290,20 +4407,34 @@ progress {
   font-size: 9px;
 }
 
+.team-create-model .model-control {
+  width: 100%;
+  height: 32px;
+  flex-direction: row;
+  gap: 7px;
+}
+
+.team-create-model .model-control select {
+  width: 100%;
+  max-width: none;
+  height: 30px;
+}
+
 .team-permission-options {
   display: grid;
   gap: 7px;
-  margin: 16px 0 0;
+  margin: 0;
   padding: 0;
   border: 0;
 }
 
 .team-permission-options legend { margin-bottom: 7px; }
 
-.team-permission-option {
-  display: flex !important;
+.dialog-body .team-permission-option {
+  display: flex;
   min-height: 54px;
   align-items: center;
+  flex-direction: row;
   gap: 9px;
   padding: 8px 10px;
   border: 1px solid var(--border);
@@ -4317,11 +4448,32 @@ progress {
   background: var(--accent-bg);
 }
 
-.team-permission-option input { flex: 0 0 auto; }
+.team-permission-option input {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  margin: 0;
+}
 .team-permission-option > svg { flex: 0 0 auto; color: var(--amber); }
-.team-permission-option > span { display: grid; gap: 2px; }
+.team-permission-option > .team-permission-current-icon { color: var(--accent-strong); }
+.team-permission-option > span {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 2px;
+}
 .team-permission-option strong { font-size: 11px; }
 .team-permission-option small { color: var(--muted); font-size: 10px; }
+
+@media (max-width: 480px) {
+  .team-create-model {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .team-create-model > small {
+    grid-column: 1;
+  }
+}
 
 .workbench-tab-close {
   display: grid;

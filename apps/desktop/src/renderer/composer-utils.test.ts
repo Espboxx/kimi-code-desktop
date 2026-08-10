@@ -10,6 +10,7 @@ import {
   formatTokenCount,
   imageFileError,
   MAX_INLINE_IMAGE_BYTES,
+  modelImageInputSupport,
   parseComposerHeight,
 } from './composer-utils';
 
@@ -60,5 +61,19 @@ describe('composer images', () => {
     expect(imageFileError({ name: 'notes.txt', type: 'text/plain', size: 10 })).toMatchObject({ code: 'media.unsupported_type' });
     expect(imageFileError({ name: 'empty.png', type: 'image/png', size: 0 })).toMatchObject({ code: 'media.invalid_size' });
     expect(imageFileError({ name: 'large.png', type: 'image/png', size: MAX_INLINE_IMAGE_BYTES + 1 })).toMatchObject({ code: 'media.invalid_size' });
+  });
+
+  it('distinguishes declared image support from unsupported and unknown models', () => {
+    expect(modelImageInputSupport({ capabilities: ['image_in', 'tool_use'] })).toBe('supported');
+    expect(modelImageInputSupport({ capabilities: ['thinking', 'tool_use'] })).toBe('unsupported');
+    expect(modelImageInputSupport({ provider: 'local' })).toBe('unknown');
+    expect(modelImageInputSupport({
+      capabilities: ['image_in'],
+      overrides: { capabilities: ['tool_use'] },
+    })).toBe('unsupported');
+    expect(modelImageInputSupport({
+      capabilities: ['tool_use'],
+      overrides: { capabilities: ['image_in'] },
+    })).toBe('supported');
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
@@ -10,9 +10,11 @@ import {
   CircleCheck,
   CircleDashed,
   Clock3,
+  ImagePlus,
   Send,
   UserRound,
   Users,
+  X,
 } from 'lucide-react';
 
 import type {
@@ -24,6 +26,13 @@ import type {
   SessionStatusSnapshot,
 } from '../shared/desktop-api';
 import { agentActivityLabel, type AgentActivityForest } from './agent-activity';
+import {
+  attachmentProblem,
+  COMPOSER_IMAGE_ACCEPT,
+  readImageAttachment,
+  type ComposerAttachmentError,
+  type ComposerImageAttachment,
+} from './composer-utils';
 import { collectTeamAgentActivities, type TeamAgentActivity } from './swarm-ui';
 import { ModelSelect, type SessionModelOption } from './SessionControls';
 import { classNames } from './ui-utils';
@@ -39,6 +48,8 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
   readonly onSelectAgent: (agentId: string) => void;
 }) {
   const [body, setBody] = useState('');
+  const [images, setImages] = useState<ComposerImageAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState<ComposerAttachmentError>();
   const [clientMessageId, setClientMessageId] = useState<string>();
   const [sending, setSending] = useState(false);
   const [modelPending, setModelPending] = useState(false);
@@ -46,6 +57,7 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
   const [error, setError] = useState<string>();
   const [assignmentsOpen, setAssignmentsOpen] = useState(true);
   const streamRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const nearBottomRef = useRef(true);
   const modelChangeRef = useRef<Promise<boolean>>(Promise.resolve(true));
   const snapshot = state.snapshot;
@@ -69,6 +81,9 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
     .map((item) => `${item.agentId}:${item.status}:${item.action}`)
     .join('|');
   const leader = agentPresentation(team?.leaderAgentId ?? 'main', snapshot.members, snapshot.assignments);
+  const selectedModelOption = models.find((model) => model.id === selectedModel);
+  const imageInputSupport = selectedModelOption?.imageInput ?? 'unknown';
+  const imageInputBlocked = images.length > 0 && imageInputSupport === 'unsupported';
 
   useEffect(() => {
     const element = streamRef.current;
@@ -99,17 +114,58 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
     modelChangeRef.current = operation;
   };
 
+  const addImageFiles = useCallback(async (files: readonly File[]) => {
+    if (files.length === 0) return;
+    setAttachmentError(undefined);
+    const remaining = Math.max(0, 8 - images.length);
+    const results = await Promise.allSettled(files.slice(0, remaining).map(readImageAttachment));
+    const accepted: ComposerImageAttachment[] = [];
+    const errors: ComposerAttachmentError[] = [];
+    for (const result of results) {
+      if (result.status === 'fulfilled') accepted.push(result.value);
+      else errors.push(attachmentProblem(result.reason));
+    }
+    if (files.length > remaining) {
+      errors.push({ code: 'media.too_many', message: '团队消息最多附加 8 张图片' });
+    }
+    if (accepted.length > 0) {
+      setImages((current) => [...current, ...accepted].slice(0, 8));
+      setClientMessageId(undefined);
+    }
+    if (errors.length > 0) {
+      setAttachmentError({
+        code: [...new Set(errors.map((item) => item.code))].join(', '),
+        message: errors.map((item) => item.message).join('；'),
+      });
+    }
+  }, [images.length]);
+
   const send = async () => {
     const message = body.trim();
-    if (message.length === 0 || sending) return;
+    if ((message.length === 0 && images.length === 0) || sending) return;
+    if (imageInputBlocked) {
+      setAttachmentError({
+        code: 'media.model_unsupported',
+        message: '当前主代理模型不支持图片输入，请先切换到支持图片的模型',
+      });
+      return;
+    }
     const id = clientMessageId ?? crypto.randomUUID();
     setClientMessageId(id);
     setSending(true);
     setError(undefined);
     try {
       if (!(await modelChangeRef.current)) return;
-      await window.kimiDesktop.team.submit(sessionId, message, id);
+      const persistedBody = message.length > 0 ? message : `分享了 ${String(images.length)} 张图片`;
+      await window.kimiDesktop.team.submit(
+        sessionId,
+        persistedBody,
+        id,
+        images.map((image) => ({ type: image.type, url: image.url, name: image.label })),
+      );
       setBody('');
+      setImages([]);
+      setAttachmentError(undefined);
       setClientMessageId(undefined);
       nearBottomRef.current = true;
     } catch (error) {
@@ -178,15 +234,59 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
                 title="主代理模型"
                 onChange={changeModel}
               />
-              <span>{modelPending ? '正在切换模型…' : '主代理将为每个新子 Agent 单独选择执行模型'}</span>
+              <span className={classNames('team-image-support', `support-${imageInputSupport}`)}>
+                {modelPending
+                  ? '正在切换模型…'
+                  : imageInputSupport === 'supported'
+                    ? '当前模型支持图片 · 主代理会为新子 Agent 单独选择执行模型'
+                    : imageInputSupport === 'unsupported'
+                      ? '当前模型不支持图片输入'
+                      : '当前模型未声明图片能力，发送前请确认'}
+              </span>
             </div>
+            {images.length > 0 && (
+              <div className="team-composer-images" aria-label={`已附加 ${String(images.length)} 张图片`}>
+                {images.map((image) => (
+                  <div className="team-composer-image" title={image.label} key={image.id}>
+                    <img src={image.url} alt={image.label} />
+                    <span>{image.label}</span>
+                    <button
+                      type="button"
+                      title={`移除 ${image.label}`}
+                      onClick={() => {
+                        setImages((current) => current.filter((item) => item.id !== image.id));
+                        setClientMessageId(undefined);
+                        setAttachmentError(undefined);
+                      }}
+                    ><X size={11} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {attachmentError !== undefined && (
+              <div className="team-attachment-error" role="alert">
+                <CircleAlert size={13} />
+                <span><strong>{attachmentError.code}</strong>{attachmentError.message}</span>
+                <button type="button" onClick={() => { setAttachmentError(undefined); }} title="关闭"><X size={11} /></button>
+              </div>
+            )}
             <textarea
               value={body}
               onChange={(event) => {
                 setBody(event.target.value);
+                setClientMessageId(undefined);
+              }}
+              onPaste={(event) => {
+                const files = Array.from(event.clipboardData.items)
+                  .filter((item) => item.kind === 'file' && item.type.toLowerCase().startsWith('image/'))
+                  .map((item) => item.getAsFile())
+                  .filter((file): file is File => file !== null);
+                if (files.length === 0) return;
+                if (event.clipboardData.getData('text/plain').length === 0) event.preventDefault();
+                void addImageFiles(files);
               }}
               onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
+                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault();
                   void send();
                 }
@@ -194,9 +294,35 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
               placeholder="发送消息到 general…"
               disabled={snapshot.state === 'degraded'}
             />
-            <button onClick={() => void send()} disabled={sending || modelPending || body.trim().length === 0 || snapshot.state === 'degraded'} title="发送团队消息">
-              {sending ? <CircleDashed className="spin" size={16} /> : <Send size={16} />}
-            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={COMPOSER_IMAGE_ACCEPT}
+              multiple
+              hidden
+              onChange={(event) => {
+                void addImageFiles(Array.from(event.target.files ?? []));
+                event.currentTarget.value = '';
+              }}
+            />
+            <div className="team-composer-actions">
+              <button
+                className="team-image-picker"
+                type="button"
+                onClick={() => { fileInputRef.current?.click(); }}
+                disabled={snapshot.state === 'degraded' || images.length >= 8}
+                title="粘贴或选择图片"
+              ><ImagePlus size={16} /></button>
+              <button
+                className="team-message-send"
+                type="button"
+                onClick={() => void send()}
+                disabled={sending || modelPending || imageInputBlocked || (body.trim().length === 0 && images.length === 0) || snapshot.state === 'degraded'}
+                title={imageInputBlocked ? '当前模型不支持图片输入' : '发送团队消息'}
+              >
+                {sending ? <CircleDashed className="spin" size={16} /> : <Send size={16} />}
+              </button>
+            </div>
             {error !== undefined && <div className="team-send-error"><CircleAlert size={13} /><span>{error}</span><button onClick={() => void send()}>重试原请求</button></div>}
           </div>
         </div>
@@ -463,6 +589,18 @@ function TeamMessageBubble({ message, members, assignments, mentionAliases, onSe
           >
             {message.body}
           </ReactMarkdown>
+          {(message.attachments ?? []).some((attachment) => safeTeamAttachmentUrl(attachment.url)) && (
+            <div className="team-message-attachments">
+              {(message.attachments ?? []).map((attachment, index) => safeTeamAttachmentUrl(attachment.url) && (
+                <img
+                  src={attachment.url}
+                  alt={attachment.name ?? `团队图片 ${String(index + 1)}`}
+                  title={attachment.name}
+                  key={`${attachment.url}:${String(index)}`}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </article>
@@ -485,4 +623,14 @@ function agentPresentation(
 
 function formatTime(timestamp: number): string {
   return new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(timestamp);
+}
+
+function safeTeamAttachmentUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'file:'
+      && /\/cache\/desktop-media\/[a-f0-9]{64}\.(?:gif|jpe?g|png|webp)$/i.test(url.pathname);
+  } catch {
+    return false;
+  }
 }

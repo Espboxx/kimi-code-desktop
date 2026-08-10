@@ -39,6 +39,7 @@ import type {
   ThinkingEffort,
   TodoItem,
   TeamMessage,
+  TeamMessageAttachment,
   TeamOperation,
   TeamSnapshot,
   Unsubscribe,
@@ -120,6 +121,7 @@ interface TeamRpcSurface {
     readonly sessionId: string;
     readonly body: string;
     readonly clientMessageId: string;
+    readonly attachments?: readonly TeamMessageAttachment[];
   }): Promise<TeamMessage>;
   onTeamOperation(
     input: { readonly sessionId: string },
@@ -230,6 +232,7 @@ export class Session {
   async sendTeamMessage(input: {
     readonly body: string;
     readonly clientMessageId: string;
+    readonly attachments?: readonly TeamMessageAttachment[];
   }): Promise<TeamMessage> {
     this.ensureOpen();
     return teamRpc(this.rpc).sendTeamMessage({ sessionId: this.id, ...input });

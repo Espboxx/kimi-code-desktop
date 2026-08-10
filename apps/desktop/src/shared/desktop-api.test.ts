@@ -106,6 +106,18 @@ describe('desktop IPC schema', () => {
       action: 'send',
       payload: { sessionId: 's1', body: 'x'.repeat(8_193), clientMessageId: 'retry-1' },
     })).toThrow();
+    expect(() => parseDesktopCommand({
+      domain: 'team',
+      action: 'submit',
+      payload: {
+        sessionId: 's1',
+        body: 'Coordinate',
+        clientMessageId: 'retry-2',
+        media: Array.from({ length: 9 }, (_, index) => ({
+          type: 'image_url', url: `data:image/png;base64,${String(index)}`, name: `${String(index)}.png`,
+        })),
+      },
+    })).toThrow();
 
     const calls = vi.fn();
     const invoke: Parameters<typeof createKimiDesktopApi>[0] = async <T>(
@@ -123,9 +135,10 @@ describe('desktop IPC schema', () => {
     expect(calls).toHaveBeenCalledWith('team', 'send', {
       sessionId: 's1', body: 'Coordinate', clientMessageId: 'retry-1',
     });
-    await api.team.submit('s1', 'Coordinate', 'retry-2');
+    const media = [{ type: 'image_url' as const, url: 'data:image/png;base64,aQ==', name: 'image.png' }];
+    await api.team.submit('s1', 'Coordinate', 'retry-2', media);
     expect(calls).toHaveBeenCalledWith('team', 'submit', {
-      sessionId: 's1', body: 'Coordinate', clientMessageId: 'retry-2',
+      sessionId: 's1', body: 'Coordinate', clientMessageId: 'retry-2', media,
     });
   });
 

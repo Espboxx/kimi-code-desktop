@@ -171,8 +171,27 @@ describe('SessionCollaborationService', () => {
     const before = (await first.service.snapshot()).latestSeq;
     const controller = new AbortController();
     const waiting = first.service.waitForOperation({ afterSeq: before, timeoutMs: 1_000, signal: controller.signal });
-    const message = await first.service.sendUserMessage({ body: 'New direction', clientMessageId: 'wake-1' });
+    const attachments = [{
+      type: 'image_url' as const,
+      url: 'file:///cache/desktop-media/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.png',
+      name: 'diagram.png',
+    }];
+    const message = await first.service.sendUserMessage({
+      body: 'New direction',
+      clientMessageId: 'wake-1',
+      attachments,
+    });
     await expect(waiting).resolves.toMatchObject({ type: 'message.sent', message: { id: message.id } });
+    await expect(first.service.sendUserMessage({
+      body: 'New direction',
+      clientMessageId: 'wake-1',
+      attachments,
+    })).resolves.toEqual(message);
+    await expect(first.service.sendUserMessage({
+      body: 'New direction',
+      clientMessageId: 'wake-1',
+      attachments: [{ ...attachments[0]!, name: 'other.png' }],
+    })).rejects.toMatchObject({ code: 'collaboration.idempotency_conflict' });
 
     await first.service.settleBatch({ batchId: receipt.batchId, status: 'completed' });
     first.disposables.dispose();
@@ -195,7 +214,7 @@ describe('SessionCollaborationService', () => {
         status: 'interrupted',
       }),
     );
-    expect((await second.service.history()).at(-1)).toMatchObject({ body: 'New direction' });
+    expect((await second.service.history()).at(-1)).toMatchObject({ body: 'New direction', attachments });
   });
 
   it('bootstraps members with an explicit communication and handoff protocol', async () => {
@@ -230,6 +249,14 @@ describe('SessionCollaborationService', () => {
       callerAgentId: 'main',
       assignments: [{ assignmentId: 'a-limit', displayName: 'limit-worker', profileName: 'coder', description: 'Work' }],
     });
+    await expect(service.sendUserMessage({
+      body: 'too many images',
+      clientMessageId: 'invalid-attachments',
+      attachments: Array.from({ length: 9 }, (_, index) => ({
+        type: 'image_url' as const,
+        url: `file:///cache/desktop-media/${String(index).padStart(64, '0')}.png`,
+      })),
+    })).rejects.toMatchObject({ code: 'request.invalid' });
     for (let index = 0; index < 10; index += 1) {
       await service.sendUserMessage({ body: `message-${String(index)}`, clientMessageId: `id-${String(index)}` });
     }
