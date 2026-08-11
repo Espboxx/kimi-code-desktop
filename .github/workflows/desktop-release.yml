@@ -13,6 +13,9 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  NODE_OPTIONS: --max-old-space-size=4096
+
 jobs:
   windows-x64:
     name: Windows x64 portable
@@ -67,7 +70,7 @@ jobs:
           }
 
       - name: Build Windows package
-        run: pnpm --filter @moonshot-ai/kimi-code-desktop exec electron-builder --win portable --x64
+        run: pnpm --filter @moonshot-ai/kimi-code-desktop exec electron-builder --win portable --x64 --publish never
 
       - name: Inspect and smoke packaged application
         run: |
@@ -127,7 +130,7 @@ jobs:
           pnpm --filter @moonshot-ai/kimi-code-desktop build
 
       - name: Build macOS package
-        run: pnpm --filter @moonshot-ai/kimi-code-desktop exec electron-builder --mac dmg --arm64
+        run: pnpm --filter @moonshot-ai/kimi-code-desktop exec electron-builder --mac dmg --arm64 --publish never
 
       - name: Inspect and smoke packaged application
         run: |
@@ -198,7 +201,7 @@ jobs:
           pnpm --filter @moonshot-ai/kimi-code-desktop build
 
       - name: Build Linux packages
-        run: pnpm --filter @moonshot-ai/kimi-code-desktop exec electron-builder --linux AppImage deb --x64
+        run: pnpm --filter @moonshot-ai/kimi-code-desktop exec electron-builder --linux AppImage deb --x64 --publish never
 
       - name: Inspect and smoke packaged application
         run: |

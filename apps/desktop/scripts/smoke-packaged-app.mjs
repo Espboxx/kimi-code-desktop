@@ -32,7 +32,9 @@ const workspace = resolve(fixtureRoot, 'workspace');
 await Promise.all([home, profile, workspace].map((path) => mkdir(path)));
 
 try {
-  await run(executable, [`--user-data-dir=${profile}`], {
+  const args = [`--user-data-dir=${profile}`];
+  if (target === 'linux-x64') args.push('--no-sandbox');
+  await run(executable, args, {
     ...process.env,
     KIMI_CODE_HOME: home,
     KIMI_DESKTOP_SMOKE: '1',
