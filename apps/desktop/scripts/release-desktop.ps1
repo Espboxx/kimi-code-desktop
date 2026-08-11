@@ -497,12 +497,12 @@ function Assert-GitHubRelease {
   foreach ($expectedAsset in $expectedAssets) {
     $downloadArguments += @('--pattern', $expectedAsset)
   }
-  Invoke-External -FilePath 'gh' -Arguments $downloadArguments
+  Invoke-External -FilePath 'gh' -Arguments $downloadArguments | Out-Host
   Invoke-External -FilePath 'node' -Arguments @(
     'apps/desktop/scripts/release-artifacts.mjs',
     'verify',
     $safeDownloadDirectory
-  )
+  ) | Out-Host
 
   Write-Host "Release: $($release.url)"
   Write-Host "Published assets: $($expectedAssets -join ', ')"
