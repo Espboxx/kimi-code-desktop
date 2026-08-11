@@ -181,16 +181,31 @@ function Assert-PackagedLicenses {
       throw "Packaged license file is missing: $licensePath"
     }
   }
+  $nativeFiles = @(
+    (Join-Path $unpackedDirectory 'resources\app.asar.unpacked\node_modules\node-pty\prebuilds\win32-x64\conpty.node'),
+    (Join-Path $unpackedDirectory 'resources\app.asar.unpacked\node_modules\node-pty\prebuilds\win32-x64\pty.node')
+  )
+  foreach ($nativeFile in $nativeFiles) {
+    if (-not (Test-Path -LiteralPath $nativeFile -PathType Leaf)) {
+      throw "Packaged native file is missing: $nativeFile"
+    }
+  }
 
   $sevenZip = Get-SevenZipPath
   $listing = Get-ExternalOutput -FilePath $sevenZip -Arguments @('l', $ArtifactPath)
-  foreach ($entry in @('resources\LICENSE', 'resources\THIRD_PARTY_NOTICES.md', 'LICENSE.electron.txt', 'LICENSES.chromium.html')) {
+  foreach ($entry in @(
+    'resources\LICENSE',
+    'resources\THIRD_PARTY_NOTICES.md',
+    'resources\app.asar.unpacked\node_modules\node-pty\prebuilds\win32-x64\pty.node',
+    'LICENSE.electron.txt',
+    'LICENSES.chromium.html'
+  )) {
     if (-not $listing.Contains($entry, [System.StringComparison]::OrdinalIgnoreCase)) {
       throw "Portable executable does not contain $entry"
     }
   }
 
-  Write-Host 'Packaged licenses: MIT, third-party, Electron, Chromium'
+  Write-Host 'Packaged licenses and Windows x64 native dependencies verified'
 }
 
 function Write-ArtifactChecksum {
@@ -248,6 +263,16 @@ function Invoke-DesktopVerification {
       '--win',
       'portable',
       '--x64'
+    )
+
+    Write-Step 'Inspect and smoke packaged Windows application'
+    Invoke-External -FilePath 'node' -Arguments @(
+      'apps/desktop/scripts/inspect-packaged-app.mjs',
+      'windows-x64'
+    )
+    Invoke-External -FilePath 'node' -Arguments @(
+      'apps/desktop/scripts/smoke-packaged-app.mjs',
+      'windows-x64'
     )
   }
   finally {
@@ -410,12 +435,11 @@ function Assert-GitHubRelease {
   param(
     [Parameter(Mandatory)][string]$RepositoryRoot,
     [Parameter(Mandatory)][string]$Tag,
-    [Parameter(Mandatory)][string]$ArtifactName,
+    [Parameter(Mandatory)][string[]]$ArtifactNames,
     [Parameter(Mandatory)][string]$GitHubRepository
   )
 
   Write-Step "Verify GitHub Release $Tag"
-  $checksumName = "$ArtifactName.sha256"
   $releaseJson = Get-ExternalOutput -FilePath 'gh' -Arguments @(
     'release',
     'view',
@@ -427,7 +451,8 @@ function Assert-GitHubRelease {
   )
   $release = $releaseJson | ConvertFrom-Json
   [string[]]$assetNames = @($release.assets | ForEach-Object { [string]$_.name })
-  foreach ($expectedAsset in @($ArtifactName, $checksumName)) {
+  [string[]]$expectedAssets = @($ArtifactNames | ForEach-Object { $_; "$_.sha256" })
+  foreach ($expectedAsset in $expectedAssets) {
     if ($assetNames -notcontains $expectedAsset) {
       throw "GitHub Release $Tag is missing $expectedAsset."
     }
@@ -438,33 +463,29 @@ function Assert-GitHubRelease {
   $safeDownloadDirectory = Assert-PathWithin -BasePath $downloadBase -TargetPath $downloadDirectory
   Remove-PathWithin -BasePath $downloadBase -TargetPath $safeDownloadDirectory
   New-Item -ItemType Directory -Path $safeDownloadDirectory -Force | Out-Null
-  Invoke-External -FilePath 'gh' -Arguments @(
+  [string[]]$downloadArguments = @(
     'release',
     'download',
     $Tag,
     '--repo',
     $GitHubRepository,
     '--dir',
-    $safeDownloadDirectory,
-    '--pattern',
-    $ArtifactName,
-    '--pattern',
-    $checksumName
+    $safeDownloadDirectory
+  )
+  foreach ($expectedAsset in $expectedAssets) {
+    $downloadArguments += @('--pattern', $expectedAsset)
+  }
+  Invoke-External -FilePath 'gh' -Arguments $downloadArguments
+  Invoke-External -FilePath 'node' -Arguments @(
+    'apps/desktop/scripts/release-artifacts.mjs',
+    'verify',
+    $safeDownloadDirectory
   )
 
-  $downloadedArtifact = Join-Path $safeDownloadDirectory $ArtifactName
-  $downloadedChecksum = Join-Path $safeDownloadDirectory $checksumName
-  $publishedHash = (Get-FileHash -LiteralPath $downloadedArtifact -Algorithm SHA256).Hash.ToLowerInvariant()
-  $declaredHash = @((Get-Content -LiteralPath $downloadedChecksum -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
-  if ($publishedHash -ne $declaredHash) {
-    throw "Published SHA256 mismatch: asset $publishedHash, checksum $declaredHash."
-  }
-
   Write-Host "Release: $($release.url)"
-  Write-Host "Published SHA256: $publishedHash"
+  Write-Host "Published assets: $($expectedAssets -join ', ')"
   return [pscustomobject]@{
     Url = [string]$release.url
-    Hash = $publishedHash
     DownloadDirectory = $safeDownloadDirectory
   }
 }
@@ -486,6 +507,12 @@ try {
   }
   $tag = "desktop-v$version"
   $artifactName = "Kimi-Code-Desktop-$version-x64-portable.exe"
+  [string[]]$releaseArtifactNames = @(
+    $artifactName,
+    "Kimi-Code-Desktop-$version-arm64.dmg",
+    "Kimi-Code-Desktop-$version-x64.AppImage",
+    "Kimi-Code-Desktop-$version-x64.deb"
+  )
   $artifactPath = Join-Path $releaseDirectory $artifactName
   $buildStampPath = Join-Path $releaseDirectory '.verified-workspace.sha256'
   Invoke-External -FilePath 'node' -Arguments @('apps/desktop/scripts/check-release-tag.mjs', $tag)
@@ -522,7 +549,7 @@ try {
     $releaseResult = Assert-GitHubRelease `
       -RepositoryRoot $repositoryRoot `
       -Tag $tag `
-      -ArtifactName $artifactName `
+      -ArtifactNames $releaseArtifactNames `
       -GitHubRepository $gitHubRepository
   }
 

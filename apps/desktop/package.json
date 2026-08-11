@@ -1,8 +1,14 @@
 {
   "name": "@moonshot-ai/kimi-code-desktop",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "private": true,
-  "description": "Unofficial Windows-first desktop client derived from Kimi Code",
+  "description": "Unofficial cross-platform desktop client derived from Kimi Code",
+  "author": {
+    "name": "Espboxx",
+    "email": "26684147+Espboxx@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/Espboxx/kimi-code-desktop",
+  "desktopName": "kimi-code-desktop",
   "license": "MIT",
   "type": "module",
   "main": "dist-electron/main.cjs",
@@ -11,11 +17,18 @@
     "build:main": "tsdown --config tsdown.main.config.ts && tsdown --config tsdown.preload.config.ts",
     "build:renderer": "vite build",
     "dev:renderer": "vite",
+    "dist:linux": "pnpm run licenses:check && pnpm run build && electron-builder --linux AppImage deb --x64",
+    "dist:mac": "pnpm run licenses:check && pnpm run build && electron-builder --mac dmg --arm64",
     "dist:win": "pnpm run licenses:check && pnpm run build && electron-builder --win portable --x64",
     "e2e": "node e2e/desktop.e2e.mjs",
     "licenses:check": "node scripts/generate-third-party-notices.mjs --check",
     "licenses:generate": "node scripts/generate-third-party-notices.mjs --write",
+    "pack:linux": "pnpm run licenses:check && pnpm run build && electron-builder --linux dir --x64",
+    "pack:mac": "pnpm run licenses:check && pnpm run build && electron-builder --mac dir --arm64",
     "pack:win": "pnpm run licenses:check && pnpm run build && electron-builder --win dir --x64",
+    "release:artifacts": "node scripts/release-artifacts.mjs",
+    "release:inspect-package": "node scripts/inspect-packaged-app.mjs",
+    "release:smoke-package": "node scripts/smoke-packaged-app.mjs",
     "release:check-tag": "node scripts/check-release-tag.mjs",
     "start": "electron .",
     "test": "vitest run --config vitest.config.ts",
@@ -25,7 +38,11 @@
     "appId": "ai.moonshot.kimi-code-desktop",
     "productName": "Kimi Code Desktop",
     "asar": true,
+    "asarUnpack": [
+      "node_modules/node-pty/**/*"
+    ],
     "compression": "normal",
+    "npmRebuild": false,
     "directories": {
       "buildResources": "build",
       "output": "release"
@@ -49,6 +66,49 @@
         "to": "THIRD_PARTY_NOTICES.md"
       }
     ],
+    "mac": {
+      "artifactName": "Kimi-Code-Desktop-${version}-${arch}.${ext}",
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": false,
+      "icon": "build/icon.png",
+      "identity": null,
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "artifactName": "Kimi-Code-Desktop-${version}-${arch}.${ext}",
+      "category": "Development",
+      "desktop": {
+        "entry": {
+          "Keywords": "kimi;code;agent;developer;"
+        }
+      },
+      "executableName": "kimi-code-desktop",
+      "icon": "build/icon.png",
+      "maintainer": "Espboxx <26684147+Espboxx@users.noreply.github.com>",
+      "synopsis": "Kimi Code agent desktop workbench",
+      "syncDesktopName": true,
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
     "win": {
       "artifactName": "Kimi-Code-Desktop-${version}-${arch}-portable.${ext}",
       "icon": "build/icon.ico",
@@ -70,6 +130,7 @@
     "chokidar": "^4.0.3",
     "lucide-react": "^1.30.0",
     "monaco-editor": "^0.56.0",
+    "node-pty": "^1.1.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",

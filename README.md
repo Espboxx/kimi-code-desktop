@@ -7,7 +7,7 @@
 > [!IMPORTANT]
 > 本项目是基于上游 [MoonshotAI/kimi-code](https://github.com/MoonshotAI/kimi-code) 修改的**非官方衍生项目**，不是 Moonshot AI 官方发行版，也不代表 Moonshot AI 的认可或背书。详见 [NOTICE.md](NOTICE.md)。
 
-Kimi Code Desktop 是一个 Windows 优先的 Electron 桌面工作台，把 Kimi Code 的 Agent 会话、代码编辑、Git 状态、任务面板和多 Agent 协作放进同一个原生窗口。仓库同时保留上游 CLI、SDK 和引擎包；当前首页以 Desktop 产品为主。
+Kimi Code Desktop 是一个面向 Windows、macOS 和 Linux 的 Electron 桌面工作台，把 Kimi Code 的 Agent 会话、代码编辑、Git 状态、任务面板和多 Agent 协作放进同一个原生窗口。仓库同时保留上游 CLI、SDK 和引擎包；当前首页以 Desktop 产品为主。
 
 ## 界面预览
 
@@ -36,23 +36,49 @@ Kimi Code Desktop 是一个 Windows 优先的 Electron 桌面工作台，把 Kim
 
 ## 下载与运行
 
-Windows x64 便携版由 `desktop-v*` 标签触发的 GitHub Actions 构建。前往本仓库的 [GitHub Releases](../../releases)，下载：
+`desktop-v*` 标签会触发 GitHub Actions，在目标系统原生构建以下安装包。前往本仓库的 [GitHub Releases](../../releases) 下载：
 
-- `Kimi-Code-Desktop-0.3.2-x64-portable.exe`
-- `Kimi-Code-Desktop-0.3.2-x64-portable.exe.sha256`
+- `Kimi-Code-Desktop-0.4.0-x64-portable.exe`
+- `Kimi-Code-Desktop-0.4.0-arm64.dmg`
+- `Kimi-Code-Desktop-0.4.0-x64.AppImage`
+- `Kimi-Code-Desktop-0.4.0-x64.deb`
+
+每个安装包都带有同名 `.sha256` 文件，例如 Windows x64 便携版对应 `Kimi-Code-Desktop-0.4.0-x64-portable.exe.sha256`。
 
 下载后可在 PowerShell 校验 SHA256：
 
 ```powershell
-$exe = ".\Kimi-Code-Desktop-0.3.2-x64-portable.exe"
+$exe = ".\Kimi-Code-Desktop-0.4.0-x64-portable.exe"
 $expected = (Get-Content "$exe.sha256").Split()[0]
 $actual = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
 $actual -eq $expected
 ```
 
-返回 `True` 后直接运行 EXE，无需预装 Node.js 或 pnpm。
+返回 `True` 后直接运行 EXE，无需预装 Node.js 或 pnpm。macOS 和 Linux 可用系统自带工具校验：
 
-当前自动构建默认**不做代码签名**，Windows SmartScreen 可能在首次运行时显示提示。请先核对下载来源和 SHA256；后续取得代码签名证书后会单独接入发布流程。
+```bash
+shasum -a 256 -c Kimi-Code-Desktop-0.4.0-arm64.dmg.sha256
+sha256sum -c Kimi-Code-Desktop-0.4.0-x64.AppImage.sha256
+sha256sum -c Kimi-Code-Desktop-0.4.0-x64.deb.sha256
+```
+
+macOS arm64 用户挂载 DMG 后将应用拖入“应用程序”。该构建未签名，首次打开时可在 Finder 中右键应用并选择“打开”；如系统仍保留下载隔离标记，可执行：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Kimi Code Desktop.app"
+open "/Applications/Kimi Code Desktop.app"
+```
+
+Linux x64 用户可任选一种方式：
+
+```bash
+chmod +x Kimi-Code-Desktop-0.4.0-x64.AppImage
+./Kimi-Code-Desktop-0.4.0-x64.AppImage
+
+sudo apt install ./Kimi-Code-Desktop-0.4.0-x64.deb
+```
+
+当前 Windows 与 macOS 自动构建默认**不做代码签名**，系统可能在首次运行时显示确认提示。请先核对下载来源和 SHA256；后续取得代码签名证书后会单独接入发布流程。
 
 ## 首次选择工作区
 

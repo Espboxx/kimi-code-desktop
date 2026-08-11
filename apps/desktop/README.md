@@ -1,6 +1,7 @@
 # Kimi Code Desktop
 
-Windows-first Electron/React host for the Kimi Code v2 engine. This is part of
+Cross-platform Electron/React host for the Kimi Code v2 engine, released for
+Windows x64, macOS arm64, and Linux x64. This is part of
 the unofficial derivative project described in the root [README](../../README.en.md)
 and [NOTICE](../../NOTICE.md). The Electron main
 process owns one application-lifetime `createKimiHarnessV2` instance and a
@@ -89,23 +90,35 @@ The Electron test uses isolated workspace and home directories plus local
 fixtures. Screenshots are written under `apps/desktop/output/playwright/` at the
 default and minimum supported window sizes.
 
-## Package for Windows
+## Package by target
 
-Build a self-contained x64 portable executable that does not require Node.js or
-pnpm on the target computer:
+Build the package on its target operating system. Each result is self-contained
+and does not require Node.js or pnpm on the target computer:
 
 ```powershell
 fnm exec --using=24.15.0 -- pnpm --filter @moonshot-ai/kimi-code-desktop dist:win
 ```
 
-The distributable is written to
-`apps/desktop/release/Kimi-Code-Desktop-<version>-x64-portable.exe`. Use
-`pack:win` to produce an unpacked directory for local smoke testing without
-creating the portable archive. Both commands reject a stale
+```bash
+pnpm --filter @moonshot-ai/kimi-code-desktop dist:mac
+pnpm --filter @moonshot-ai/kimi-code-desktop dist:linux
+```
+
+The outputs are written under `apps/desktop/release/`:
+
+- Windows x64: `Kimi-Code-Desktop-<version>-x64-portable.exe`
+- macOS arm64: `Kimi-Code-Desktop-<version>-arm64.dmg`
+- Linux x64: `Kimi-Code-Desktop-<version>-x64.AppImage` and `Kimi-Code-Desktop-<version>-x64.deb`
+
+Use `pack:win`, `pack:mac`, or `pack:linux` to produce an unpacked directory
+for target-native smoke testing without creating the distributable archive.
+All commands reject a stale
 `THIRD_PARTY_NOTICES.md`; regenerate it with `licenses:generate` after changing
 runtime dependencies.
 
-Windows builds are unsigned by default, so SmartScreen may prompt on first
-launch. Packaged resources include the repository MIT License, project NOTICE,
-and the generated third-party notice inventory. Electron's own `LICENSE.electron.txt` and
-`LICENSES.chromium.html` remain in the distribution root.
+Windows and macOS builds are unsigned by default. The macOS package explicitly
+uses `identity: null` and disables hardened runtime until Developer ID signing
+and notarization are configured. Packaged resources include the repository MIT
+License, project NOTICE, generated third-party inventory, Electron license, and
+Chromium license. The external `node-pty` production dependency and its native
+binary are unpacked from ASAR and checked by the packaged smoke.

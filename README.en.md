@@ -7,7 +7,7 @@
 > [!IMPORTANT]
 > This is an **unofficial derivative project** based on the upstream [MoonshotAI/kimi-code](https://github.com/MoonshotAI/kimi-code) repository. It is not an official Moonshot AI distribution and does not imply endorsement by Moonshot AI. See [NOTICE.md](NOTICE.md).
 
-Kimi Code Desktop is a Windows-first Electron workbench that brings Kimi Code agent sessions, code editing, Git state, task panels, and multi-agent collaboration into one native window. The monorepo still contains the upstream CLI, SDK, and engine packages; this homepage focuses on the Desktop product.
+Kimi Code Desktop is a cross-platform Electron workbench for Windows, macOS, and Linux that brings Kimi Code agent sessions, code editing, Git state, task panels, and multi-agent collaboration into one native window. The monorepo still contains the upstream CLI, SDK, and engine packages; this homepage focuses on the Desktop product.
 
 ## Screenshots
 
@@ -36,23 +36,49 @@ These screenshots are generated from an isolated local E2E fixture and contain n
 
 ## Download and run
 
-The `desktop-v*` GitHub Actions workflow builds a portable Windows x64 executable. Open this repository's [GitHub Releases](../../releases) page and download:
+The `desktop-v*` GitHub Actions workflow builds each package on its target operating system. Open this repository's [GitHub Releases](../../releases) page and download:
 
-- `Kimi-Code-Desktop-0.3.2-x64-portable.exe`
-- `Kimi-Code-Desktop-0.3.2-x64-portable.exe.sha256`
+- `Kimi-Code-Desktop-0.4.0-x64-portable.exe`
+- `Kimi-Code-Desktop-0.4.0-arm64.dmg`
+- `Kimi-Code-Desktop-0.4.0-x64.AppImage`
+- `Kimi-Code-Desktop-0.4.0-x64.deb`
+
+Every package has a matching `.sha256` file.
 
 Verify the SHA256 checksum in PowerShell:
 
 ```powershell
-$exe = ".\Kimi-Code-Desktop-0.3.2-x64-portable.exe"
+$exe = ".\Kimi-Code-Desktop-0.4.0-x64-portable.exe"
 $expected = (Get-Content "$exe.sha256").Split()[0]
 $actual = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
 $actual -eq $expected
 ```
 
-After the command returns `True`, run the EXE directly. The target machine does not need Node.js or pnpm.
+After the command returns `True`, run the EXE directly. The target machine does not need Node.js or pnpm. Verify macOS and Linux packages with built-in tools:
 
-Automated builds are **unsigned by default**, so Windows SmartScreen may show a warning on first launch. Verify the release source and SHA256 before running it. Code signing can be added separately when a certificate is available.
+```bash
+shasum -a 256 -c Kimi-Code-Desktop-0.4.0-arm64.dmg.sha256
+sha256sum -c Kimi-Code-Desktop-0.4.0-x64.AppImage.sha256
+sha256sum -c Kimi-Code-Desktop-0.4.0-x64.deb.sha256
+```
+
+On Apple Silicon, mount the DMG and drag the app to Applications. This build is unsigned, so first open it by right-clicking the app in Finder and selecting **Open**. If macOS keeps the download quarantine attribute, run:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Kimi Code Desktop.app"
+open "/Applications/Kimi Code Desktop.app"
+```
+
+On Linux x64, use either package:
+
+```bash
+chmod +x Kimi-Code-Desktop-0.4.0-x64.AppImage
+./Kimi-Code-Desktop-0.4.0-x64.AppImage
+
+sudo apt install ./Kimi-Code-Desktop-0.4.0-x64.deb
+```
+
+Automated Windows and macOS builds are **unsigned by default**, so the operating system may show a confirmation prompt on first launch. Verify the release source and SHA256 before running it. Code signing can be added separately when a certificate is available.
 
 ## Choose a workspace on first launch
 

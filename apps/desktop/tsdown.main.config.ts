@@ -12,7 +12,7 @@ export default defineConfig({
   plugins: [rawTextPlugin()],
   deps: {
     alwaysBundle: [/^@moonshot-ai\//],
-    neverBundle: ['electron'],
+    neverBundle: ['electron', 'node-pty'],
   },
   outputOptions: {
     codeSplitting: false,

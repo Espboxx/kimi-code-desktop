@@ -8,6 +8,9 @@ packages:
 catalog:
   zod: 4.3.6
 
+allowBuilds:
+  node-pty: true
+
 overrides:
   "kimi-code>@tailwindcss/vite": "4.1.18"
   "ssh2@1.17.0>cpu-features": "-"

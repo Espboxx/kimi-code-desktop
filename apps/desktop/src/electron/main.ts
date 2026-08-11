@@ -18,6 +18,7 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const COMMAND_CHANNEL = 'kimi-desktop:command';
 const NOTIFICATION_CHANNEL = 'kimi-desktop:notification';
+const SMOKE_TIMEOUT_MS = 10_000;
 
 let mainWindow: BrowserWindow | undefined;
 let runtime: KimiDesktopRuntime | undefined;
@@ -28,6 +29,35 @@ let closeRequestId: string | undefined;
 
 app.setName('Kimi Code Desktop');
 if (process.platform === 'win32') app.setAppUserModelId('ai.moonshot.kimi-code-desktop');
+
+async function smokeNativePty(): Promise<void> {
+  const { spawn } = await import('node-pty');
+  const shell = process.platform === 'win32'
+    ? process.env['ComSpec'] ?? 'cmd.exe'
+    : process.env['SHELL'] ?? '/bin/sh';
+  const args = process.platform === 'win32'
+    ? ['/d', '/s', '/c', 'exit 0']
+    : ['-c', 'exit 0'];
+
+  await new Promise<void>((resolve, reject) => {
+    const terminal = spawn(shell, args, {
+      cols: 80,
+      cwd: app.getPath('temp'),
+      env: process.env,
+      name: 'xterm-color',
+      rows: 24,
+    });
+    const timeout = setTimeout(() => {
+      terminal.kill();
+      reject(new Error(`Packaged PTY smoke timed out after ${SMOKE_TIMEOUT_MS} ms`));
+    }, SMOKE_TIMEOUT_MS);
+    terminal.onExit(({ exitCode }) => {
+      clearTimeout(timeout);
+      if (exitCode === 0) resolve();
+      else reject(new Error(`Packaged PTY smoke exited with code ${exitCode}`));
+    });
+  });
+}
 
 function notify(notification: KimiDesktopNotification): void {
   if (mainWindow?.isDestroyed() === false) {
@@ -90,12 +120,20 @@ function createWindow(): BrowserWindow {
     .then(async () => {
       loadingInitialDocument = false;
       await runtime?.initialize();
-      if (process.env['KIMI_DESKTOP_SMOKE'] === '1') setTimeout(() => app.quit(), 500);
+      if (process.env['KIMI_DESKTOP_SMOKE'] === '1') {
+        await smokeNativePty();
+        setTimeout(() => app.quit(), 500);
+      }
     })
     .catch((error) => {
       loadingInitialDocument = false;
+      if (process.env['KIMI_DESKTOP_SMOKE'] === '1') {
+        console.error(error);
+        exiting = true;
+        void (runtime?.close() ?? Promise.resolve()).finally(() => app.exit(1));
+        return;
+      }
       notify({ type: 'error', error: serializeError(error), command: 'renderer.load' });
-      if (process.env['KIMI_DESKTOP_SMOKE'] === '1') app.quit();
     });
   return window;
 }

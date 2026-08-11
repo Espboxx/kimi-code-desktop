@@ -2,7 +2,7 @@
 /**
  * Restore the executable bit on node-pty's `spawn-helper` prebuilt binaries.
  *
- * Why: on macOS/Linux node-pty launches the shell through a tiny `spawn-helper`
+ * Why: on macOS node-pty launches the shell through a tiny `spawn-helper`
  * executable shipped under `prebuilds/<platform-arch>/`. pnpm's content-
  * addressable store does not preserve the +x mode on these non-bin prebuild
  * assets, so after `pnpm install` the helper lands as 0644 and any PTY spawn
@@ -17,10 +17,15 @@ import { dirname, join } from 'node:path';
 
 function nodePtyRoot() {
   const require = createRequire(import.meta.url);
-  // Resolve from packages/services (where node-pty is declared) so we find the
-  // workspace's hoisted copy regardless of where this script runs.
+  // Resolve from current workspace packages that declare node-pty so pnpm's
+  // isolated links are found regardless of which host is being packaged.
   const entry = require.resolve('node-pty', {
-    paths: [join(process.cwd(), 'packages/services'), process.cwd()],
+    paths: [
+      join(process.cwd(), 'apps/desktop'),
+      join(process.cwd(), 'packages/agent-core-v2'),
+      join(process.cwd(), 'packages/agent-core'),
+      process.cwd(),
+    ],
   });
   // .../node-pty/lib/index.js -> .../node-pty
   return dirname(dirname(entry));
