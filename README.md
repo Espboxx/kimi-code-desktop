@@ -38,13 +38,13 @@ Kimi Code Desktop 是一个 Windows 优先的 Electron 桌面工作台，把 Kim
 
 Windows x64 便携版由 `desktop-v*` 标签触发的 GitHub Actions 构建。前往本仓库的 [GitHub Releases](../../releases)，下载：
 
-- `Kimi-Code-Desktop-0.3.1-x64-portable.exe`
-- `Kimi-Code-Desktop-0.3.1-x64-portable.exe.sha256`
+- `Kimi-Code-Desktop-0.3.2-x64-portable.exe`
+- `Kimi-Code-Desktop-0.3.2-x64-portable.exe.sha256`
 
 下载后可在 PowerShell 校验 SHA256：
 
 ```powershell
-$exe = ".\Kimi-Code-Desktop-0.3.1-x64-portable.exe"
+$exe = ".\Kimi-Code-Desktop-0.3.2-x64-portable.exe"
 $expected = (Get-Content "$exe.sha256").Split()[0]
 $actual = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
 $actual -eq $expected

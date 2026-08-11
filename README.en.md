@@ -38,13 +38,13 @@ These screenshots are generated from an isolated local E2E fixture and contain n
 
 The `desktop-v*` GitHub Actions workflow builds a portable Windows x64 executable. Open this repository's [GitHub Releases](../../releases) page and download:
 
-- `Kimi-Code-Desktop-0.3.1-x64-portable.exe`
-- `Kimi-Code-Desktop-0.3.1-x64-portable.exe.sha256`
+- `Kimi-Code-Desktop-0.3.2-x64-portable.exe`
+- `Kimi-Code-Desktop-0.3.2-x64-portable.exe.sha256`
 
 Verify the SHA256 checksum in PowerShell:
 
 ```powershell
-$exe = ".\Kimi-Code-Desktop-0.3.1-x64-portable.exe"
+$exe = ".\Kimi-Code-Desktop-0.3.2-x64-portable.exe"
 $expected = (Get-Content "$exe.sha256").Split()[0]
 $actual = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
 $actual -eq $expected
