@@ -11,17 +11,19 @@ import {
 } from '@moonshot-ai/transcript';
 import { describe, expect, it } from 'vitest';
 
-import type { TeamMessage } from '../shared/desktop-api';
+import type { TeamAssignment, TeamMessage, TeamSchedulerState } from '../shared/desktop-api';
 import {
   agentActivityLabel,
   buildAgentActivityForest,
 } from './agent-activity';
 import {
+  buildTeamBadge,
   collectTeamAgentActivities,
   collectPendingLeaderQuestions,
   collectPendingAgentInteractions,
   interactionSummary,
   mergePendingLeaderQuestionActivity,
+  resolveTeamLeaderStatus,
 } from './swarm-ui';
 
 describe('multi-agent UI coordination', () => {
@@ -168,6 +170,121 @@ describe('Agent activity view model', () => {
   });
 });
 
+describe('Team runtime status view model', () => {
+  it('counts only executing assignments as running and keeps ready work waiting', () => {
+    expect(buildTeamBadge([
+      assignment('ready', 'ready'),
+      assignment('running', 'running', 'worker-1'),
+      assignment('validating', 'awaiting_validation', 'worker-2'),
+      assignment('blocked', 'blocked'),
+      assignment('failed', 'failed', 'worker-3'),
+    ], 2)).toEqual({ unread: 2, running: 2, waiting: 2, failed: 1 });
+  });
+
+  it('prioritizes a durable leader question over live execution', () => {
+    const pendingQuestion = collectPendingLeaderQuestions([
+      teamQuestionMessage('leader-question-1', 'main', 1),
+    ], 'main')[0];
+
+    expect(resolveTeamLeaderStatus({
+      leaderAgentId: 'main',
+      busy: true,
+      pendingQuestion,
+      assignments: [],
+      scheduler: scheduler('running'),
+      snapshotState: 'ready',
+      activeBatchCount: 0,
+      hasInProgressPlan: true,
+    })).toMatchObject({ state: 'waiting_user', label: '等待回答', action: '等待回答：Continue?' });
+  });
+
+  it('uses the live leader action while busy and a deterministic fallback before activity arrives', () => {
+    const store = new TranscriptStore('s1');
+    const main = store.ensureAgent('main', { agentId: 'main', type: 'main' });
+    main.apply([{
+      op: 'meta.merge',
+      meta: { agent: { phase: { kind: 'streaming', turnId: 1, step: 1, stepId: '1.1', stream: 'thinking', since: 1 } } },
+    }]);
+    const base = {
+      leaderAgentId: 'main',
+      busy: true,
+      assignments: [],
+      scheduler: scheduler('running'),
+      snapshotState: 'ready' as const,
+      activeBatchCount: 0,
+      hasInProgressPlan: true,
+    };
+
+    expect(resolveTeamLeaderStatus({ ...base, activity: buildAgentActivityForest(store) }))
+      .toMatchObject({ state: 'running', label: '运行中', action: 'Thinking' });
+    expect(resolveTeamLeaderStatus(base))
+      .toMatchObject({ state: 'running', label: '运行中', action: '正在处理团队任务' });
+  });
+
+  it('shows the leader waiting when a direct child agent remains active', () => {
+    const store = new TranscriptStore('s1');
+    store.ensureAgent('main', { agentId: 'main', type: 'main' });
+    const child = store.ensureAgent('agent-1', {
+      agentId: 'agent-1',
+      type: 'sub',
+      parentAgentId: 'main',
+      label: 'Coder',
+    });
+    child.apply([{
+      op: 'meta.merge',
+      meta: { agent: { phase: { kind: 'running', turnId: 1, step: 1, stepId: '1.1', since: 1 } } },
+    }]);
+
+    expect(resolveTeamLeaderStatus({
+      leaderAgentId: 'main',
+      activity: buildAgentActivityForest(store),
+      busy: false,
+      assignments: [],
+      scheduler: scheduler('running'),
+      snapshotState: 'ready',
+      activeBatchCount: 0,
+      hasInProgressPlan: true,
+    })).toMatchObject({ state: 'waiting_children', label: '等待子代理' });
+  });
+
+  it('reproduces a paused Team with one ready task without claiming it is running', () => {
+    const status = resolveTeamLeaderStatus({
+      leaderAgentId: 'main',
+      busy: false,
+      assignments: [assignment('probe', 'ready')],
+      scheduler: scheduler('paused', 0, 1),
+      snapshotState: 'ready',
+      activeBatchCount: 0,
+      hasInProgressPlan: true,
+    });
+
+    expect(status).toEqual({
+      state: 'paused',
+      tone: 'paused',
+      label: '已暂停',
+      action: '调度已暂停，1 个子任务等待继续',
+    });
+    expect(buildTeamBadge([assignment('probe', 'ready')], 0).running).toBe(0);
+  });
+
+  it('states explicitly when the plan is still active but no runtime work exists', () => {
+    expect(resolveTeamLeaderStatus({
+      leaderAgentId: 'main',
+      busy: false,
+      assignments: [],
+      scheduler: scheduler('running'),
+      snapshotState: 'ready',
+      activeBatchCount: 0,
+      hasInProgressPlan: true,
+    })).toEqual({
+      state: 'idle',
+      tone: 'idle',
+      label: '空闲',
+      action: '计划尚未完成，当前没有运行中的工作',
+    });
+  });
+});
+
 describe('Team leader question recovery', () => {
   it('returns only unanswered questions published by the Team leader', () => {
     const messages: TeamMessage[] = [
@@ -212,6 +329,38 @@ function transcriptFixture(): TranscriptStore {
 
 function upsert(interaction: TranscriptInteraction): TranscriptOperation {
   return { op: 'interaction.upsert', interaction };
+}
+
+function assignment(
+  id: string,
+  status: Exclude<TeamAssignment['status'], 'queued'>,
+  agentId?: string,
+): TeamAssignment {
+  return {
+    id,
+    taskKey: id,
+    batchId: 'batch-1',
+    dependsOn: [],
+    delegationDepth: 1,
+    agentId,
+    profileName: 'worker',
+    description: `Task ${id}`,
+    promptRef: `artifact://team/prompts/${id}`,
+    workspaceMode: 'shared_readonly',
+    validationMode: 'none',
+    status,
+    artifactIds: [],
+    createdAt: 1,
+    updatedAt: 1,
+  };
+}
+
+function scheduler(
+  status: TeamSchedulerState['status'],
+  activeCount = 0,
+  queuedCount = 0,
+): TeamSchedulerState {
+  return { status, activeCount, queuedCount, updatedAt: 1 };
 }
 
 function teamQuestionMessage(questionId: string, agentId: string, seq: number): TeamMessage {

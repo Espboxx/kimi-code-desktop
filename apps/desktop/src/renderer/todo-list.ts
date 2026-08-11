@@ -91,7 +91,7 @@ export function buildTeamTodoEntries(
       source: 'leader',
       sourceLabel: '组长计划',
       status: item.status,
-      statusLabel: todoStatusLabel(item.status),
+      statusLabel: teamPlanStatusLabel(item.status),
       bucket: todoBucket(item.status),
       ownerAgentId: leaderAgentId,
       ownerLabel: leaderLabel,
@@ -140,6 +140,11 @@ function todoBucket(status: TodoStatus): TeamTodoBucket {
   if (status === 'in_progress') return 'running';
   if (status === 'pending') return 'waiting';
   return 'terminal';
+}
+
+function teamPlanStatusLabel(status: TodoStatus): string {
+  if (status === 'in_progress') return '计划进行中';
+  return todoStatusLabel(status);
 }
 
 function assignmentBucket(status: TeamAssignmentStatus): TeamTodoBucket {

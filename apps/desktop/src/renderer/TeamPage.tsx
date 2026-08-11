@@ -58,8 +58,10 @@ import {
   collectTeamAgentActivities,
   collectPendingLeaderQuestions,
   mergePendingLeaderQuestionActivity,
+  resolveTeamLeaderStatus,
   type PendingLeaderQuestion,
   type TeamAgentActivity,
+  type TeamLeaderStatus,
 } from './swarm-ui';
 import {
   ComposerUsageIndicators,
@@ -164,7 +166,29 @@ export function TeamPage({
     ),
     [activity, leaderAgentId, pendingLeaderQuestion, snapshot.members],
   );
-  const leaderActivity = activeAgents.find((item) => item.agentId === leaderAgentId);
+  const leaderStatus = useMemo(() => resolveTeamLeaderStatus({
+    leaderAgentId,
+    activity,
+    busy: status?.busy,
+    pendingQuestion: pendingLeaderQuestion,
+    assignments: snapshot.assignments,
+    scheduler: snapshotV2?.scheduler,
+    snapshotState: snapshot.state,
+    degradedReason: snapshot.degradedReason,
+    activeBatchCount: activeBatches,
+    hasInProgressPlan: leaderTodos.some((item) => item.status === 'in_progress'),
+  }), [
+    activeBatches,
+    activity,
+    leaderAgentId,
+    leaderTodos,
+    pendingLeaderQuestion,
+    snapshot.assignments,
+    snapshot.degradedReason,
+    snapshot.state,
+    snapshotV2?.scheduler,
+    status?.busy,
+  ]);
   const activityKey = activeAgents
     .map((item) => `${item.agentId}:${item.status}:${item.action}`)
     .join('|');
@@ -583,7 +607,7 @@ export function TeamPage({
             >
               {assignmentsOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
               <strong>团队任务</strong>
-              <span>{teamTodoCounts.running} 进行中 · {teamTodoCounts.waiting} 等待 · {teamTodoCounts.terminal} 已结束</span>
+              <span>计划进度：{teamTodoCounts.running} 进行中 · {teamTodoCounts.waiting} 等待 · {teamTodoCounts.terminal} 已结束</span>
             </button>
           )}
         >
@@ -593,16 +617,14 @@ export function TeamPage({
                 leaderAgentId={team.leaderAgentId}
                 onSelectAgent={onSelectAgent}
               />
+              <LeaderStatusCard
+                status={leaderStatus}
+                displayName={leader.displayName}
+                onActivate={pendingLeaderQuestion === undefined
+                  ? () => { onSelectAgent(leaderAgentId); }
+                  : focusPendingLeaderQuestion}
+              />
               <TeamTodoList entries={teamTodos} onSelectAgent={onSelectAgent} />
-              {leaderActivity !== undefined && (
-                <LeaderActivityCard
-                  activity={leaderActivity}
-                  displayName={leader.displayName}
-                  onActivate={leaderActivity.agentId === leaderAgentId && pendingLeaderQuestion !== undefined
-                    ? focusPendingLeaderQuestion
-                    : () => { onSelectAgent(leaderActivity.agentId); }}
-                />
-              )}
               <div className="team-assignment-subheading">
                 <strong>任务分配</strong>
                 <span>{snapshot.assignments.length} 项</span>
@@ -728,36 +750,50 @@ function TeamActivityStrip({ activities, members, assignments, onSelectActivity 
   );
 }
 
-function LeaderActivityCard({ activity, displayName, onActivate }: {
-  readonly activity: TeamAgentActivity;
+function LeaderStatusCard({ status, displayName, onActivate }: {
+  readonly status: TeamLeaderStatus;
   readonly displayName: string;
   readonly onActivate: () => void;
 }) {
-  const status = agentActivityLabel(activity.status);
   return (
     <section
-      className={classNames('team-leader-activity', `status-${activity.status}`)}
-      aria-label="组长当前工作"
+      className={classNames('team-leader-activity', `state-${status.state}`, `tone-${status.tone}`)}
+      data-state={status.state}
+      aria-label="组长状态"
       aria-live="polite"
     >
-      <h3>组长当前工作</h3>
+      <h3>组长状态</h3>
       <button
         type="button"
         onClick={onActivate}
-        title={`${displayName} · ${status} · ${activity.action}`}
-        aria-label={`${displayName}，${status}：${activity.action}`}
+        title={`${displayName} · ${status.label} · ${status.action}`}
+        aria-label={`${displayName}，${status.label}：${status.action}`}
       >
         <span className="team-leader-activity-icon">
-          <TeamActivityStatusIcon status={activity.status} size={13} />
+          <LeaderStatusIcon status={status} />
         </span>
         <span className="team-leader-activity-copy">
           <strong>{displayName}</strong>
-          <small className="team-leader-activity-action">{activity.action}</small>
+          <small className="team-leader-activity-action">{status.action}</small>
         </span>
-        <em>{status}</em>
+        <em>{status.label}</em>
       </button>
     </section>
   );
+}
+
+function LeaderStatusIcon({ status }: { readonly status: TeamLeaderStatus }) {
+  if (status.state === 'completed') return <CircleCheck size={13} />;
+  if (status.state === 'failed' || status.state === 'degraded') return <CircleAlert size={13} />;
+  if (status.state === 'cancelled') return <Square size={12} />;
+  if (
+    status.state === 'waiting_user'
+    || status.state === 'waiting_interaction'
+    || status.state === 'waiting_children'
+    || status.state === 'awaiting_apply'
+  ) return <Clock3 size={13} />;
+  if (status.state === 'paused' || status.state === 'idle') return <Pause size={13} />;
+  return <CircleDashed className="spin" size={13} />;
 }
 
 function TeamActivityStatusIcon({ status, size }: {
@@ -804,7 +840,7 @@ function TeamTodoList({ entries, onSelectAgent }: {
   const [open, setOpen] = useState(true);
   const sections = partitionTeamTodos(entries);
   const groups = [
-    { id: 'running', label: '进行中', entries: sections.running },
+    { id: 'running', label: '计划进行中', entries: sections.running },
     { id: 'waiting', label: '等待', entries: sections.waiting },
     { id: 'terminal', label: '已结束', entries: sections.terminal },
   ].filter((group) => group.entries.length > 0);
@@ -815,6 +851,7 @@ function TeamTodoList({ entries, onSelectAgent }: {
         className="team-todo-toggle"
         type="button"
         aria-expanded={open}
+        title="TodoList 表示计划进度，不代表 Agent 当前正在运行"
         onClick={() => { setOpen((value) => !value); }}
       >
         {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}

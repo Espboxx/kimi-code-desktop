@@ -132,7 +132,7 @@ describe('TodoList view model', () => {
     );
 
     expect(entries.map((entry) => ({ status: entry.status, label: entry.statusLabel, bucket: entry.bucket }))).toEqual([
-      { status: 'in_progress', label: '正在进行', bucket: 'running' },
+      { status: 'in_progress', label: '计划进行中', bucket: 'running' },
       { status: 'pending', label: '未完成', bucket: 'waiting' },
       { status: 'done', label: '已完成', bucket: 'terminal' },
       { status: 'running', label: '运行中', bucket: 'running' },

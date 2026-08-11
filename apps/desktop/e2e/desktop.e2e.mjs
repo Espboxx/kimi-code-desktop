@@ -585,7 +585,7 @@ try {
   assert.match(await teamTodoPanel.innerText(), /Verify Team results/);
   assert.equal(await teamTodoPanel.locator('input').count(), 0, 'Team TodoList must stay read-only');
   assert.match(await assignmentToggle.innerText(), /1 进行中 · 1 等待 · 0 已结束/);
-  assert.match(await leaderActivityCard.innerText(), /组长当前工作/);
+  assert.match(await leaderActivityCard.innerText(), /组长状态/);
   assert.ok(
     (await leaderActivityCard.locator('.team-leader-activity-action').innerText()).trim().length > 0,
     'Team leader activity card has no live action',
@@ -596,16 +596,40 @@ try {
   await returnToTeamChannel(page, teamPage);
   await leaderActivityCard.getByRole('button').click();
   await page.locator('.team-agent-surface').waitFor({ state: 'visible' });
+  await returnToTeamChannel(page, teamPage);
+  await teamPage.locator('.team-header-controls').getByRole('button', { name: '暂停', exact: true }).click();
+  await page.waitForFunction(async (id) =>
+    (await window.kimiDesktop.host.snapshot()).teams[id]?.snapshot.scheduler?.status === 'paused',
+  teamSessionId, { timeout: 30_000 });
+  await leaderActivityCard.getByRole('button').click();
+  await page.locator('.team-agent-surface').waitFor({ state: 'visible' });
   await approveProfileIfNeeded(page, teamProfilePath);
   assert.ok(
     provider.requests.some((request) => request.toolName === 'AgentProfileCreate'),
     'Team leader did not create the reusable fixture profile',
   );
+  await page.waitForFunction(async (id) => {
+    const assignments = (await window.kimiDesktop.host.snapshot()).teams[id]?.snapshot.assignments ?? [];
+    return assignments.length >= 2 && assignments.every((assignment) => ['ready', 'blocked'].includes(assignment.status));
+  }, teamSessionId, { timeout: 30_000 });
+  await returnToTeamChannel(page, teamPage);
+  await page.waitForFunction(() =>
+    document.querySelector('.team-leader-activity')?.getAttribute('data-state') === 'paused',
+  undefined, { timeout: 30_000 });
+  assert.match(await leaderActivityCard.innerText(), /已暂停/);
+  const activeTeamRow = page.locator('.team-task-row-shell').filter({ hasText: 'Desktop Team E2E' });
+  assert.match(await activeTeamRow.innerText(), /2 等待/);
+  assert.doesNotMatch(await activeTeamRow.innerText(), /运行/);
+  assert.equal(await teamTab.locator('.tab-working').count(), 0, 'ready Team tasks must not show a running tab marker');
+  await teamPage.locator('.team-header-controls').getByRole('button', { name: '继续', exact: true }).click();
   await page.waitForFunction(async (id) => (
     (await window.kimiDesktop.host.snapshot()).teams[id]?.snapshot.assignments
       .filter((assignment) => assignment.status === 'running').length ?? 0
   ) >= 2, teamSessionId, { timeout: 30_000 });
-  await returnToTeamChannel(page, teamPage);
+  await page.waitForFunction(() =>
+    document.querySelector('.team-leader-activity')?.getAttribute('data-state') === 'waiting_children',
+  undefined, { timeout: 30_000 });
+  assert.match(await leaderActivityCard.innerText(), /等待子代理/);
   try {
     await page.waitForFunction(() => {
       const text = [...document.querySelectorAll('.team-activity-bubble')]
@@ -674,7 +698,11 @@ try {
   }
   await returnToTeamChannel(page, teamPage);
   await page.waitForFunction(() => document.querySelectorAll('.team-activity-strip').length === 0);
-  assert.equal(await teamPage.locator('.team-leader-activity').count(), 0, 'idle Team leader card must disappear');
+  await page.waitForFunction(() =>
+    document.querySelector('.team-leader-activity')?.getAttribute('data-state') === 'completed',
+  undefined, { timeout: 30_000 });
+  assert.equal(await teamPage.locator('.team-leader-activity').count(), 1, 'Team leader status card must remain visible');
+  assert.match(await leaderActivityCard.innerText(), /已完成/);
   assert.equal(
     provider.requests.filter((request) => request.toolName === 'TeamWait').length,
     teamWaitRequestCountBefore,

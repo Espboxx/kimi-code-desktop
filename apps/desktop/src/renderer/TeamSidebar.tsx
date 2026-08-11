@@ -8,13 +8,8 @@ import {
   NavigationSidebar,
   NavigationSidebarHeader,
 } from './SidePrimitives';
+import type { TeamBadge } from './swarm-ui';
 import { basename, formatTime } from './ui-utils';
-
-interface TeamBadge {
-  readonly unread: number;
-  readonly running: number;
-  readonly failed: number;
-}
 
 export function TeamSidebar({
   workspace,
@@ -80,6 +75,7 @@ export function TeamSidebar({
                   <span className="team-task-badges">
                     {busy && <CircleDashed className="spin" size={12} />}
                     {(badge?.running ?? 0) > 0 && <em className="running">{badge?.running} 运行</em>}
+                    {(badge?.waiting ?? 0) > 0 && <em className="waiting">{badge?.waiting} 等待</em>}
                     {(badge?.failed ?? 0) > 0 && <em className="failed">{badge?.failed} 失败</em>}
                     {(badge?.unread ?? 0) > 0 && <em className="unread">{badge?.unread}</em>}
                   </span>

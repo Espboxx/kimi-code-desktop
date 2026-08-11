@@ -1,6 +1,7 @@
 import { Bot, CircleAlert, FileCode2, GitCompare, UserRoundCog, Users, X } from 'lucide-react';
 
 import type { SessionListItem, SessionStatusSnapshot } from '../shared/desktop-api';
+import type { TeamBadge } from './swarm-ui';
 import { classNames } from './ui-utils';
 import type { WorkbenchTab, WorkbenchTabState } from './workbench-tabs';
 
@@ -9,7 +10,7 @@ export function WorkbenchTabs({ state, sessions, statuses, pendingCounts, teamBa
   readonly sessions: readonly SessionListItem[];
   readonly statuses: Readonly<Record<string, SessionStatusSnapshot>>;
   readonly pendingCounts: Readonly<Record<string, number>>;
-  readonly teamBadges?: Readonly<Record<string, { readonly unread: number; readonly running: number; readonly failed: number }>>;
+  readonly teamBadges?: Readonly<Record<string, TeamBadge>>;
   readonly agentLabels?: Readonly<Record<string, string>>;
   readonly onActivate: (tab: WorkbenchTab) => void;
   readonly onClose: (tab: WorkbenchTab) => void;
@@ -21,9 +22,18 @@ export function WorkbenchTabs({ state, sessions, statuses, pendingCounts, teamBa
           const session = tab.kind === 'session' || tab.kind === 'team' || tab.kind === 'agent'
             ? sessions.find((item) => item.id === tab.sessionId)
             : undefined;
-          const busy = tab.kind === 'session' && statuses[tab.sessionId]?.busy === true;
+          const sessionBusy = tab.kind === 'session'
+            || tab.kind === 'team'
+            || (tab.kind === 'agent' && tab.agentId === 'main')
+            ? statuses[tab.sessionId]?.busy === true
+            : false;
           const pending = tab.kind === 'session' ? pendingCounts[tab.sessionId] ?? 0 : 0;
           const teamBadge = tab.kind === 'team' ? teamBadges?.[tab.sessionId] : undefined;
+          const teamTasksRunning = (teamBadge?.running ?? 0) > 0;
+          const working = sessionBusy || teamTasksRunning;
+          const workingTitle = sessionBusy
+            ? tab.kind === 'session' ? 'Working' : '组长运行中'
+            : `${String(teamBadge?.running ?? 0)} 个任务运行中`;
           return (
             <div
               className={classNames('workbench-tab', state.activeId === tab.id && 'active', tab.kind === 'file' && tab.dirty && 'dirty')}
@@ -35,9 +45,8 @@ export function WorkbenchTabs({ state, sessions, statuses, pendingCounts, teamBa
               <button className="workbench-tab-main" onClick={() => onActivate(tab)} title={tabTitle(tab, session, agentLabels)}>
                 {tab.kind === 'session' ? <Bot size={13} /> : tab.kind === 'team' ? <Users size={13} /> : tab.kind === 'agent' ? <UserRoundCog size={13} /> : tab.kind === 'file' ? <FileCode2 size={13} /> : <GitCompare size={13} />}
                 <span>{tabLabel(tab, session, agentLabels)}</span>
-                {busy && <i className="tab-working" title="Working" />}
+                {working && <i className="tab-working" title={workingTitle} />}
                 {pending > 0 && <em title={`${pending} 个待处理交互`}>{pending}</em>}
-                {(teamBadge?.running ?? 0) > 0 && <i className="tab-working" title={`${teamBadge?.running} 个任务运行中`} />}
                 {(teamBadge?.failed ?? 0) > 0 && <CircleAlert className="tab-team-failed" size={12} aria-label={`${teamBadge?.failed} 个任务失败`} />}
                 {(teamBadge?.unread ?? 0) > 0 && <em title={`${teamBadge?.unread} 条未读团队消息`}>{teamBadge?.unread}</em>}
                 {tab.kind === 'file' && tab.dirty && <i className="tab-dirty" title="未保存" />}

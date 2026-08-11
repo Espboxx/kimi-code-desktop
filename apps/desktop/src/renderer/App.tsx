@@ -37,6 +37,7 @@ import { Inspector } from './Inspector';
 import { PendingInteractionDock } from './PendingInteractionDock';
 import { SettingsDialog } from './SettingsDialog';
 import { Sidebar, type SessionAction } from './Sidebar';
+import { buildTeamBadge } from './swarm-ui';
 import { TeamPage } from './TeamPage';
 import { TeamSidebar } from './TeamSidebar';
 import { persistTheme, readTheme, toggleTheme } from './theme';
@@ -627,18 +628,13 @@ export function App() {
       ? current
       : { ...current, [sessionId]: channelSeq });
   };
-  const teamBadges = Object.fromEntries(Object.entries(state.teams).map(([sessionId, teamState]) => [sessionId, {
-    unread: Math.max(0, teamState.snapshot.latestChannelSeq - (seenTeamSeqs[sessionId] ?? 0)),
-    running: teamState.snapshot.assignments.filter((assignment) => [
-      'queued',
-      'blocked',
-      'ready',
-      'running',
-      'awaiting_validation',
-      'integrating',
-    ].includes(assignment.status)).length,
-    failed: teamState.snapshot.assignments.filter((assignment) => assignment.status === 'failed').length,
-  }]));
+  const teamBadges = Object.fromEntries(Object.entries(state.teams).map(([sessionId, teamState]) => [
+    sessionId,
+    buildTeamBadge(
+      teamState.snapshot.assignments,
+      Math.max(0, teamState.snapshot.latestChannelSeq - (seenTeamSeqs[sessionId] ?? 0)),
+    ),
+  ]));
   const teamAgentLabels = Object.fromEntries(Object.entries(state.teams).flatMap(([sessionId, teamState]) =>
     teamState.snapshot.members.map((member) => {
       const assignment = teamState.snapshot.assignments.findLast(
