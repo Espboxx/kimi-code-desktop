@@ -56,6 +56,8 @@ describe('workspace-service helpers', () => {
       await Promise.all([
         mkdir(join(root, 'src')),
         mkdir(join(root, 'node_modules')),
+      ]);
+      await Promise.all([
         writeFile(join(root, 'src', 'main.ts'), Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('const a = 1;\r\n')])),
         writeFile(join(root, 'binary.bin'), Buffer.from([0, 1, 2])),
         writeFile(join(root, 'large.txt'), Buffer.alloc(MAX_EDITABLE_FILE_BYTES + 1, 65)),

@@ -54,6 +54,7 @@ export function Inspector(props: InspectorProps) {
           {tabs.map((item) => (
             <button
               role="tab"
+              aria-label={item.label}
               aria-selected={tab === item.id}
               className={tab === item.id ? 'active' : ''}
               onClick={() => setTab(item.id)}
