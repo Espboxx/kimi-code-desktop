@@ -69,6 +69,16 @@
     "mac": {
       "artifactName": "Kimi-Code-Desktop-${version}-${arch}.${ext}",
       "category": "public.app-category.developer-tools",
+      "extraResources": [
+        {
+          "from": "node_modules/electron/dist/LICENSE",
+          "to": "LICENSE.electron.txt"
+        },
+        {
+          "from": "node_modules/electron/dist/LICENSES.chromium.html",
+          "to": "LICENSES.chromium.html"
+        }
+      ],
       "hardenedRuntime": false,
       "icon": "build/icon.png",
       "identity": null,
@@ -82,7 +92,7 @@
       ]
     },
     "linux": {
-      "artifactName": "Kimi-Code-Desktop-${version}-${arch}.${ext}",
+      "artifactName": "Kimi-Code-Desktop-${version}-x64.${ext}",
       "category": "Development",
       "desktop": {
         "entry": {

@@ -13,9 +13,6 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  NODE_OPTIONS: --max-old-space-size=4096
-
 jobs:
   windows-x64:
     name: Windows x64 portable
@@ -55,6 +52,8 @@ jobs:
           pnpm --filter @moonshot-ai/kimi-code-desktop typecheck
 
       - name: Build Desktop
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: |
           pnpm --filter @moonshot-ai/kimi-code-desktop licenses:check
           pnpm --filter @moonshot-ai/kimi-code-desktop build
@@ -125,6 +124,8 @@ jobs:
           pnpm --filter @moonshot-ai/kimi-code-desktop typecheck
 
       - name: Build Desktop
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: |
           pnpm --filter @moonshot-ai/kimi-code-desktop licenses:check
           pnpm --filter @moonshot-ai/kimi-code-desktop build
@@ -196,6 +197,8 @@ jobs:
           pnpm --filter @moonshot-ai/kimi-code-desktop typecheck
 
       - name: Build Desktop
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: |
           pnpm --filter @moonshot-ai/kimi-code-desktop licenses:check
           pnpm --filter @moonshot-ai/kimi-code-desktop build
