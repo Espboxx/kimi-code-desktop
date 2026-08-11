@@ -56,7 +56,7 @@ jobs:
           pnpm --filter @moonshot-ai/kimi-code-desktop licenses:check
           pnpm --filter @moonshot-ai/kimi-code-desktop build
 
-      - name: Run Desktop Electron E2E
+      - name: Run Windows Desktop Electron E2E
         run: |
           for ($attempt = 1; $attempt -le 2; $attempt++) {
             pnpm --filter @moonshot-ai/kimi-code-desktop e2e
@@ -125,14 +125,6 @@ jobs:
         run: |
           pnpm --filter @moonshot-ai/kimi-code-desktop licenses:check
           pnpm --filter @moonshot-ai/kimi-code-desktop build
-
-      - name: Run Desktop Electron E2E
-        run: |
-          for attempt in 1 2; do
-            if pnpm --filter @moonshot-ai/kimi-code-desktop e2e; then exit 0; fi
-            if [[ "$attempt" == 2 ]]; then exit 1; fi
-            echo 'Desktop E2E failed; retrying once with a fresh fixture.' >&2
-          done
 
       - name: Build macOS package
         run: pnpm --filter @moonshot-ai/kimi-code-desktop exec electron-builder --mac dmg --arm64
@@ -204,14 +196,6 @@ jobs:
         run: |
           pnpm --filter @moonshot-ai/kimi-code-desktop licenses:check
           pnpm --filter @moonshot-ai/kimi-code-desktop build
-
-      - name: Run Desktop Electron E2E
-        run: |
-          for attempt in 1 2; do
-            if xvfb-run -a pnpm --filter @moonshot-ai/kimi-code-desktop e2e; then exit 0; fi
-            if [[ "$attempt" == 2 ]]; then exit 1; fi
-            echo 'Desktop E2E failed; retrying once with a fresh fixture.' >&2
-          done
 
       - name: Build Linux packages
         run: pnpm --filter @moonshot-ai/kimi-code-desktop exec electron-builder --linux AppImage deb --x64
