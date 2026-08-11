@@ -195,6 +195,32 @@ export interface TeamMessageAttachment {
   readonly name?: string;
 }
 
+export interface TeamQuestionOption {
+  readonly label: string;
+  readonly description?: string;
+}
+
+export interface TeamQuestionItem {
+  readonly question: string;
+  readonly header?: string;
+  readonly options: readonly TeamQuestionOption[];
+  readonly multiSelect?: boolean;
+}
+
+export type TeamQuestionAnswers = Readonly<Record<string, string | true>>;
+
+export type TeamMessagePayload =
+  | {
+      readonly type: 'question';
+      readonly questionId: string;
+      readonly questions: readonly TeamQuestionItem[];
+    }
+  | {
+      readonly type: 'question_answer';
+      readonly questionId: string;
+      readonly answers: TeamQuestionAnswers;
+    };
+
 export interface TeamMessage {
   readonly id: string;
   readonly teamId: string;
@@ -209,6 +235,7 @@ export interface TeamMessage {
   readonly recipientAgentIds?: readonly string[];
   readonly body: string;
   readonly attachments?: readonly TeamMessageAttachment[];
+  readonly payload?: TeamMessagePayload;
   readonly clientMessageId: string;
   readonly taskId?: string;
   readonly createdAt: number;

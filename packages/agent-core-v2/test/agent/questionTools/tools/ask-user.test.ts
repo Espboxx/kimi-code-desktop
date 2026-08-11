@@ -23,6 +23,7 @@ import type {
   QuestionResult,
 } from '#/session/question/question';
 import type { QuestionBackgroundTask } from '#/agent/tools/ask-user-question/question-background-task';
+import type { ISessionCollaborationService } from '#/features/collaboration/collaboration';
 import { executeTool } from '../../../tools/fixtures/execute-tool';
 
 const signal = new AbortController().signal;
@@ -52,6 +53,8 @@ function makeTool(
       req: QuestionRequest,
       requestOptions?: { readonly signal?: AbortSignal },
     ) => Promise<QuestionResult>;
+    readonly agentId?: string;
+    readonly collaboration?: ISessionCollaborationService;
   } = {},
 ): {
   readonly tool: AskUserQuestionTool;
@@ -74,8 +77,14 @@ function makeTool(
     id === 'q_test_task_id' ? { status: 'running' } : undefined,
   );
   const tasks = { registerTask, getTask } as unknown as IAgentTaskService;
-  const scopeContext = { agentId: 'main' } as unknown as IAgentScopeContext;
-  const tool = new AskUserQuestionTool(question, telemetry, tasks, scopeContext);
+  const scopeContext = { agentId: options.agentId ?? 'main' } as unknown as IAgentScopeContext;
+  const tool = new AskUserQuestionTool(
+    question,
+    telemetry,
+    tasks,
+    scopeContext,
+    options.collaboration,
+  );
   return { tool, request, telemetryTrack, registerTask, getTask, lastRegisteredTask: () => lastTask };
 }
 
@@ -262,6 +271,49 @@ describe('AskUserQuestionTool', () => {
     expect(telemetryTrack).toHaveBeenCalledWith('question_answered', {
       answered: 1,
       trace_id: undefined,
+    });
+  });
+
+  it('routes a Team member question to the leader without creating a user interaction', async () => {
+    const requestLeaderQuestion = vi.fn(async () => ({
+      'Which database?': 'SQLite',
+    }));
+    const collaboration = {
+      ready: Promise.resolve(),
+      isActive: () => true,
+      snapshot: async () => ({ team: { leaderAgentId: 'main' } }),
+      requestLeaderQuestion,
+    } as unknown as ISessionCollaborationService;
+    const { tool, request } = makeTool({
+      agentId: 'agent-member',
+      collaboration,
+    });
+
+    const result = await executeTool(tool, {
+      turnId: 4,
+      toolCallId: 'call_member_question',
+      args: input(),
+      signal,
+    });
+
+    expect(result).toMatchObject({
+      isError: false,
+      output: JSON.stringify({ answers: { 'Which database?': 'SQLite' } }),
+    });
+    expect(request).not.toHaveBeenCalled();
+    expect(requestLeaderQuestion).toHaveBeenCalledWith({
+      agentId: 'agent-member',
+      questionId: 'question:agent-member:call_member_question',
+      questions: [{
+        question: 'Which database?',
+        header: 'Storage',
+        options: [
+          { label: 'Postgres', description: 'Relational storage' },
+          { label: 'SQLite', description: 'Embedded storage' },
+        ],
+        multiSelect: false,
+      }],
+      signal,
     });
   });
 

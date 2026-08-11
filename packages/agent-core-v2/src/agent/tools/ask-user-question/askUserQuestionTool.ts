@@ -7,12 +7,12 @@
  * to `ISessionQuestionService` (the Session-scoped question service backed by
  * the `interaction` kernel), which owns the actual UI interaction. Requests
  * record the owning agent (`IAgentScopeContext.agentId`) on the interaction
- * origin, so question events and transcript frames route to the asking
- * agent's surfaces instead of falling back to 'main' (a subagent's question
- * must not land there). Answers and dismissals are tracked through
+ * origin. In an active Team, a non-leader request instead routes through the
+ * Session-scoped collaboration service to the Team leader without creating a
+ * UI interaction. Answers and dismissals are tracked through
  * `ITelemetryService`; `background: true` registers a
- * `QuestionBackgroundTask` on
- * `IAgentTaskService` so the call returns immediately with a `task_id`.
+ * `QuestionBackgroundTask` on `IAgentTaskService` so the call returns
+ * immediately with a `task_id`.
  *
  * Registered via the module-level `registerAgentToolService(IAskUserQuestionTool,
  * AskUserQuestionTool)` at the bottom of this file — the same "import =
@@ -51,7 +51,7 @@ import {
 } from './ask-user-question';
 import DESCRIPTION from './ask-user.md?raw';
 import { QuestionBackgroundTask } from './question-background-task';
-
+import { ISessionCollaborationService } from '#/features/collaboration/collaboration';
 
 const QUESTION_DISMISSED_MESSAGE = 'User dismissed the question without answering.';
 
@@ -70,8 +70,10 @@ export class AskUserQuestionTool implements IAskUserQuestionTool {
     @ITelemetryService private readonly telemetry: ITelemetryService,
     @IAgentTaskService private readonly tasks: IAgentTaskService,
     @IAgentScopeContext private readonly scopeContext: IAgentScopeContext,
+    @ISessionCollaborationService
+    private readonly collaboration?: ISessionCollaborationService,
   ) {
-    this.description = `${DESCRIPTION}- Set background=true when you can keep working without the answer. This starts a background question task and returns a task_id immediately. The answer arrives automatically in a later turn — you do not need to poll, sleep, or check on it. Continue with other work; never fabricate or predict the answer.`;
+    this.description = `${DESCRIPTION}- In an active Team, a non-leader's question is transparently routed to the Team leader instead of the user.\n- Set background=true when you can keep working without the answer. This starts a background question task and returns a task_id immediately. The answer arrives automatically in a later turn — you do not need to poll, sleep, or check on it. Continue with other work; never fabricate or predict the answer.`;
     this.parameters = toInputJsonSchema(this.inputSchema());
   }
 
@@ -145,7 +147,7 @@ export class AskUserQuestionTool implements IAskUserQuestionTool {
         `description: ${description}\n` +
         `status: ${status}\n` +
         `automatic_notification: true\n` +
-        'next_step: Continue your current work; the answer will arrive automatically when the user responds.\n' +
+        'next_step: Continue your current work; the answer will arrive automatically when the designated responder answers.\n' +
         'next_step: Use TaskOutput with this task_id for a non-blocking status/answer snapshot.\n' +
         'next_step: Use TaskStop only if the question should be cancelled.\n' +
         'human_shell_hint: The pending question is also visible in /tasks.',
@@ -161,23 +163,44 @@ export class AskUserQuestionTool implements IAskUserQuestionTool {
       trace,
     }: Pick<ExecutableToolContext, 'toolCallId' | 'signal' | 'turnId' | 'trace'>,
   ): Promise<ExecutableToolResult> {
+    let routedToLeader = false;
     try {
-      const result = await this.question.request(
-        {
-          turnId,
-          toolCallId,
-          questions: args.questions.map((q) => ({
-            question: q.question,
-            header: q.header,
-            options: q.options.map((o) => ({
-              label: o.label,
-              description: o.description,
-            })),
-            multiSelect: q.multi_select,
-          })),
-        },
-        { signal, agentId: this.scopeContext.agentId },
-      );
+      const questions = args.questions.map((q) => ({
+        question: q.question,
+        header: q.header,
+        options: q.options.map((o) => ({
+          label: o.label,
+          description: o.description,
+        })),
+        multiSelect: q.multi_select,
+      }));
+      let result: QuestionResult;
+      if (this.collaboration !== undefined) {
+        await this.collaboration.ready;
+        const snapshot = this.collaboration.isActive()
+          ? await this.collaboration.snapshot()
+          : undefined;
+        const leaderAgentId = snapshot?.team?.leaderAgentId;
+        if (leaderAgentId !== undefined && this.scopeContext.agentId !== leaderAgentId) {
+          routedToLeader = true;
+          result = await this.collaboration.requestLeaderQuestion({
+            agentId: this.scopeContext.agentId,
+            questionId: `question:${this.scopeContext.agentId}:${toolCallId}`,
+            questions,
+            signal,
+          });
+        } else {
+          result = await this.question.request(
+            { turnId, toolCallId, questions },
+            { signal, agentId: this.scopeContext.agentId },
+          );
+        }
+      } else {
+        result = await this.question.request(
+          { turnId, toolCallId, questions },
+          { signal, agentId: this.scopeContext.agentId },
+        );
+      }
 
       const normalized = normalizeQuestionResult(result);
       if (normalized === null || Object.keys(normalized.answers).length === 0) {
@@ -205,6 +228,13 @@ export class AskUserQuestionTool implements IAskUserQuestionTool {
         return {
           isError: true,
           output: QUESTION_UNSUPPORTED_FAILURE_MESSAGE,
+        };
+      }
+
+      if (routedToLeader) {
+        return {
+          isError: true,
+          output: `Team leader question failed: ${error instanceof Error ? error.message : String(error)}`,
         };
       }
 

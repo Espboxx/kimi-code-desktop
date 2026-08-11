@@ -36,6 +36,7 @@ import type { ExecutableToolContext } from '#/tool/toolContract';
 import { IAgentToolRegistryService } from '#/agent/toolRegistry/toolRegistry';
 import { AgentToolRegistryService } from '#/agent/toolRegistry/toolRegistryService';
 import { IAgentLoopService } from '#/agent/loop/loop';
+import { IAgentTaskService } from '#/agent/task/task';
 import { IConfigService } from '#/app/config/config';
 import { normalizeAgentProfile, type AgentProfile } from '#/app/agentProfileCatalog/agentProfileCatalog';
 import { ISessionAgentProfileCatalog } from '#/session/sessionAgentProfileCatalog/sessionAgentProfileCatalog';
@@ -49,6 +50,8 @@ import { type DomainEvent, IEventBus } from '#/app/event/eventBus';
 import { EventBusService } from '#/app/event/eventBusService';
 import type { ISessionCollaborationService } from '#/features/collaboration/collaboration';
 import { TEAM_COLLABORATION_FLAG_ID } from '#/features/collaboration/flag';
+import { AgentCollaborationPolicyService } from '#/features/collaboration/agentPolicy';
+import { BeforeToolExecuteEmitter } from '#/agent/toolExecutor/beforeToolExecuteEvent';
 
 import { stubContextMemory, type StubContextMemory } from '../contextMemory/stubs';
 import { executeTool } from '../../tools/fixtures/execute-tool';
@@ -240,6 +243,16 @@ function stubTeamCollaboration(): ISessionCollaborationService {
   } as unknown as ISessionCollaborationService;
 }
 
+function stubAgentTasks(): IAgentTaskService {
+  let index = 0;
+  return {
+    registerTask: vi.fn(() => {
+      index += 1;
+      return `team-callback-${String(index)}`;
+    }),
+  } as unknown as IAgentTaskService;
+}
+
 describe('AgentSwarmService', () => {
   let disposables: DisposableStore;
   let ix: TestInstantiationService;
@@ -324,7 +337,8 @@ describe('AgentSwarmService', () => {
     const reminder = contextMemory.messages[0]?.content[0];
     expect(reminder?.type).toBe('text');
     expect(reminder?.type === 'text' ? reminder.text : '').toContain('coordinator and integrator');
-    expect(reminder?.type === 'text' ? reminder.text : '').toContain('use TeamWait instead of polling');
+    expect(reminder?.type === 'text' ? reminder.text : '').toContain('automatically wakes its direct delegator');
+    expect(reminder?.type === 'text' ? reminder.text : '').toContain('do not call TeamWait merely to await');
   });
 
   it('dispatch persists enter/exit records and replay rebuilds the trigger (silent)', async () => {
@@ -408,6 +422,33 @@ describe('AgentSwarmService', () => {
     expect(decision).toBeUndefined();
     expect(permissionGateRan).toBe(true);
     expect(formatDenyMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe('AgentCollaborationPolicyService', () => {
+  it('vetoes ordinary Agent delegation while a durable Team is active', async () => {
+    const beforeExecute = new BeforeToolExecuteEmitter();
+    const executor = {
+      onBeforeExecuteTool: beforeExecute.event,
+    } as unknown as IAgentToolExecutorService;
+    const collaboration = {
+      ready: Promise.resolve(),
+      isActive: () => true,
+    } as unknown as ISessionCollaborationService;
+    const policy = new AgentCollaborationPolicyService(executor, collaboration);
+
+    try {
+      const decision = await beforeExecute.fireBeforeExecute(
+        hookContext([toolCall('Agent', 'agent-call')]),
+      );
+
+      expect(decision?.veto).toMatchObject({ isError: true });
+      expect(decision?.veto?.output).toContain('Use AgentSwarm');
+      expect(decision?.veto?.output).toContain('notifies the direct delegator automatically');
+    } finally {
+      policy.dispose();
+      beforeExecute.dispose();
+    }
   });
 });
 
@@ -599,6 +640,8 @@ describe('AgentSwarmTool', () => {
       settleAssignment: vi.fn(),
       settleBatch: vi.fn(),
     } as unknown as ISessionCollaborationService;
+    const registerTask = vi.fn((_task) => `team-callback-${String(registerTask.mock.calls.length)}`);
+    const agentTasks = { registerTask } as unknown as IAgentTaskService;
     const tool = new AgentSwarmTool(
       host.swarmService,
       makeAgentScopeContext({ agentId: host.callerAgentId, agentScope: '' }),
@@ -611,6 +654,7 @@ describe('AgentSwarmTool', () => {
         'main-model': { image_in: false, video_in: false, audio_in: false, thinking: true, tool_use: true, max_context_tokens: 262_144 },
       }),
       collaboration,
+      agentTasks,
     );
 
     const result = await executeTool(tool, context({
@@ -633,7 +677,11 @@ describe('AgentSwarmTool', () => {
     expect(result.output).toContain('<agent_swarm_started>');
     expect(result.output).toContain('<batch_id>team-batch</batch_id>');
     expect(result.output).toContain('model="main-model"');
-    expect(result.output).toContain('Use TeamStatus, TeamSend, and TeamWait');
+    expect(result.output).toContain('<automatic_notification>true</automatic_notification>');
+    expect(result.output).toContain('callback_task_id="team-callback-1"');
+    expect(result.output).toContain('do not call TeamWait merely to wait');
+    expect(result.stopTurn).toBe(true);
+    expect(registerTask).toHaveBeenCalledTimes(2);
     expect(collaboration.prepareSwarmBatch).toHaveBeenCalledWith(
       expect.objectContaining({
         assignments: expect.arrayContaining([
@@ -657,6 +705,7 @@ describe('AgentSwarmTool', () => {
       stubCallerProfile({ modelAlias: 'main-model', thinkingLevel: 'high' }),
       stubModelCatalog({ 'main-model': TEST_MODEL_CAPABILITY }),
       collaboration,
+      stubAgentTasks(),
     );
 
     const result = await executeTool(tool, context({
@@ -760,6 +809,7 @@ describe('AgentSwarmTool', () => {
       stubCallerProfile({ modelAlias: 'deep', thinkingLevel: 'high' }),
       stubModelCatalog({ fast: TEST_MODEL_CAPABILITY, deep: TEST_MODEL_CAPABILITY }),
       collaboration,
+      stubAgentTasks(),
     );
 
     const result = await executeTool(tool, context({
@@ -830,6 +880,7 @@ describe('AgentSwarmTool', () => {
         'main-model': { image_in: false, video_in: false, audio_in: false, thinking: true, tool_use: true, max_context_tokens: 262_144 },
       }),
       collaboration,
+      stubAgentTasks(),
     );
 
     const result = await executeTool(tool, context({

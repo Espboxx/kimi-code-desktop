@@ -35,6 +35,10 @@ Without overrides, a Team runs at most 4 tasks concurrently, keeps at most 16 me
 
 After activation, `AgentSwarm` becomes a durable, non-blocking task-graph launcher. Each new item has a stable task key, display name, agent profile, workspace policy, validation policy, and optional model assignment. `depends_on` edges hold a task until its prerequisites complete. The launcher returns after accepting the batch, while the Team scheduler continues work in the background and records tasks, attempts, artifacts, reviews, messages, budget usage, and integration state.
 
+While Team mode is active, every new delegation must go through `AgentSwarm`; ordinary `Agent` calls are rejected so that no child run escapes the durable task graph. The direct delegator ends its current turn after launch and is automatically woken with the result whenever one of its child tasks finishes. `TeamWait` remains available for an explicit one-off synchronization event, but it is not needed merely to wait for child completion.
+
+Questions follow the same coordination chain. When a Team member calls `AskUserQuestion`, Kimi Code sends the structured question to the Team leader through the Team channel instead of opening a user interaction in the member's session. The leader answers through the channel; only questions asked by the leader are presented to the user.
+
 Workspace handling depends on the task:
 
 - Read tasks share the main workspace through read-only tools.

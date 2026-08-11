@@ -88,7 +88,13 @@ describe('TeamReplica', () => {
       message: {
         id: 'm1', teamId: 'team-1', channelId: 'general', seq: 3, channelSeq: 1,
         sender: { actorKind: 'user', actorId: 'desktop-user', role: 'user' },
-        body: 'Proceed', clientMessageId: 'client-1', createdAt: 3,
+        body: 'Proceed',
+        payload: {
+          type: 'question_answer',
+          questionId: 'question-1',
+          answers: { 'Proceed?': 'Yes' },
+        },
+        clientMessageId: 'client-1', createdAt: 3,
       },
     };
 
@@ -96,6 +102,11 @@ describe('TeamReplica', () => {
     expect(replica.get('s1')?.snapshot.latestSeq).toBe(3);
     expect(replica.get('s1')?.snapshot.assignments[0]?.displayName).toBe('构建专家');
     expect(replica.get('s1')?.messages).toHaveLength(1);
+    expect(replica.get('s1')?.messages[0]?.payload).toEqual({
+      type: 'question_answer',
+      questionId: 'question-1',
+      answers: { 'Proceed?': 'Yes' },
+    });
     expect(replica.apply('s1', [message])).toBe('duplicate');
     expect(replica.apply('s1', [{ ...message, seq: 5, message: { ...message.message, id: 'm2', seq: 5, channelSeq: 2 } }])).toBe('gap');
   });

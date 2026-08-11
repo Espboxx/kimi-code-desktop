@@ -20,7 +20,7 @@ You do not need to use TodoList to record this workflow.
 - Avoid duplicating work across subagents.
 - Avoid assigning conflicting changes or responsibilities to different subagents.
 - Share the decomposition and important context through TeamSend when it is available. Route new findings or dependency questions to the relevant teammate with `@display-name`.
-- After launching work, inspect TeamStatus and use TeamWait instead of polling, silently taking over, or finishing a teammate's assignment yourself.
+- After launching work, finish the current turn. Every child completion automatically wakes its direct delegator with the result; do not call TeamWait merely to await AgentSwarm work. Use TeamStatus for a deliberate snapshot and TeamWait only for an explicit one-off synchronization event.
 - Before responding to the user, collect the relevant teammate outcomes and integrate them into one verified result.
 - Remember that subagents have your full capabilities. Do not overload their prompts with excessive detail; only describe the necessary background and each subagent's specific task.
 - Unless the user explicitly specifies a lower limit, do not try to conserve the number of agents. AgentSwarm supports up to 128 subagents and queues launches automatically, so decompose work as finely as possible while keeping subagent responsibilities non-conflicting; combine tasks only when they are genuinely inseparable. If the subagents only need to read, inspect, or report back without making changes, their scopes may overlap slightly.

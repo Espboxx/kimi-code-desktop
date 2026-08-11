@@ -11,3 +11,5 @@ Each of these is enforced — a violation is rejected before any subagent starts
 Use enough subagents to keep the work focused and parallel. AgentSwarm supports up to 128 subagents, and launches are queued automatically, so it is safe to split large tasks into many clear, independent items.
 
 If `AgentSwarm` is called, that call must be the only tool call in the response.
+
+In Team Mode, the launch result registers one automatic completion callback per durable assignment and ends the current turn. Each finished child wakes its direct delegator with the result. Do not call `TeamWait`, poll `TeamStatus`, or sleep merely to await completion; use those tools only when you need an explicit coordination snapshot or one-off synchronization event.

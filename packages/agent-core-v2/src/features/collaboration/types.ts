@@ -270,6 +270,40 @@ export const teamMessageAttachmentSchema = z.object({
 }).strict();
 export type TeamMessageAttachment = z.infer<typeof teamMessageAttachmentSchema>;
 
+export const teamQuestionOptionSchema = z.object({
+  label: z.string().min(1),
+  description: z.string().optional(),
+}).strict();
+export type TeamQuestionOption = z.infer<typeof teamQuestionOptionSchema>;
+
+export const teamQuestionItemSchema = z.object({
+  question: z.string().min(1),
+  header: z.string().optional(),
+  options: z.array(teamQuestionOptionSchema).min(2).max(4),
+  multiSelect: z.boolean().optional(),
+}).strict();
+export type TeamQuestionItem = z.infer<typeof teamQuestionItemSchema>;
+
+export const teamQuestionAnswersSchema = z.record(z.string().min(1), z.union([
+  z.string(),
+  z.literal(true),
+]));
+export type TeamQuestionAnswers = z.infer<typeof teamQuestionAnswersSchema>;
+
+export const teamMessagePayloadSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('question'),
+    questionId: z.string().min(1),
+    questions: z.array(teamQuestionItemSchema).min(1).max(4),
+  }).strict(),
+  z.object({
+    type: z.literal('question_answer'),
+    questionId: z.string().min(1),
+    answers: teamQuestionAnswersSchema,
+  }).strict(),
+]);
+export type TeamMessagePayload = z.infer<typeof teamMessagePayloadSchema>;
+
 export const teamMessageSchema = z.object({
   id: z.string().min(1),
   teamId: z.string().min(1),
@@ -280,6 +314,7 @@ export const teamMessageSchema = z.object({
   recipientAgentIds: z.array(z.string().min(1)).min(1).max(16).optional(),
   body: z.string().min(1),
   attachments: z.array(teamMessageAttachmentSchema).max(TEAM_MESSAGE_MAX_ATTACHMENTS).optional(),
+  payload: teamMessagePayloadSchema.optional(),
   clientMessageId: z.string().min(1),
   taskId: z.string().min(1).optional(),
   createdAt: z.number().nonnegative(),

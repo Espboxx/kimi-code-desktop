@@ -85,6 +85,10 @@ import type {
   TeamMember,
   TeamMessage,
   TeamMessageAttachment,
+  TeamMessagePayload,
+  TeamQuestionAnswers,
+  TeamQuestionItem,
+  TeamQuestionOption,
   TeamMessageSender,
   TeamOperation,
   TeamOperationV2,
@@ -268,12 +272,16 @@ import {
   teamIntegrationStateSchema,
   teamMemberSchema,
   teamMessageAttachmentSchema,
+  teamMessagePayloadSchema,
   teamMessageSchema,
   teamMessageSenderSchema,
   teamOperationSchema,
   teamOperationV2Schema,
   teamPolicyInputSchema,
   teamPolicySchema,
+  teamQuestionAnswersSchema,
+  teamQuestionItemSchema,
+  teamQuestionOptionSchema,
   teamReviewSchema,
   teamRoleSchema,
   teamSchedulerStateSchema,
@@ -574,6 +582,19 @@ const _teamMessageSender: AssertWire<typeof teamMessageSenderSchema, TeamMessage
 const _teamMessageAttachment: AssertWire<
   typeof teamMessageAttachmentSchema,
   TeamMessageAttachment
+> = true;
+const _teamQuestionOption: AssertWire<
+  typeof teamQuestionOptionSchema,
+  TeamQuestionOption
+> = true;
+const _teamQuestionItem: AssertWire<typeof teamQuestionItemSchema, TeamQuestionItem> = true;
+const _teamQuestionAnswers: AssertWire<
+  typeof teamQuestionAnswersSchema,
+  TeamQuestionAnswers
+> = true;
+const _teamMessagePayload: AssertWire<
+  typeof teamMessagePayloadSchema,
+  TeamMessagePayload
 > = true;
 const _teamMessage: AssertWire<typeof teamMessageSchema, TeamMessage> = true;
 const _teamPolicy: AssertWire<typeof teamPolicySchema, TeamPolicy> = true;

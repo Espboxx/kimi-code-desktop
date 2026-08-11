@@ -1408,6 +1408,13 @@ function buildAgentTaskNotificationBody(info: AgentTaskInfo): string {
 
   if (info.kind !== 'agent') return baseLine;
   if (info.status === 'completed') return baseLine;
+  if (info.taskId.startsWith('team-')) {
+    return [
+      baseLine,
+      '',
+      'This is a durable Team assignment. Inspect TeamStatus and use the Team task controls or AgentSwarm continuation flow; ordinary Agent delegation is disabled while the Team is active.',
+    ].join('\n');
+  }
   const agentId = info.agentId;
   if (agentId === undefined || agentId === info.taskId) return baseLine;
 

@@ -22,13 +22,18 @@ import {
 } from '#/app/telemetry/telemetry';
 import { createHooks } from '#/hooks';
 import { contextAppendMessage, contextClear, contextUndo } from '#/agent/contextMemory/contextOps';
+import type { AgentTaskSink } from '#/agent/task/types';
+import type { IAgentScopeContext } from '#/agent/scopeContext/scopeContext';
 import { ISessionCollaborationService } from '#/features/collaboration/collaboration';
 import { SessionCollaborationService } from '#/features/collaboration/collaborationService';
+import { AgentCollaborationDeliveryService } from '#/features/collaboration/deliveryService';
 import { CollaborationDeliveryModel, teamDeliveryAdvance } from '#/features/collaboration/deliveryOps';
+import { TeamAssignmentTask } from '#/features/collaboration/teamAssignmentTask';
 import { TEAM_COLLABORATION_FLAG_ID } from '#/features/collaboration/flag';
 import { ITeamWorkspaceService } from '#/features/collaboration/teamWorkspace';
 import { TeamWorkspaceService } from '#/features/collaboration/teamWorkspaceService';
 import type { TeamIntegrationState } from '#/features/collaboration/types';
+import { TeamAnswerQuestionTool } from '#/features/collaboration/tools/teamAnswerQuestion';
 import type { IBootstrapService } from '#/app/bootstrap/bootstrap';
 import { HostFileSystem } from '#/os/backends/node-local/hostFsService';
 import { HostProcessService } from '#/os/backends/node-local/hostProcessService';
@@ -53,6 +58,8 @@ import {
 
 import { stubFlag } from '../../app/flag/stubs';
 import { registerTestAgentWire } from '../../wire/stubs';
+import { stubContextMemory } from '../../agent/contextMemory/stubs';
+import { stubLoopWithHooks, stubWire } from '../../agent/loop/stubs';
 
 const SESSION_SCOPE = 'workspaces/w1/sessions/s1';
 const active = new Set<DisposableStore>();
@@ -926,6 +933,139 @@ describe('SessionCollaborationService', () => {
     ]);
   });
 
+  it('routes a structured member question to the leader and returns the leader answer', async () => {
+    const { service } = buildService();
+    await service.ensureTeam();
+    await service.prepareSwarmBatch({
+      callerAgentId: 'main',
+      assignments: [{
+        assignmentId: 'question-task',
+        displayName: 'questioner',
+        profileName: 'coder',
+        description: 'Implement parser',
+      }],
+    });
+    await service.bindAssignment({
+      assignmentId: 'question-task',
+      agentId: 'agent-questioner',
+      parentAgentId: 'main',
+    });
+    const leaderLoop = stubLoopWithHooks();
+    const delivery = new AgentCollaborationDeliveryService(
+      { agentId: 'main' } as IAgentScopeContext,
+      service,
+      stubContextMemory(),
+      stubWire(),
+      leaderLoop,
+    );
+    const controller = new AbortController();
+
+    try {
+      const pending = service.requestLeaderQuestion({
+        agentId: 'agent-questioner',
+        questionId: 'question-1',
+        questions: [{
+          question: 'Which parser should we use?',
+          header: 'Parser',
+          options: [
+            { label: 'Native', description: 'No dependency' },
+            { label: 'Library', description: 'More features' },
+          ],
+          multiSelect: false,
+        }],
+        signal: controller.signal,
+      });
+      await vi.waitFor(() => {
+        expect(leaderLoop.launches).toHaveLength(1);
+      });
+      const questionMessage = (await service.history()).at(-1);
+      expect(questionMessage).toMatchObject({
+        sender: { actorId: 'agent-questioner', role: 'member' },
+        recipientAgentIds: ['main'],
+        payload: {
+          type: 'question',
+          questionId: 'question-1',
+        },
+      });
+      expect(questionMessage?.body).toContain('Native: No dependency');
+      expect(questionMessage?.body).toContain('Library: More features');
+
+      const execution = new TeamAnswerQuestionTool(
+        { agentId: 'main' } as IAgentScopeContext,
+        service,
+      ).resolveExecution({
+        question_id: 'question-1',
+        answers: [{ question: 'Which parser should we use?', answer: 'Native' }],
+      });
+      if (execution.isError === true) throw new Error(JSON.stringify(execution.output));
+      const answerResult = await execution.execute({
+        turnId: 1,
+        toolCallId: 'team-answer-question-1',
+        signal: controller.signal,
+      });
+      expect(answerResult.isError).toBeUndefined();
+
+      await expect(pending).resolves.toEqual({ 'Which parser should we use?': 'Native' });
+      expect((await service.history()).at(-1)).toMatchObject({
+        sender: { actorId: 'main', role: 'leader' },
+        recipientAgentIds: ['agent-questioner'],
+        payload: {
+          type: 'question_answer',
+          questionId: 'question-1',
+          answers: { 'Which parser should we use?': 'Native' },
+        },
+      });
+    } finally {
+      delivery.dispose();
+    }
+  });
+
+  it('projects one completed durable assignment into an Agent task callback result', async () => {
+    const { service } = buildService();
+    await service.ensureTeam();
+    const receipt = await service.prepareSwarmBatch({
+      callerAgentId: 'main',
+      assignments: [{
+        assignmentId: 'callback-task',
+        displayName: 'callback-worker',
+        profileName: 'coder',
+        description: 'Implement callback',
+      }],
+    });
+    await service.bindAssignment({
+      assignmentId: 'callback-task',
+      agentId: 'agent-callback',
+      parentAgentId: 'main',
+    });
+    await service.submitTaskReport({
+      agentId: 'agent-callback',
+      taskId: 'callback-task',
+      summary: 'Callback implementation verified.',
+    });
+    const task = new TeamAssignmentTask(service, receipt.assignments[0]!);
+    const appendOutput = vi.fn();
+    const settle = vi.fn(async () => true);
+    const running = task.start({
+      signal: new AbortController().signal,
+      appendOutput,
+      settle,
+    } satisfies AgentTaskSink);
+
+    await service.settleAssignment({ assignmentId: 'callback-task', status: 'completed' });
+    await running;
+
+    expect(settle).toHaveBeenCalledWith({ status: 'completed', stopReason: undefined });
+    expect(appendOutput).toHaveBeenCalledWith(expect.stringContaining('Callback implementation verified.'));
+    expect(task.toInfo({
+      taskId: 'observer-1',
+      description: task.description,
+      status: 'completed',
+      detached: true,
+      startedAt: 1,
+      endedAt: 2,
+    })).toMatchObject({ kind: 'agent', agentId: 'agent-callback', subagentType: 'coder' });
+  });
+
   it('wakes TeamWait without losing a raced operation and folds active work as interrupted on restart', async () => {
     const persistence = new InMemoryStorageService();
     const first = buildService(true, persistence);
@@ -1002,7 +1142,8 @@ describe('SessionCollaborationService', () => {
     expect(delivery?.bootstrap).toContain('Call TeamStatus');
     expect(delivery?.bootstrap).toContain('TeamSend');
     expect(delivery?.bootstrap).toContain('Do not duplicate an active teammate task');
-    expect(delivery?.bootstrap).toContain('Use TeamWait');
+    expect(delivery?.bootstrap).toContain('use TeamWait only for an explicit one-off');
+    expect(delivery?.bootstrap).toContain('AskUserQuestion');
     expect(delivery?.bootstrap).toContain('Before finishing execution work');
   });
 

@@ -1,9 +1,10 @@
 /**
  * `collaboration` domain — experimental Team Mode feature assembly.
  *
- * Contributes the session collaboration service, per-agent delivery service,
- * and the Team coordination, reporting, validation, and profile-authoring
- * tools while keeping static flag and wire registrations import-discoverable.
+ * Contributes the Session collaboration service, per-Agent delivery and
+ * delegation-policy services, and the Team coordination, question-answering,
+ * reporting, validation, and profile-authoring tools while keeping static flag
+ * and wire registrations import-discoverable.
  */
 
 import { IFlagService } from '#/app/flag/flag';
@@ -19,6 +20,10 @@ import { WorkspaceAgentProfileManagerService } from '#/workspace/workspaceAgentP
 
 import { ISessionCollaborationService } from './collaboration';
 import { SessionCollaborationService } from './collaborationService';
+import {
+  AgentCollaborationPolicyService,
+  IAgentCollaborationPolicyService,
+} from './agentPolicy';
 import { ITeamBudgetGuardService, TeamBudgetGuardService } from './budgetGuard';
 import { IAgentCollaborationDeliveryService } from './delivery';
 import { AgentCollaborationDeliveryService } from './deliveryService';
@@ -30,6 +35,10 @@ import { ITeamSendTool, TeamSendTool } from './tools/teamSend';
 import { ITeamStatusTool, TeamStatusTool } from './tools/teamStatus';
 import { ITeamWaitTool, TeamWaitTool } from './tools/teamWait';
 import { ITeamTaskReportTool, TeamTaskReportTool } from './tools/teamTaskReport';
+import {
+  ITeamAnswerQuestionTool,
+  TeamAnswerQuestionTool,
+} from './tools/teamAnswerQuestion';
 import { ITeamReviewSubmitTool, TeamReviewSubmitTool } from './tools/teamReviewSubmit';
 import {
   AgentProfileCreateTool,
@@ -54,6 +63,12 @@ export class CollaborationFeature extends Feature {
     this.contributeAgentService(
       IAgentCollaborationDeliveryService,
       AgentCollaborationDeliveryService,
+      { activation: ScopeActivation.OnScopeCreated },
+    );
+    this.contributeAgentService(
+      IAgentCollaborationPolicyService,
+      AgentCollaborationPolicyService,
+      { activation: ScopeActivation.OnScopeCreated },
     );
     this.contributeAgentService(
       ITeamBudgetGuardService,
@@ -91,6 +106,11 @@ export class CollaborationFeature extends Feature {
     });
     this.contributeTool(IAgentProfileCreateTool, AgentProfileCreateTool, {
       name: 'AgentProfileCreate',
+      domain: 'collaboration',
+      when: whenLeader,
+    });
+    this.contributeTool(ITeamAnswerQuestionTool, TeamAnswerQuestionTool, {
+      name: 'TeamAnswerQuestion',
       domain: 'collaboration',
       when: whenLeader,
     });

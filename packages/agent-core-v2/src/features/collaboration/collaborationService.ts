@@ -47,6 +47,7 @@ import {
   legacyTeamOperationSchema,
   teamDisplayNameSchema,
   teamMessageAttachmentSchema,
+  teamMessagePayloadSchema,
   teamOperationV2Schema,
   teamPolicyInputSchema,
   type LegacyTeamOperation,
@@ -66,11 +67,14 @@ import {
   type TeamMember,
   type TeamMessage,
   type TeamMessageAttachment,
+  type TeamMessagePayload,
   type TeamMessageSender,
   type TeamOperation,
   type TeamOperationV2,
   type TeamPolicy,
   type TeamPolicyInput,
+  type TeamQuestionAnswers,
+  type TeamQuestionItem,
   type TeamReview,
   type TeamSchedulerState,
   type TeamSnapshot,
@@ -296,6 +300,131 @@ export class SessionCollaborationService extends Service implements ISessionColl
       body: input.body,
       clientMessageId: input.clientMessageId,
       recipientAgentIds: input.recipientAgentIds,
+    });
+  }
+
+  async requestLeaderQuestion(input: {
+    readonly agentId: string;
+    readonly questionId: string;
+    readonly questions: readonly TeamQuestionItem[];
+    readonly signal: AbortSignal;
+  }): Promise<TeamQuestionAnswers> {
+    await this.ready;
+    const team = this.requireTeam();
+    if (input.agentId === team.leaderAgentId) {
+      throw new Error2(ErrorCodes.REQUEST_INVALID, 'The Team leader asks the user directly');
+    }
+    if (!this.members.has(input.agentId)) throw this.notMemberError(input.agentId);
+    const payload = teamMessagePayloadSchema.parse({
+      type: 'question',
+      questionId: input.questionId,
+      questions: input.questions,
+    });
+    await this.sendMessage({
+      actorKind: 'agent',
+      actorId: input.agentId,
+      body: renderLeaderQuestion(input.questionId, input.questions),
+      clientMessageId: `question:${input.questionId}`,
+      recipientAgentIds: [team.leaderAgentId],
+      payload,
+    });
+    return this.waitForLeaderAnswer({
+      questionId: input.questionId,
+      requesterAgentId: input.agentId,
+      leaderAgentId: team.leaderAgentId,
+      signal: input.signal,
+    });
+  }
+
+  async answerLeaderQuestion(input: {
+    readonly leaderAgentId: string;
+    readonly questionId: string;
+    readonly answers: TeamQuestionAnswers;
+  }): Promise<TeamMessage> {
+    await this.ready;
+    const team = this.requireTeam();
+    if (input.leaderAgentId !== team.leaderAgentId) {
+      throw new Error2(ErrorCodes.COLLABORATION_NOT_MEMBER, 'Only the Team leader can answer teammate questions');
+    }
+    const questionMessage = this.messages.findLast(
+      (message) => message.payload?.type === 'question'
+        && message.payload.questionId === input.questionId,
+    );
+    if (questionMessage?.payload?.type !== 'question') {
+      throw new Error2(ErrorCodes.REQUEST_INVALID, `Unknown Team question "${input.questionId}"`);
+    }
+    const questionTexts = questionMessage.payload.questions.map((question) => question.question);
+    const answerTexts = Object.keys(input.answers);
+    if (
+      answerTexts.length !== questionTexts.length
+      || questionTexts.some((question) => !Object.hasOwn(input.answers, question))
+    ) {
+      throw new Error2(
+        ErrorCodes.REQUEST_INVALID,
+        'Answer every question exactly once using the original question text',
+        { details: { expectedQuestions: questionTexts, answeredQuestions: answerTexts } },
+      );
+    }
+    if (Object.values(input.answers).some((answer) => typeof answer === 'string' && answer.trim().length === 0)) {
+      throw new Error2(ErrorCodes.REQUEST_INVALID, 'Team question answers cannot be empty');
+    }
+    const payload = teamMessagePayloadSchema.parse({
+      type: 'question_answer',
+      questionId: input.questionId,
+      answers: input.answers,
+    });
+    return this.sendMessage({
+      actorKind: 'agent',
+      actorId: input.leaderAgentId,
+      body: renderLeaderAnswer(input.questionId, questionTexts, input.answers),
+      clientMessageId: `question-answer:${input.questionId}`,
+      recipientAgentIds: [questionMessage.sender.actorId],
+      payload,
+    });
+  }
+
+  private async waitForLeaderAnswer(input: {
+    readonly questionId: string;
+    readonly requesterAgentId: string;
+    readonly leaderAgentId: string;
+    readonly signal: AbortSignal;
+  }): Promise<TeamQuestionAnswers> {
+    const findAnswer = (): TeamQuestionAnswers | undefined => {
+      const answer = this.messages.findLast(
+        (message) => message.payload?.type === 'question_answer'
+          && message.payload.questionId === input.questionId
+          && message.sender.actorKind === 'agent'
+          && message.sender.actorId === input.leaderAgentId
+          && this.messageVisibleTo(message, input.requesterAgentId),
+      );
+      return answer?.payload?.type === 'question_answer'
+        ? answer.payload.answers
+        : undefined;
+    };
+    const available = findAnswer();
+    if (available !== undefined) return available;
+    input.signal.throwIfAborted();
+    return new Promise<TeamQuestionAnswers>((resolve, reject) => {
+      let settled = false;
+      const finish = (answers: TeamQuestionAnswers | undefined, error?: unknown): void => {
+        if (settled) return;
+        settled = true;
+        subscription.dispose();
+        input.signal.removeEventListener('abort', onAbort);
+        if (error !== undefined) reject(error);
+        else if (answers !== undefined) resolve(answers);
+      };
+      const subscription = this.onDidOperate((operation) => {
+        if (operation.type !== 'message.sent') return;
+        const answers = findAnswer();
+        if (answers !== undefined) finish(answers);
+      });
+      const onAbort = (): void => {
+        finish(undefined, input.signal.reason ?? new DOMException('Aborted', 'AbortError'));
+      };
+      input.signal.addEventListener('abort', onAbort, { once: true });
+      const raced = findAnswer();
+      if (raced !== undefined) finish(raced);
     });
   }
 
@@ -856,8 +985,13 @@ export class SessionCollaborationService extends Service implements ISessionColl
         toSeq = operation.seq;
         continue;
       }
+      if (message.payload?.type === 'question_answer') {
+        toSeq = operation.seq;
+        continue;
+      }
       const messageBytes = Buffer.byteLength(message.body, 'utf8')
-        + Buffer.byteLength(JSON.stringify(message.attachments ?? []), 'utf8');
+        + Buffer.byteLength(JSON.stringify(message.attachments ?? []), 'utf8')
+        + Buffer.byteLength(JSON.stringify(message.payload ?? null), 'utf8');
       if (messages.length >= TEAM_DELIVERY_MAX_MESSAGES || (messages.length > 0 && bytes + messageBytes > TEAM_DELIVERY_MAX_BYTES)) break;
       messages.push(message);
       bytes += messageBytes;
@@ -883,6 +1017,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
     readonly clientMessageId: string;
     readonly attachments?: readonly TeamMessageAttachment[];
     readonly recipientAgentIds?: readonly string[];
+    readonly payload?: TeamMessagePayload;
   }): Promise<TeamMessage> {
     await this.ready;
     return this.runWrite(async () => {
@@ -899,14 +1034,19 @@ export class SessionCollaborationService extends Service implements ISessionColl
       const idempotencyKey = `${sender.actorKind}:${sender.actorId}:${input.clientMessageId}`;
       const existing = this.messageByIdempotencyKey.get(idempotencyKey);
       if (existing !== undefined) {
-        if (existing.body === input.body && sameAttachments(existing.attachments, input.attachments) && sameStrings(existing.recipientAgentIds, recipients)) return existing;
+        if (
+          existing.body === input.body
+          && sameAttachments(existing.attachments, input.attachments)
+          && sameStrings(existing.recipientAgentIds, recipients)
+          && sameMessagePayload(existing.payload, input.payload)
+        ) return existing;
         throw new Error2(
           ErrorCodes.COLLABORATION_IDEMPOTENCY_CONFLICT,
           'The collaboration message id was already used with different content',
           { details: { clientMessageId: input.clientMessageId } },
         );
       }
-      this.validateMessage(input.body, input.attachments);
+      this.validateMessage(input.body, input.attachments, input.payload);
       this.consumeRateToken(`${sender.actorKind}:${sender.actorId}`);
       return this.appendMessage({
         team,
@@ -915,6 +1055,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
         clientMessageId: input.clientMessageId,
         attachments: input.attachments,
         recipientAgentIds: recipients,
+        payload: input.payload,
         taskId: input.actorKind === 'agent' ? this.activeTaskForAgent(input.actorId)?.id : undefined,
       });
     });
@@ -927,6 +1068,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
     readonly clientMessageId: string;
     readonly attachments?: readonly TeamMessageAttachment[];
     readonly recipientAgentIds?: readonly string[];
+    readonly payload?: TeamMessagePayload;
     readonly taskId?: string;
   }): Promise<TeamMessage> {
     let committed: TeamMessage | undefined;
@@ -941,6 +1083,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
         recipientAgentIds: input.recipientAgentIds === undefined ? undefined : [...input.recipientAgentIds],
         body: input.body,
         attachments: input.attachments === undefined ? undefined : [...input.attachments],
+        payload: input.payload,
         clientMessageId: input.clientMessageId,
         taskId: input.taskId,
         createdAt: Date.now(),
@@ -1921,14 +2064,22 @@ export class SessionCollaborationService extends Service implements ISessionColl
     assertAcyclic(assignments);
   }
 
-  private validateMessage(body: string, attachments: readonly TeamMessageAttachment[] | undefined): void {
-    const bytes = Buffer.byteLength(body, 'utf8');
+  private validateMessage(
+    body: string,
+    attachments: readonly TeamMessageAttachment[] | undefined,
+    payload: TeamMessagePayload | undefined,
+  ): void {
+    const bytes = Buffer.byteLength(body, 'utf8')
+      + Buffer.byteLength(JSON.stringify(attachments ?? []), 'utf8')
+      + Buffer.byteLength(JSON.stringify(payload ?? null), 'utf8');
     if (bytes === 0 || body.trim().length === 0) throw new Error2(ErrorCodes.REQUEST_INVALID, 'Team message cannot be empty');
     if (bytes > TEAM_MESSAGE_MAX_BYTES) {
       throw new Error2(ErrorCodes.COLLABORATION_MESSAGE_TOO_LARGE, `Team message exceeds ${String(TEAM_MESSAGE_MAX_BYTES)} UTF-8 bytes`);
     }
     const parsed = teamMessageAttachmentSchema.array().max(TEAM_MESSAGE_MAX_ATTACHMENTS).safeParse(attachments ?? []);
     if (!parsed.success) throw new Error2(ErrorCodes.REQUEST_INVALID, 'Team message attachments are invalid', { details: { issues: parsed.error.issues } });
+    const parsedPayload = teamMessagePayloadSchema.optional().safeParse(payload);
+    if (!parsedPayload.success) throw new Error2(ErrorCodes.REQUEST_INVALID, 'Team message payload is invalid', { details: { issues: parsedPayload.error.issues } });
   }
 
   private validateRecipients(recipients: readonly string[] | undefined): readonly string[] | undefined {
@@ -2131,7 +2282,8 @@ export class SessionCollaborationService extends Service implements ISessionColl
       `You joined as ${member.role}. ${assignmentText}`,
       'Call TeamStatus before starting, then use TeamSend for plans, dependencies, findings, blockers, and handoff.',
       'Direct messages name explicit recipient_agent_ids; broadcast only when the whole team needs the update.',
-      'Do not duplicate an active teammate task. Use TeamWait when a dependency is still running.',
+      'Do not duplicate an active teammate task. Child completion arrives automatically; use TeamWait only for an explicit one-off synchronization event.',
+      'When you need a decision, call AskUserQuestion. In Team Mode it is routed to the leader through this channel; do not ask the user directly.',
       task === undefined
         ? 'Wait for a new assignment before changing repository files.'
         : task.workspaceMode === 'shared_readonly'
@@ -2192,6 +2344,40 @@ function sameStrings(left: readonly string[] | undefined, right: readonly string
   const first = left ?? [];
   const second = right ?? [];
   return first.length === second.length && first.every((value, index) => value === second[index]);
+}
+
+function sameMessagePayload(
+  left: TeamMessagePayload | undefined,
+  right: TeamMessagePayload | undefined,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function renderLeaderQuestion(
+  questionId: string,
+  questions: readonly TeamQuestionItem[],
+): string {
+  return [
+    `[Question for Team leader: ${questionId}]`,
+    ...questions.flatMap((question, index) => [
+      `${String(index + 1)}. ${question.header === undefined || question.header.length === 0 ? '' : `[${question.header}] `}${question.question}`,
+      `Options${question.multiSelect === true ? ' (multiple selections allowed)' : ''}:`,
+      ...question.options.map((option) =>
+        `- ${option.label}${option.description === undefined || option.description.length === 0 ? '' : `: ${option.description}`}`),
+    ]),
+    `Answer with TeamAnswerQuestion using question_id="${questionId}" and one answer for every original question text.`,
+  ].join('\n');
+}
+
+function renderLeaderAnswer(
+  questionId: string,
+  questions: readonly string[],
+  answers: TeamQuestionAnswers,
+): string {
+  return [
+    `[Team leader answer: ${questionId}]`,
+    ...questions.map((question) => `${question}: ${String(answers[question])}`),
+  ].join('\n');
 }
 
 function sameScheduler(left: TeamSchedulerState, right: TeamSchedulerState): boolean {

@@ -16,7 +16,10 @@
  * pair via `buildSubagentModelDescriptions`, suffixing each line with the
  * entry's capability flags resolved through `IModelCatalog`. Swarm mode is
  * entered through `IAgentSwarmService`; the caller's agent id comes from
- * `IAgentScopeContext`. Pure tool — owns no scoped state.
+ * `IAgentScopeContext`. In an active Team, stages durable assignments through
+ * the Session-scoped collaboration service and registers their completion
+ * observers through the Agent-scoped task service. Pure tool — owns no scoped
+ * state.
  *
  * Registered via the module-level `registerAgentToolService(IAgentSwarmTool,
  * AgentSwarmTool)` at the bottom of this file — the same "import = register"
@@ -29,7 +32,7 @@ import {
   type ExecutableToolResult,
   type ToolExecution,
 } from '#/tool/toolContract';
-import { Error2, ErrorCodes } from '#/errors';
+import { BugIndicatingError, Error2, ErrorCodes } from '#/errors';
 import { registerAgentToolService } from '#/agent/toolRegistry/toolContribution';
 import { toInputJsonSchema } from '#/tool/input-schema';
 import { IConfigService } from '#/app/config/config';
@@ -45,6 +48,7 @@ import {
 } from '#/app/agentProfileCatalog/profile-shared';
 import { IAgentScopeContext } from '#/agent/scopeContext/scopeContext';
 import { IAgentSwarmService } from '#/agent/swarm/swarm';
+import { IAgentTaskService } from '#/agent/task/task';
 import {
   buildSubagentModelDescriptions,
   buildTeamSubagentModelDescriptions,
@@ -64,6 +68,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { ISessionCollaborationService } from '#/features/collaboration/collaboration';
 import { TEAM_COLLABORATION_FLAG_ID } from '#/features/collaboration/flag';
+import { TeamAssignmentTask } from '#/features/collaboration/teamAssignmentTask';
 import AGENT_SWARM_DESCRIPTION from './agent-swarm.md?raw';
 
 const DEFAULT_SUBAGENT_TYPE = 'coder';
@@ -142,6 +147,7 @@ export class AgentSwarmTool implements IAgentSwarmTool {
     @IAgentProfileService private readonly profile: IAgentProfileService,
     @IModelCatalog private readonly modelCatalog: IModelCatalog,
     @ISessionCollaborationService private readonly collaboration?: ISessionCollaborationService,
+    @IAgentTaskService private readonly agentTasks?: IAgentTaskService,
   ) {
     this.callerAgentId = scopeContext.agentId;
   }
@@ -184,10 +190,12 @@ export class AgentSwarmTool implements IAgentSwarmTool {
     context: ExecutableToolContext,
   ): Promise<ExecutableToolResult> {
     try {
+      const teamMode = this.teamModeEnabled();
       this.swarmMode.enter('tool');
       const result = await this.runSwarm(args, context.signal, context.toolCallId);
       return {
         output: result,
+        stopTurn: teamMode,
       };
     } catch (error) {
       return {
@@ -399,7 +407,19 @@ export class AgentSwarmTool implements IAgentSwarmTool {
     });
     if (teamReceipt !== undefined) {
       const receipt = teamReceipt;
+      const callbackTaskIds: string[] = [];
       try {
+        if (this.agentTasks === undefined) {
+          throw new BugIndicatingError('AgentSwarm Team Mode requires the Agent task service');
+        }
+        for (const assignment of receipt.assignments) {
+          callbackTaskIds.push(
+            this.agentTasks.registerTask(
+              new TeamAssignmentTask(this.requireCollaboration(), assignment),
+              { detached: true },
+            ),
+          );
+        }
         await this.requireCollaboration().scheduleSwarmBatch({
           batchId: receipt.batchId,
           tasks,
@@ -416,7 +436,7 @@ export class AgentSwarmTool implements IAgentSwarmTool {
         await this.requireCollaboration().settleBatch({ batchId: receipt.batchId, status: 'failed' });
         throw error;
       }
-      return renderSwarmLaunchReceipt(receipt.batchId, receipt.assignments);
+      return renderSwarmLaunchReceipt(receipt.batchId, receipt.assignments, callbackTaskIds);
     }
     const results = await this.swarmService.run({
       callerAgentId: this.callerAgentId,
@@ -483,21 +503,27 @@ function renderSwarmLaunchReceipt(
     readonly profileName: string;
     readonly model?: string;
   }[],
+  callbackTaskIds: readonly string[],
 ): string {
   return [
     '<agent_swarm_started>',
     `<batch_id>${batchId}</batch_id>`,
     `<accepted>${String(assignments.length)}</accepted>`,
-    ...assignments.map((assignment) => {
+    ...assignments.map((assignment, index) => {
       const name = assignment.displayName === undefined
         ? ''
         : ` display_name="${escapeXmlAttribute(assignment.displayName)}"`;
       const model = assignment.model === undefined
         ? ''
         : ` model="${escapeXmlAttribute(assignment.model)}"`;
-      return `<assignment id="${escapeXmlAttribute(assignment.id)}"${name} profile="${escapeXmlAttribute(assignment.profileName)}"${model}>${escapeXmlAttribute(assignment.description)}</assignment>`;
+      const callbackTaskId = callbackTaskIds[index];
+      const callback = callbackTaskId === undefined
+        ? ''
+        : ` callback_task_id="${escapeXmlAttribute(callbackTaskId)}"`;
+      return `<assignment id="${escapeXmlAttribute(assignment.id)}"${callback}${name} profile="${escapeXmlAttribute(assignment.profileName)}"${model}>${escapeXmlAttribute(assignment.description)}</assignment>`;
     }),
-    '<coordination>Use TeamStatus, TeamSend, and TeamWait to coordinate this running batch.</coordination>',
+    '<automatic_notification>true</automatic_notification>',
+    '<coordination>Finish this turn after launch. Each child task completion automatically wakes the direct delegator with its result. Use TeamStatus and TeamSend for active coordination; do not call TeamWait merely to wait for child completion.</coordination>',
     '</agent_swarm_started>',
   ].join('\n');
 }

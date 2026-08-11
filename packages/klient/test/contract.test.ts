@@ -11,7 +11,11 @@ import { describe, expect, it } from 'vitest';
 import { pluginManifestSchema } from '../src/contract/global/plugins.js';
 import { createSessionOptionsSchema } from '../src/contract/session/lifecycle.js';
 import { todoItemsSchema } from '../src/contract/session/todo.js';
-import { teamOperationSchema, teamSnapshotSchema } from '../src/contract/session/collaboration.js';
+import {
+  teamMessageSchema,
+  teamOperationSchema,
+  teamSnapshotSchema,
+} from '../src/contract/session/collaboration.js';
 
 type McpTimeoutField = 'startupTimeoutMs' | 'toolTimeoutMs';
 
@@ -189,5 +193,37 @@ describe('Team collaboration contract validation', () => {
     expect(teamOperationSchema.safeParse(legacyOperation).success).toBe(true);
     expect(teamOperationSchema.safeParse(operationV2).success).toBe(true);
     expect(teamOperationSchema.safeParse({ ...legacyOperation, version: 3 }).success).toBe(false);
+  });
+
+  it('accepts both payload-less messages and structured Team questions', () => {
+    const baseMessage = {
+      id: 'message-1',
+      teamId: 'team-1',
+      channelId: 'general',
+      seq: 2,
+      channelSeq: 1,
+      sender: { actorKind: 'agent', actorId: 'agent-2', role: 'member' },
+      recipientAgentIds: ['main'],
+      body: 'Which parser should we use?',
+      clientMessageId: 'client-1',
+      createdAt: 2,
+    } as const;
+
+    expect(teamMessageSchema.safeParse(baseMessage).success).toBe(true);
+    expect(teamMessageSchema.safeParse({
+      ...baseMessage,
+      payload: {
+        type: 'question',
+        questionId: 'question-1',
+        questions: [{
+          question: 'Which parser should we use?',
+          options: [
+            { label: 'Native', description: 'No dependency' },
+            { label: 'Library', description: 'More features' },
+          ],
+          multiSelect: false,
+        }],
+      },
+    }).success).toBe(true);
   });
 });

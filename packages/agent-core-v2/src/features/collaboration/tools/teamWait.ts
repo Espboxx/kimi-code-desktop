@@ -23,7 +23,7 @@ export class TeamWaitTool implements ITeamWaitTool {
   declare readonly _serviceBrand: undefined;
   readonly name = 'TeamWait' as const;
   readonly description =
-    'Wait without polling for the next team message or assignment status change and return the full operation.';
+    'Wait without polling for one explicit Team synchronization event. Child task completion already notifies and wakes the direct delegator automatically, so do not use TeamWait merely to await AgentSwarm work.';
   readonly parameters = toInputJsonSchema(TeamWaitInputSchema);
 
   private readonly agentId: string;

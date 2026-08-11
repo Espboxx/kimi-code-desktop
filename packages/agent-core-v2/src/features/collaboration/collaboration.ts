@@ -20,6 +20,8 @@ import type {
   TeamDelivery,
   TeamMessage,
   TeamMessageAttachment,
+  TeamQuestionAnswers,
+  TeamQuestionItem,
   TeamOperation,
   TeamPolicyInput,
   TeamReview,
@@ -56,6 +58,17 @@ export interface ISessionCollaborationService {
     readonly body: string;
     readonly clientMessageId: string;
     readonly recipientAgentIds?: readonly string[];
+  }): Promise<TeamMessage>;
+  requestLeaderQuestion(input: {
+    readonly agentId: string;
+    readonly questionId: string;
+    readonly questions: readonly TeamQuestionItem[];
+    readonly signal: AbortSignal;
+  }): Promise<TeamQuestionAnswers>;
+  answerLeaderQuestion(input: {
+    readonly leaderAgentId: string;
+    readonly questionId: string;
+    readonly answers: TeamQuestionAnswers;
   }): Promise<TeamMessage>;
   waitForOperation(input: {
     readonly afterSeq: number;
