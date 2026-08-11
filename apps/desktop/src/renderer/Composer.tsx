@@ -9,8 +9,6 @@ import {
   AtSign,
   Bot,
   ChevronDown,
-  Database,
-  Gauge,
   ImagePlus,
   Send,
   Sparkles,
@@ -20,13 +18,9 @@ import {
 
 import type { SessionStatusSnapshot } from '../shared/desktop-api';
 import {
-  cacheMetrics,
   attachmentProblem,
   COMPOSER_HEIGHT_STORAGE_KEY,
   COMPOSER_IMAGE_ACCEPT,
-  contextPercentage,
-  contextProgress,
-  formatTokenCount,
   readImageAttachment,
   type ComposerAttachmentError,
 } from './composer-utils';
@@ -36,7 +30,11 @@ import {
   ComposerFrame,
   type ComposerAttachmentView,
 } from './ComposerPrimitives';
-import { SessionControls, type SessionModelOption } from './SessionControls';
+import {
+  ComposerUsageIndicators,
+  SessionControls,
+  type SessionModelOption,
+} from './SessionControls';
 import { classNames, record, text } from './ui-utils';
 
 export type ComposerMode = 'prompt' | 'steer';
@@ -90,9 +88,6 @@ export function Composer(props: ComposerProps) {
   const visibleSuggestions = value.startsWith('/') && invocation === undefined
     ? suggestions.filter((item) => item.label.toLowerCase().includes(value.slice(1).split(/\s/)[0]?.toLowerCase() ?? '')).slice(0, 8)
     : [];
-  const contextPercent = props.status === undefined ? undefined : contextPercentage(props.status.contextUsage);
-  const contextBar = props.status === undefined ? 0 : contextProgress(props.status.contextUsage);
-  const cache = cacheMetrics(props.status?.usage);
 
   useEffect(() => {
     setMode('prompt');
@@ -162,12 +157,6 @@ export function Composer(props: ComposerProps) {
     }
   }, []);
 
-  const contextTitle = props.status === undefined
-    ? '尚未选择会话'
-    : `上下文 ${formatTokenCount(props.status.contextTokens)} / ${formatTokenCount(props.status.maxContextTokens)} tokens (${String(contextPercent)}%)`;
-  const cacheTitle = cache === undefined
-    ? '会话尚无用量数据'
-    : `会话累计 · 普通输入 ${formatTokenCount(cache.inputOther)} · 缓存读取 ${formatTokenCount(cache.cacheRead)} · 缓存写入 ${formatTokenCount(cache.cacheCreation)} · 输入总量 ${formatTokenCount(cache.inputTotal)}`;
   const attachmentViews: ComposerAttachmentView[] = [
     ...(invocation === undefined ? [] : [{
       id: `invocation:${invocation.id}`,
@@ -246,17 +235,7 @@ export function Composer(props: ComposerProps) {
             planModePending={props.planModePending}
             onSetPlanMode={props.onSetPlanMode}
           />
-          <div className="composer-usage-indicators">
-            <span className="composer-metric context-usage-indicator" title={contextTitle}>
-              <Gauge size={12} />
-              <span>上下文 <strong>{contextPercent === undefined ? '--' : `${String(contextPercent)}%`}</strong></span>
-              <span className="context-mini-progress" aria-hidden="true"><i style={{ width: `${String(contextBar)}%` }} /></span>
-            </span>
-            <span className="composer-metric cache-usage-indicator" title={cacheTitle}>
-              <Database size={12} />
-              <span>缓存 <strong>{cache === undefined ? '--' : formatTokenCount(cache.cacheRead)}</strong> · 命中 <strong>{cache === undefined ? '--' : `${String(cache.hitRate)}%`}</strong></span>
-            </span>
-          </div>
+          <ComposerUsageIndicators status={props.status} />
         </>
       )}
       toolbarStart={(

@@ -503,20 +503,23 @@ export function App() {
     return () => window.removeEventListener('keydown', listener, { capture: true });
   }, [requestCloseTab, saveFile, surface]);
 
-  const setPlanMode = useCallback(async (enabled: boolean): Promise<void> => {
-    if (activeSessionId === undefined || planPendingRef.current.has(activeSessionId)) return;
-    planPendingRef.current.add(activeSessionId);
+  const setSessionPlanMode = useCallback(async (sessionId: string, enabled: boolean): Promise<void> => {
+    if (planPendingRef.current.has(sessionId)) return;
+    planPendingRef.current.add(sessionId);
     setPlanPendingSessions(new Set(planPendingRef.current));
     setActionError(undefined);
     try {
-      await window.kimiDesktop.turn.setPlanMode(enabled, activeSessionId);
+      await window.kimiDesktop.turn.setPlanMode(enabled, sessionId);
     } catch (error) {
       setActionError(rendererError(error, 'session.plan_mode_failed'));
     } finally {
-      planPendingRef.current.delete(activeSessionId);
+      planPendingRef.current.delete(sessionId);
       setPlanPendingSessions(new Set(planPendingRef.current));
     }
-  }, [activeSessionId]);
+  }, []);
+  const setPlanMode = useCallback(async (enabled: boolean): Promise<void> => {
+    if (activeSessionId !== undefined) await setSessionPlanMode(activeSessionId, enabled);
+  }, [activeSessionId, setSessionPlanMode]);
   const deleteSession = useCallback(async (sessionId: string): Promise<void> => {
     if (deletingSessionIds.current.has(sessionId)) return;
     const previousAutoOpenSuppression = suppressEmptyWorkbenchAutoOpen.current;
@@ -938,6 +941,9 @@ export function App() {
                 activity={snapshot.activeSessionId === activeTab.sessionId ? agentActivity : undefined}
                 status={state.sessionStatuses[activeTab.sessionId]}
                 models={modelOptions}
+                leaderTodos={snapshot.activeSessionId === activeTab.sessionId ? todos : []}
+                planModePending={planPendingSessions.has(activeTab.sessionId)}
+                onSetPlanMode={(enabled) => setSessionPlanMode(activeTab.sessionId, enabled)}
                 onSeen={(channelSeq) => markTeamSeen(activeTab.sessionId, channelSeq)}
                 onSelectAgent={(agentId) => selectTeamAgent(activeTab.sessionId, agentId)}
               />

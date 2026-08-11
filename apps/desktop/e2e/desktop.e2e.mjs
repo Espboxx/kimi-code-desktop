@@ -539,6 +539,15 @@ try {
   assert.equal(await page.locator('.team-task-sidebar.navigation-sidebar').count(), 1, 'Team must reuse the navigation sidebar shell');
   assert.equal(await teamPage.locator('.team-assignments.side-panel').count(), 1, 'Team assignments must reuse the side-panel shell');
   assert.equal(await teamPage.locator('.team-composer > .composer').count(), 1, 'Team must reuse the composer frame');
+  const teamComposerControls = teamPage.locator('.session-controls[data-placement="composer"]');
+  await teamComposerControls.waitFor({ state: 'visible' });
+  assert.equal(await teamComposerControls.getByLabel('主代理模型').count(), 1);
+  assert.equal(await teamComposerControls.getByLabel('Thinking').count(), 1);
+  assert.equal(await teamComposerControls.getByLabel('权限').count(), 1);
+  assert.equal(await teamComposerControls.getByTitle('Plan 模式').count(), 1);
+  assert.deepEqual(await teamPage.locator('.composer-modes button').allTextContents(), ['Prompt']);
+  assert.equal(await teamPage.locator('.composer-modes button').filter({ hasText: 'Steer' }).count(), 0, 'Team must not expose stale turn steering');
+  assert.equal(await teamPage.locator('.composer-usage-indicators .composer-metric').count(), 2);
   const teamResizeHandle = teamPage.locator('.team-composer .composer-resize-handle');
   await teamResizeHandle.focus();
   await teamResizeHandle.press('Home');
@@ -568,12 +577,23 @@ try {
   assert.equal(await teamPage.getByLabel('主代理模型').inputValue(), 'desktop-test-alt');
   const leaderActivityCard = teamPage.locator('.team-leader-activity');
   await leaderActivityCard.waitFor({ state: 'visible', timeout: 30_000 });
-  assert.match(await assignmentToggle.innerText(), /0 进行中 · 0 等待 · 0 已结束/);
+  const teamTodoPanel = teamPage.locator('.team-todo-panel');
+  await teamTodoPanel.locator('.team-todo-item').first().waitFor({ state: 'visible', timeout: 30_000 });
+  assert.equal(await teamTodoPanel.locator('.team-todo-item').count(), 2);
+  assert.match(await teamTodoPanel.innerText(), /组长计划/);
+  assert.match(await teamTodoPanel.innerText(), /Coordinate Team execution/);
+  assert.match(await teamTodoPanel.innerText(), /Verify Team results/);
+  assert.equal(await teamTodoPanel.locator('input').count(), 0, 'Team TodoList must stay read-only');
+  assert.match(await assignmentToggle.innerText(), /1 进行中 · 1 等待 · 0 已结束/);
   assert.match(await leaderActivityCard.innerText(), /组长当前工作/);
   assert.ok(
     (await leaderActivityCard.locator('.team-leader-activity-action').innerText()).trim().length > 0,
     'Team leader activity card has no live action',
   );
+  await teamTodoPanel.locator('button.team-todo-owner').first().click();
+  await page.locator('.team-agent-surface').waitFor({ state: 'visible' });
+  assert.match(await page.locator('.team-agent-surface .conversation-header').innerText(), /组长详情/);
+  await returnToTeamChannel(page, teamPage);
   await leaderActivityCard.getByRole('button').click();
   await page.locator('.team-agent-surface').waitFor({ state: 'visible' });
   await approveProfileIfNeeded(page, teamProfilePath);
@@ -679,6 +699,11 @@ try {
   assert.match(teamText, /fixture-researcher/);
   assert.match(teamText, /desktop-test/);
   assert.match(teamText, /desktop-test-alt/);
+  assert.equal(await teamTodoPanel.locator('.team-todo-item').count(), 4, 'Team total TodoList did not aggregate assignments');
+  assert.equal(await teamTodoPanel.locator('.team-todo-source').filter({ hasText: '子任务' }).count(), 2);
+  assert.match(await teamTodoPanel.innerText(), /界面侦察/);
+  assert.match(await teamTodoPanel.innerText(), /构建专家/);
+  assert.match(await assignmentToggle.innerText(), /1 进行中 · 1 等待 · 2 已结束/);
   assert.ok(await teamPage.locator('.team-message.agent').count() >= 2, 'Agent messages are not rendered as agent bubbles');
   assert.ok(await teamPage.locator('.team-message.agent .team-message-bubble br').count() >= 2, 'single newlines were not rendered');
   const mention = teamPage.locator('.team-mention').filter({ hasText: '@构建专家' }).first();
@@ -697,7 +722,37 @@ try {
   assert.match(await page.locator('.team-agent-surface .conversation-header').innerText(), /构建专家/);
   await returnToTeamChannel(page, teamPage);
   const teamComposer = teamPage.locator('.team-composer textarea');
-  assert.match(await teamPage.locator('.team-image-support').innerText(), /支持图片/);
+  await teamComposerControls.getByLabel('Thinking').selectOption('low');
+  await page.waitForFunction(async (id) => (
+    (await window.kimiDesktop.host.snapshot()).activeSessionId === id
+      && (await window.kimiDesktop.host.snapshot()).session.status?.thinkingEffort === 'low'
+  ), teamSessionId);
+  await teamComposerControls.getByLabel('Thinking').selectOption('off');
+  await page.waitForFunction(async (id) => (
+    (await window.kimiDesktop.host.snapshot()).activeSessionId === id
+      && (await window.kimiDesktop.host.snapshot()).session.status?.thinkingEffort === 'off'
+  ), teamSessionId);
+  await teamComposerControls.getByLabel('权限').selectOption('auto');
+  await page.waitForFunction(async (id) => (
+    (await window.kimiDesktop.host.snapshot()).activeSessionId === id
+      && (await window.kimiDesktop.host.snapshot()).session.status?.permission === 'auto'
+  ), teamSessionId);
+  await teamComposerControls.getByLabel('权限').selectOption('manual');
+  await page.waitForFunction(async (id) => (
+    (await window.kimiDesktop.host.snapshot()).activeSessionId === id
+      && (await window.kimiDesktop.host.snapshot()).session.status?.permission === 'manual'
+  ), teamSessionId);
+  const teamPlanButton = teamComposerControls.getByTitle('Plan 模式');
+  await teamPlanButton.click();
+  await page.waitForFunction(async (id) => (
+    (await window.kimiDesktop.host.snapshot()).activeSessionId === id
+      && (await window.kimiDesktop.host.snapshot()).session.status?.planMode === true
+  ), teamSessionId);
+  await teamPlanButton.click();
+  await page.waitForFunction(async (id) => (
+    (await window.kimiDesktop.host.snapshot()).activeSessionId === id
+      && (await window.kimiDesktop.host.snapshot()).session.status?.planMode === false
+  ), teamSessionId);
   const teamImagePastePrevented = await page.evaluate(() => {
     const encoded = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
     const bytes = Uint8Array.from(atob(encoded), (character) => character.codePointAt(0) ?? 0);
@@ -709,6 +764,7 @@ try {
   });
   assert.equal(teamImagePastePrevented, true, 'Team image-only paste should suppress the browser default');
   await teamPage.locator('.team-composer-image').filter({ hasText: 'team-clipboard.png' }).waitFor();
+  assert.match(await teamPage.locator('.team-image-support').innerText(), /支持图片/);
   await teamPage.getByLabel('主代理模型').selectOption('desktop-test');
   await page.waitForFunction(async (id) => (
     (await window.kimiDesktop.host.snapshot()).session.status?.model === 'desktop-test'
@@ -1135,6 +1191,10 @@ try {
     assert.fail(`Team tab did not restore: ${JSON.stringify({ error: error instanceof Error ? error.message : String(error), restoreDiagnostic })}`);
   }
   await restoredTeamTab.click();
+  const restoredTeamTodo = restoredPage.locator('.team-todo-panel');
+  await restoredTeamTodo.locator('.team-todo-item').first().waitFor({ state: 'visible', timeout: 30_000 });
+  assert.equal(await restoredTeamTodo.locator('.team-todo-item').count(), 4, 'Team total TodoList was not restored');
+  assert.equal(await restoredTeamTodo.getByText('Run complete desktop suite', { exact: true }).count(), 0, 'Chat Todo leaked into Team projection');
   const restoredLeaderQuestion = restoredPage.locator('.team-user-question[data-question-id="team-restart-question-call-1"]');
   await restoredLeaderQuestion.waitFor({ state: 'visible', timeout: 30_000 });
   assert.match(await restoredPage.locator('.team-leader-activity').innerText(), /等待回答/);
@@ -1861,7 +1921,9 @@ async function startProvider() {
         if (toolName === 'TeamWait') {
           return sendText(response, 'Team coordination resumed after a live message.', ++responseId);
         }
-        if (toolName === 'TodoList') return sendText(response, 'TodoList updated by Kimi.', ++responseId);
+        if (toolName === 'TodoList' && !promptText.includes('Launch a Team Mode batch and wait for live updates.')) {
+          return sendText(response, 'TodoList updated by Kimi.', ++responseId);
+        }
       }
       if (promptText.includes('Edit sample.txt through an approval request.')) {
         return sendTool(response, 'Edit', {
@@ -1911,6 +1973,14 @@ async function startProvider() {
         }, 'swarm-call-1', ++responseId);
       }
       if (promptText.includes('Launch a Team Mode batch and wait for live updates.')) {
+        if (!hasToolCall(messages, 'TodoList')) {
+          return sendTool(response, 'TodoList', {
+            todos: [
+              { title: 'Coordinate Team execution', status: 'in_progress' },
+              { title: 'Verify Team results', status: 'pending' },
+            ],
+          }, 'team-todo-call-1', ++responseId);
+        }
         if (!hasToolCall(messages, 'AgentProfileCreate')) {
           return sendTool(response, 'AgentProfileCreate', {
             name: 'fixture-researcher',

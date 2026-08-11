@@ -13,6 +13,7 @@ import {
   Eye,
   GitMerge,
   ImagePlus,
+  ListChecks,
   Pause,
   Play,
   RotateCcw,
@@ -35,6 +36,7 @@ import type {
   TeamSchedulerState,
   TeamStateSnapshot,
   SessionStatusSnapshot,
+  TodoItem,
 } from '../shared/desktop-api';
 import { isTeamSnapshotV2, teamTaskParentId } from '../shared/team-types';
 import { agentActivityLabel, type AgentActivityForest } from './agent-activity';
@@ -59,18 +61,42 @@ import {
   type PendingLeaderQuestion,
   type TeamAgentActivity,
 } from './swarm-ui';
-import { ModelSelect, type SessionModelOption } from './SessionControls';
+import {
+  ComposerUsageIndicators,
+  SessionControls,
+  type SessionModelOption,
+} from './SessionControls';
 import { QuestionForm } from './QuestionForm';
 import { SidePanelFrame } from './SidePrimitives';
+import {
+  buildTeamTodoEntries,
+  countTeamTodos,
+  partitionTeamTodos,
+  type TeamTodoEntry,
+} from './todo-list';
 import { classNames } from './ui-utils';
 import { buildTeamMentionAliases, rehypeTeamMentions } from './team-message-markdown';
 
-export function TeamPage({ sessionId, state, activity, status, models, onSeen, onSelectAgent }: {
+export function TeamPage({
+  sessionId,
+  state,
+  activity,
+  status,
+  models,
+  leaderTodos,
+  planModePending,
+  onSetPlanMode,
+  onSeen,
+  onSelectAgent,
+}: {
   readonly sessionId: string;
   readonly state: TeamStateSnapshot;
   readonly activity?: AgentActivityForest;
   readonly status?: SessionStatusSnapshot;
   readonly models: readonly SessionModelOption[];
+  readonly leaderTodos: readonly TodoItem[];
+  readonly planModePending: boolean;
+  readonly onSetPlanMode: (enabled: boolean) => Promise<void>;
   readonly onSeen: (channelSeq: number) => void;
   readonly onSelectAgent: (agentId: string) => void;
 }) {
@@ -106,7 +132,6 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
   const schedulerControllable = snapshotV2 !== undefined
     && ['running', 'paused'].includes(snapshotV2.scheduler.status);
   const activeBatches = snapshot.batches.filter((batch) => batch.status === 'running').length;
-  const statusCounts = countAssignments(snapshot.assignments);
   const assignmentForest = useMemo(
     () => buildAssignmentForest(snapshot.assignments),
     [snapshot.assignments],
@@ -117,6 +142,11 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
     [snapshot.assignments, snapshot.members],
   );
   const leaderAgentId = team?.leaderAgentId ?? 'main';
+  const teamTodos = useMemo(
+    () => buildTeamTodoEntries(leaderTodos, snapshot.assignments, snapshot.members, leaderAgentId),
+    [leaderAgentId, leaderTodos, snapshot.assignments, snapshot.members],
+  );
+  const teamTodoCounts = useMemo(() => countTeamTodos(teamTodos), [teamTodos]);
   const pendingLeaderQuestions = useMemo(
     () => collectPendingLeaderQuestions(state.messages, leaderAgentId),
     [leaderAgentId, state.messages],
@@ -439,42 +469,60 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
             )}
             status={(
               <>
-                <label className="team-recipient-control">
-                  <span>收件人</span>
-                  <select
-                    aria-label="团队消息收件人"
-                    value={recipientAgentId}
-                    disabled={!writable || sending}
-                    onChange={(event) => {
-                      setRecipientAgentId(event.currentTarget.value);
-                      setClientMessageId(undefined);
-                    }}
-                  >
-                    <option value="">全员广播</option>
-                    {snapshot.members.map((member) => (
-                      <option value={member.agentId} key={member.agentId}>
-                        {agentPresentation(member.agentId, snapshot.members, snapshot.assignments).displayName}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <ModelSelect
-                  value={selectedModel}
-                  models={models}
-                  disabled={!writable || modelPending || models.length === 0}
-                  title="主代理模型"
-                  onChange={changeModel}
-                />
-                <span className={classNames('team-image-support', `support-${imageInputSupport}`)}>
-                  {modelPending
-                    ? '正在切换模型…'
-                    : imageInputSupport === 'supported'
-                      ? '当前模型支持图片 · 主代理会为新子 Agent 单独选择执行模型'
-                      : imageInputSupport === 'unsupported'
-                        ? '当前模型不支持图片输入'
-                        : '当前模型未声明图片能力，发送前请确认'}
-                </span>
+                <div className="team-composer-target-row">
+                  <label className="team-recipient-control">
+                    <span>收件人</span>
+                    <select
+                      aria-label="团队消息收件人"
+                      value={recipientAgentId}
+                      disabled={!writable || sending}
+                      onChange={(event) => {
+                        setRecipientAgentId(event.currentTarget.value);
+                        setClientMessageId(undefined);
+                      }}
+                    >
+                      <option value="">全员广播</option>
+                      {snapshot.members.map((member) => (
+                        <option value={member.agentId} key={member.agentId}>
+                          {agentPresentation(member.agentId, snapshot.members, snapshot.assignments).displayName}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <SessionControls
+                    sessionId={sessionId}
+                    status={status}
+                    models={models}
+                    placement="composer"
+                    disabled={!writable || controlPending}
+                    modelDisabled={modelPending || models.length === 0}
+                    modelTitle="主代理模型"
+                    modelValue={selectedModel}
+                    planModePending={planModePending}
+                    onSetModel={changeModel}
+                    onSetThinking={(effort) => runControl(() => window.kimiDesktop.turn.setThinking(effort, sessionId))}
+                    onSetPermission={(permission) => runControl(() => window.kimiDesktop.turn.setPermission(permission, sessionId))}
+                    onSetPlanMode={onSetPlanMode}
+                  />
+                </div>
+                <ComposerUsageIndicators status={status} />
+                {images.length > 0 && (
+                  <span className={classNames('team-image-support', `support-${imageInputSupport}`)}>
+                    {modelPending
+                      ? '正在切换模型…'
+                      : imageInputSupport === 'supported'
+                        ? '当前模型支持图片 · 主代理会为新子 Agent 单独选择执行模型'
+                        : imageInputSupport === 'unsupported'
+                          ? '当前模型不支持图片输入'
+                          : '当前模型未声明图片能力，发送前请确认'}
+                  </span>
+                )}
               </>
+            )}
+            toolbarStart={(
+              <div className="segmented composer-modes" aria-label="团队消息发送模式">
+                <button className="active" type="button" title="持久化 Team Prompt"><Bot size={13} /><span>Prompt</span></button>
+              </div>
             )}
             toolbarEnd={(
               <>
@@ -497,6 +545,15 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
                   disabled={!writable || images.length >= 8}
                   title="粘贴或选择图片"
                 ><ImagePlus size={16} /></button>
+                {status?.busy === true && (
+                  <button
+                    className="icon-button cancel-button"
+                    type="button"
+                    disabled={controlPending}
+                    onClick={() => void runControl(() => window.kimiDesktop.turn.cancel(sessionId))}
+                    title="取消组长当前轮次"
+                  ><Square size={14} /></button>
+                )}
                 <button
                   className="send-button team-message-send"
                   type="button"
@@ -513,7 +570,7 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
 
         <SidePanelFrame
           className="team-assignments"
-          ariaLabel="团队成员与任务分配"
+          ariaLabel="团队任务"
           open={assignmentsOpen}
           bodyClassName="team-assignment-scroll"
           header={(
@@ -525,8 +582,8 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
               aria-expanded={assignmentsOpen}
             >
               {assignmentsOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-              <strong>任务分配</strong>
-              <span>{statusCounts.running} 进行中 · {statusCounts.queued} 等待 · {statusCounts.terminal} 已结束</span>
+              <strong>团队任务</strong>
+              <span>{teamTodoCounts.running} 进行中 · {teamTodoCounts.waiting} 等待 · {teamTodoCounts.terminal} 已结束</span>
             </button>
           )}
         >
@@ -536,6 +593,7 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
                 leaderAgentId={team.leaderAgentId}
                 onSelectAgent={onSelectAgent}
               />
+              <TeamTodoList entries={teamTodos} onSelectAgent={onSelectAgent} />
               {leaderActivity !== undefined && (
                 <LeaderActivityCard
                   activity={leaderActivity}
@@ -545,6 +603,10 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
                     : () => { onSelectAgent(leaderActivity.agentId); }}
                 />
               )}
+              <div className="team-assignment-subheading">
+                <strong>任务分配</strong>
+                <span>{snapshot.assignments.length} 项</span>
+              </div>
               {assignmentForest.length === 0
                 ? <div className="team-assignment-empty">暂无任务分配</div>
                 : assignmentGroups.map((group) => (
@@ -735,6 +797,79 @@ function MemberList({ members, assignments, leaderAgentId, onSelectAgent }: {
   );
 }
 
+function TeamTodoList({ entries, onSelectAgent }: {
+  readonly entries: readonly TeamTodoEntry[];
+  readonly onSelectAgent: (agentId: string) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const sections = partitionTeamTodos(entries);
+  const groups = [
+    { id: 'running', label: '进行中', entries: sections.running },
+    { id: 'waiting', label: '等待', entries: sections.waiting },
+    { id: 'terminal', label: '已结束', entries: sections.terminal },
+  ].filter((group) => group.entries.length > 0);
+
+  return (
+    <section className={classNames('team-todo-panel', !open && 'collapsed')} aria-label="团队总 TodoList">
+      <button
+        className="team-todo-toggle"
+        type="button"
+        aria-expanded={open}
+        onClick={() => { setOpen((value) => !value); }}
+      >
+        {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        <ListChecks size={13} />
+        <strong>团队总 TodoList</strong>
+        <span>{entries.length} 项 · 只读</span>
+      </button>
+      {open && (
+        <div className="team-todo-groups">
+          {groups.length === 0
+            ? <div className="team-todo-empty">组长计划或子任务出现后会显示在这里</div>
+            : groups.map((group) => (
+                <section className={`team-todo-group team-todo-group-${group.id}`} key={group.id}>
+                  <h3>{group.label}<span>{group.entries.length}</span></h3>
+                  {group.entries.map((entry) => (
+                    <div className={classNames('team-todo-item', `team-todo-state-${entry.status}`)} key={entry.id}>
+                      <span className="team-todo-status"><TeamTodoStatusIcon entry={entry} /></span>
+                      <span className="team-todo-copy">
+                        <strong title={entry.title}>{entry.title}</strong>
+                        <small>
+                          <span className="team-todo-source">{entry.sourceLabel}</span>
+                          {entry.ownerAgentId === undefined
+                            ? <span className="team-todo-owner waiting"><Clock3 size={10} />{entry.ownerLabel}</span>
+                            : (
+                                <button
+                                  className="team-todo-owner"
+                                  type="button"
+                                  onClick={() => {
+                                    if (entry.ownerAgentId !== undefined) onSelectAgent(entry.ownerAgentId);
+                                  }}
+                                  title={`查看 ${entry.ownerLabel}`}
+                                ><Bot size={10} />{entry.ownerLabel}</button>
+                              )}
+                        </small>
+                      </span>
+                      <em>{entry.statusLabel}</em>
+                    </div>
+                  ))}
+                </section>
+              ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TeamTodoStatusIcon({ entry }: { readonly entry: TeamTodoEntry }) {
+  if (entry.bucket === 'running') return <CircleDashed className="spin" size={13} />;
+  if (entry.bucket === 'waiting') return <Clock3 size={13} />;
+  if (entry.status === 'failed' || entry.status === 'cancelled' || entry.status === 'interrupted') {
+    return <CircleAlert size={13} />;
+  }
+  return <CircleCheck size={13} />;
+}
+
 interface AssignmentNodeModel {
   readonly assignment: TeamAssignment;
   readonly children: readonly AssignmentNodeModel[];
@@ -893,15 +1028,6 @@ function createsCycle(
     current = parentId === undefined ? undefined : nodes.get(parentId);
   }
   return false;
-}
-
-function countAssignments(assignments: readonly TeamAssignment[]) {
-  return assignments.reduce((counts, assignment) => {
-    if (isActiveAssignmentStatus(assignment.status)) counts.running += 1;
-    else if (isWaitingAssignmentStatus(assignment.status)) counts.queued += 1;
-    else counts.terminal += 1;
-    return counts;
-  }, { running: 0, queued: 0, terminal: 0 });
 }
 
 function assignmentStatusLabel(status: TeamAssignmentStatus): string {

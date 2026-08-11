@@ -4137,9 +4137,22 @@ progress {
   max-width: 920px;
 }
 
+.team-composer-target-row {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 540px;
+  align-items: center;
+  gap: 8px;
+}
+
+.team-composer-target-row .composer-session-controls {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .team-composer .composer-status-toolbar > .team-image-support {
   min-width: 0;
-  flex: 1 1 260px;
+  flex: 1 1 100%;
   overflow: hidden;
   color: var(--muted);
   font-size: 9px;
@@ -4338,6 +4351,178 @@ progress {
   color: var(--muted);
   font-size: 9px;
   font-style: normal;
+}
+
+.team-todo-panel {
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 88%, var(--accent-bg));
+}
+
+.team-todo-toggle,
+.team-assignment-subheading {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 0;
+  background: var(--panel-2);
+  text-align: left;
+}
+
+.team-todo-toggle > span,
+.team-assignment-subheading > span {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-todo-groups {
+  padding: 6px 7px 8px;
+}
+
+.team-todo-group {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+}
+
+.team-todo-group + .team-todo-group {
+  margin-top: 6px;
+}
+
+.team-todo-group > h3 {
+  display: flex;
+  height: 25px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  padding: 0 7px;
+  border-bottom: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--panel-2) 86%, transparent);
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.team-todo-group > h3 span {
+  padding: 0 4px;
+  border-radius: 7px;
+  background: var(--panel);
+}
+
+.team-todo-item {
+  display: flex;
+  min-width: 0;
+  min-height: 43px;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+}
+
+.team-todo-item + .team-todo-item {
+  border-top: 1px solid var(--border-soft);
+}
+
+.team-todo-status {
+  display: grid;
+  width: 16px;
+  flex: 0 0 16px;
+  color: var(--muted);
+  place-items: center;
+}
+
+.team-todo-group-running .team-todo-status { color: var(--accent); }
+.team-todo-group-waiting .team-todo-status { color: var(--amber); }
+.team-todo-item.team-todo-state-failed .team-todo-status,
+.team-todo-item.team-todo-state-cancelled .team-todo-status,
+.team-todo-item.team-todo-state-interrupted .team-todo-status { color: var(--red); }
+.team-todo-item.team-todo-state-done .team-todo-status,
+.team-todo-item.team-todo-state-completed .team-todo-status { color: var(--accent); }
+
+.team-todo-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 3px;
+}
+
+.team-todo-copy > strong {
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-todo-copy > small {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.team-todo-source,
+.team-todo-owner {
+  display: inline-flex;
+  min-width: 0;
+  height: 17px;
+  align-items: center;
+  gap: 3px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 15px;
+  white-space: nowrap;
+}
+
+.team-todo-source {
+  flex: 0 0 auto;
+  border-color: color-mix(in srgb, var(--blue) 34%, var(--border));
+  color: var(--blue);
+}
+
+.team-todo-owner {
+  max-width: 118px;
+  overflow: hidden;
+  background: var(--panel);
+  text-overflow: ellipsis;
+}
+
+button.team-todo-owner:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  color: var(--accent-strong);
+}
+
+.team-todo-owner.waiting {
+  color: var(--amber);
+}
+
+.team-todo-item > em {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 8px;
+  font-style: normal;
+}
+
+.team-todo-empty {
+  padding: 10px 8px;
+  color: var(--muted);
+  font-size: 9px;
+  text-align: center;
+}
+
+.team-assignment-subheading {
+  border-bottom: 1px solid var(--border);
 }
 
 .team-leader-activity {
