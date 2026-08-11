@@ -44,6 +44,8 @@ import type {
   TeamMessageModelAttachment,
   TeamOperation,
   TeamPolicyInput,
+  TeamQuestionAnswers,
+  TeamQuestionItem,
   TeamSnapshot,
   Unsubscribe,
 } from '#/types';
@@ -131,6 +133,16 @@ interface TeamRpcSurface {
     readonly modelAttachments?: readonly TeamMessageModelAttachment[];
     readonly recipientAgentIds?: readonly string[];
   }): Promise<TeamMessage>;
+  publishTeamUserQuestion(input: {
+    readonly sessionId: string;
+    readonly questionId: string;
+    readonly questions: readonly TeamQuestionItem[];
+  }): Promise<TeamMessage>;
+  answerTeamUserQuestion(input: {
+    readonly sessionId: string;
+    readonly questionId: string;
+    readonly answers: TeamQuestionAnswers | null;
+  }): Promise<TeamMessage>;
   updateTeamPolicy(input: {
     readonly sessionId: string;
     readonly policy: TeamPolicyInput;
@@ -191,6 +203,8 @@ function teamRpc(rpc: SDKRpcClientBase): TeamRpcSurface {
     typeof candidate.getTeamOperations !== 'function' ||
     typeof candidate.getTeamHistory !== 'function' ||
     typeof candidate.sendTeamMessage !== 'function' ||
+    typeof candidate.publishTeamUserQuestion !== 'function' ||
+    typeof candidate.answerTeamUserQuestion !== 'function' ||
     typeof candidate.updateTeamPolicy !== 'function' ||
     typeof candidate.pauseTeam !== 'function' ||
     typeof candidate.resumeTeam !== 'function' ||
@@ -302,6 +316,22 @@ export class Session {
   }): Promise<TeamMessage> {
     this.ensureOpen();
     return teamRpc(this.rpc).sendTeamMessage({ sessionId: this.id, ...input });
+  }
+
+  async publishTeamUserQuestion(input: {
+    readonly questionId: string;
+    readonly questions: readonly TeamQuestionItem[];
+  }): Promise<TeamMessage> {
+    this.ensureOpen();
+    return teamRpc(this.rpc).publishTeamUserQuestion({ sessionId: this.id, ...input });
+  }
+
+  async answerTeamUserQuestion(input: {
+    readonly questionId: string;
+    readonly answers: TeamQuestionAnswers | null;
+  }): Promise<TeamMessage> {
+    this.ensureOpen();
+    return teamRpc(this.rpc).answerTeamUserQuestion({ sessionId: this.id, ...input });
   }
 
   async updateTeamPolicy(input: {

@@ -34,6 +34,8 @@ import type {
   TeamMessageModelAttachment,
   TeamOperation,
   TeamPolicyInput,
+  TeamQuestionAnswers,
+  TeamQuestionItem,
   TeamSnapshot,
 } from '../../contract/session/collaboration.js';
 
@@ -103,6 +105,14 @@ export interface SessionCollaborationFacade {
     readonly attachments?: readonly TeamMessageAttachment[];
     readonly modelAttachments?: readonly TeamMessageModelAttachment[];
     readonly recipientAgentIds?: readonly string[];
+  }): Promise<TeamMessage>;
+  publishUserQuestion(input: {
+    readonly questionId: string;
+    readonly questions: readonly TeamQuestionItem[];
+  }): Promise<TeamMessage>;
+  answerUserQuestion(input: {
+    readonly questionId: string;
+    readonly answers: TeamQuestionAnswers | null;
   }): Promise<TeamMessage>;
   updatePolicy(input: {
     readonly policy: TeamPolicyInput;
@@ -308,6 +318,10 @@ export function createSessionFacade(call: ScopedCaller, sessionId: string): Sess
         call(scope, 'sessionCollaborationService', 'history', [input]) as Promise<readonly TeamMessage[]>,
       sendUserMessage: (input) =>
         call(scope, 'sessionCollaborationService', 'sendUserMessage', [input]) as Promise<TeamMessage>,
+      publishUserQuestion: (input) =>
+        call(scope, 'sessionCollaborationService', 'publishUserQuestion', [input]) as Promise<TeamMessage>,
+      answerUserQuestion: (input) =>
+        call(scope, 'sessionCollaborationService', 'answerUserQuestion', [input]) as Promise<TeamMessage>,
       updatePolicy: (input) =>
         call(scope, 'sessionCollaborationService', 'updatePolicy', [input]) as Promise<TeamSnapshot>,
       pause: (input) =>

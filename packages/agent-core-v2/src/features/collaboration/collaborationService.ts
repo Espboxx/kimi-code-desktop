@@ -5,7 +5,8 @@
  * serializes mutations, routes addressed messages, and schedules dependency-
  * ready Swarm tasks under one session-wide concurrency and budget boundary.
  * Persists large job/report bodies through `blobStore` and emits lifecycle
- * metrics through `telemetry`. Bound at Session scope.
+ * metrics through `telemetry`. Consults `question` to distinguish a live
+ * Desktop answer from a restart recovery. Bound at Session scope.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -20,6 +21,7 @@ import { grandTotal, type TokenUsage } from '#/kosong/contract/usage';
 import { IAppendLogStore } from '#/persistence/interface/appendLogStore';
 import { IBlobStore } from '#/persistence/interface/blobStore';
 import { ISessionContext } from '#/session/sessionContext/sessionContext';
+import { ISessionQuestionService } from '#/session/question/question';
 import {
   ISessionLifecycleHooks,
   type SessionLifecycleHookSlots,
@@ -126,6 +128,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
   private readonly reviews = new Map<string, TeamReview>();
   private readonly messages: TeamMessage[] = [];
   private readonly messageByIdempotencyKey = new Map<string, TeamMessage>();
+  private readonly liveUserQuestionAnswers = new Set<string>();
   private readonly rateBuckets = new Map<string, RateBucket>();
   private readonly runtimeTasks = new Map<string, SessionSwarmTask>();
   private readonly activeRuns = new Map<string, ActiveRun>();
@@ -151,6 +154,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
     @IAppendLogStore private readonly log: IAppendLogStore,
     @IBlobStore private readonly blobs: IBlobStore,
     @ISessionContext private readonly sessionContext: ISessionContext,
+    @ISessionQuestionService private readonly questions: ISessionQuestionService,
     @ISessionLifecycleHooks lifecycleHooks: Hooks<SessionLifecycleHookSlots>,
     @ISessionSwarmService private readonly swarm: ISessionSwarmService,
     @ITeamWorkspaceService private readonly teamWorkspace: ITeamWorkspaceService,
@@ -311,6 +315,70 @@ export class SessionCollaborationService extends Service implements ISessionColl
     });
   }
 
+  async publishUserQuestion(input: {
+    readonly questionId: string;
+    readonly questions: readonly TeamQuestionItem[];
+  }): Promise<TeamMessage> {
+    await this.ready;
+    const team = this.requireTeam();
+    const payload = teamMessagePayloadSchema.parse({
+      type: 'question',
+      questionId: input.questionId,
+      questions: input.questions,
+    });
+    return this.sendMessage({
+      actorKind: 'agent',
+      actorId: team.leaderAgentId,
+      body: renderUserQuestion(input.questionId, input.questions),
+      clientMessageId: `user-question:${input.questionId}`,
+      recipientAgentIds: [team.leaderAgentId],
+      payload,
+    });
+  }
+
+  async answerUserQuestion(input: {
+    readonly questionId: string;
+    readonly answers: TeamQuestionAnswers | null;
+  }): Promise<TeamMessage> {
+    await this.ready;
+    const team = this.requireTeam();
+    const questionMessage = this.messages.findLast(
+      (message) => message.payload?.type === 'question'
+        && message.payload.questionId === input.questionId
+        && message.sender.actorKind === 'agent'
+        && message.sender.actorId === team.leaderAgentId,
+    );
+    if (questionMessage?.payload?.type !== 'question') {
+      throw new Error2(ErrorCodes.REQUEST_INVALID, `Unknown Team user question "${input.questionId}"`);
+    }
+    const questionTexts = questionMessage.payload.questions.map((question) => question.question);
+    if (input.answers !== null) this.validateQuestionAnswers(questionTexts, input.answers);
+    const payload = teamMessagePayloadSchema.parse({
+      type: 'question_answer',
+      questionId: input.questionId,
+      answers: input.answers ?? {},
+      dismissed: input.answers === null ? true : undefined,
+    });
+    const live = this.questions.listPending().some(
+      (question) => question.toolCallId === input.questionId,
+    );
+    if (live) this.liveUserQuestionAnswers.add(input.questionId);
+    try {
+      return await this.sendMessage({
+        actorKind: 'user',
+        actorId: USER_ACTOR_ID,
+        body: renderUserAnswer(input.questionId, questionTexts, input.answers),
+        clientMessageId: `user-question-answer:${input.questionId}`,
+        recipientAgentIds: [team.leaderAgentId],
+        payload,
+        suppressedRecipientAgentIds: live ? [team.leaderAgentId] : undefined,
+      });
+    } catch (error) {
+      if (live) this.liveUserQuestionAnswers.delete(input.questionId);
+      throw error;
+    }
+  }
+
   async requestLeaderQuestion(input: {
     readonly agentId: string;
     readonly questionId: string;
@@ -362,20 +430,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
       throw new Error2(ErrorCodes.REQUEST_INVALID, `Unknown Team question "${input.questionId}"`);
     }
     const questionTexts = questionMessage.payload.questions.map((question) => question.question);
-    const answerTexts = Object.keys(input.answers);
-    if (
-      answerTexts.length !== questionTexts.length
-      || questionTexts.some((question) => !Object.hasOwn(input.answers, question))
-    ) {
-      throw new Error2(
-        ErrorCodes.REQUEST_INVALID,
-        'Answer every question exactly once using the original question text',
-        { details: { expectedQuestions: questionTexts, answeredQuestions: answerTexts } },
-      );
-    }
-    if (Object.values(input.answers).some((answer) => typeof answer === 'string' && answer.trim().length === 0)) {
-      throw new Error2(ErrorCodes.REQUEST_INVALID, 'Team question answers cannot be empty');
-    }
+    this.validateQuestionAnswers(questionTexts, input.answers);
     const payload = teamMessagePayloadSchema.parse({
       type: 'question_answer',
       questionId: input.questionId,
@@ -994,8 +1049,12 @@ export class SessionCollaborationService extends Service implements ISessionColl
         continue;
       }
       if (message.payload?.type === 'question_answer') {
-        toSeq = operation.seq;
-        continue;
+        const liveUserAnswer = message.sender.actorKind === 'user'
+          && this.liveUserQuestionAnswers.delete(message.payload.questionId);
+        if (message.sender.actorKind !== 'user' || liveUserAnswer) {
+          toSeq = operation.seq;
+          continue;
+        }
       }
       const messageBytes = Buffer.byteLength(message.body, 'utf8')
         + Buffer.byteLength(JSON.stringify(message.attachments ?? []), 'utf8')
@@ -1027,6 +1086,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
     readonly modelAttachments?: readonly TeamMessageModelAttachment[];
     readonly recipientAgentIds?: readonly string[];
     readonly payload?: TeamMessagePayload;
+    readonly suppressedRecipientAgentIds?: readonly string[];
   }): Promise<TeamMessage> {
     await this.ready;
     return this.runWrite(async () => {
@@ -1066,6 +1126,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
         modelAttachments: input.modelAttachments,
         recipientAgentIds: recipients,
         payload: input.payload,
+        suppressedRecipientAgentIds: input.suppressedRecipientAgentIds,
         taskId: input.actorKind === 'agent' ? this.activeTaskForAgent(input.actorId)?.id : undefined,
       });
     });
@@ -1080,6 +1141,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
     readonly modelAttachments?: readonly TeamMessageModelAttachment[];
     readonly recipientAgentIds?: readonly string[];
     readonly payload?: TeamMessagePayload;
+    readonly suppressedRecipientAgentIds?: readonly string[];
     readonly taskId?: string;
   }): Promise<TeamMessage> {
     let committed: TeamMessage | undefined;
@@ -1110,7 +1172,11 @@ export class SessionCollaborationService extends Service implements ISessionColl
       };
     });
     const message = committed!;
-    this.messageEmitter.fire({ message, modelAttachments: input.modelAttachments });
+    this.messageEmitter.fire({
+      message,
+      modelAttachments: input.modelAttachments,
+      suppressedRecipientAgentIds: input.suppressedRecipientAgentIds,
+    });
     return message;
   }
 
@@ -2102,6 +2168,26 @@ export class SessionCollaborationService extends Service implements ISessionColl
     if (!parsedPayload.success) throw new Error2(ErrorCodes.REQUEST_INVALID, 'Team message payload is invalid', { details: { issues: parsedPayload.error.issues } });
   }
 
+  private validateQuestionAnswers(
+    questionTexts: readonly string[],
+    answers: TeamQuestionAnswers,
+  ): void {
+    const answerTexts = Object.keys(answers);
+    if (
+      answerTexts.length !== questionTexts.length
+      || questionTexts.some((question) => !Object.hasOwn(answers, question))
+    ) {
+      throw new Error2(
+        ErrorCodes.REQUEST_INVALID,
+        'Answer every question exactly once using the original question text',
+        { details: { expectedQuestions: questionTexts, answeredQuestions: answerTexts } },
+      );
+    }
+    if (Object.values(answers).some((answer) => typeof answer === 'string' && answer.trim().length === 0)) {
+      throw new Error2(ErrorCodes.REQUEST_INVALID, 'Team question answers cannot be empty');
+    }
+  }
+
   private validateRecipients(recipients: readonly string[] | undefined): readonly string[] | undefined {
     if (recipients === undefined || recipients.length === 0) return undefined;
     const unique = [...new Set(recipients)];
@@ -2389,6 +2475,21 @@ function renderLeaderQuestion(
   ].join('\n');
 }
 
+function renderUserQuestion(
+  questionId: string,
+  questions: readonly TeamQuestionItem[],
+): string {
+  return [
+    `[Question for user: ${questionId}]`,
+    ...questions.flatMap((question, index) => [
+      `${String(index + 1)}. ${question.header === undefined || question.header.length === 0 ? '' : `[${question.header}] `}${question.question}`,
+      `Options${question.multiSelect === true ? ' (multiple selections allowed)' : ''}:`,
+      ...question.options.map((option) =>
+        `- ${option.label}${option.description === undefined || option.description.length === 0 ? '' : `: ${option.description}`}`),
+    ]),
+  ].join('\n');
+}
+
 function renderLeaderAnswer(
   questionId: string,
   questions: readonly string[],
@@ -2396,6 +2497,18 @@ function renderLeaderAnswer(
 ): string {
   return [
     `[Team leader answer: ${questionId}]`,
+    ...questions.map((question) => `${question}: ${String(answers[question])}`),
+  ].join('\n');
+}
+
+function renderUserAnswer(
+  questionId: string,
+  questions: readonly string[],
+  answers: TeamQuestionAnswers | null,
+): string {
+  if (answers === null) return `[User skipped question: ${questionId}]`;
+  return [
+    `[User answer: ${questionId}]`,
     ...questions.map((question) => `${question}: ${String(answers[question])}`),
   ].join('\n');
 }

@@ -281,7 +281,7 @@ export const teamQuestionOptionSchema = z.object({
   label: z.string().min(1),
   description: z.string().optional(),
 }).strict();
-export type TeamQuestionOption = z.infer<typeof teamQuestionOptionSchema>;
+export type TeamQuestionOption = Readonly<z.infer<typeof teamQuestionOptionSchema>>;
 
 export const teamQuestionItemSchema = z.object({
   question: z.string().min(1),
@@ -289,7 +289,10 @@ export const teamQuestionItemSchema = z.object({
   options: z.array(teamQuestionOptionSchema).min(2).max(4),
   multiSelect: z.boolean().optional(),
 }).strict();
-export type TeamQuestionItem = z.infer<typeof teamQuestionItemSchema>;
+type ParsedTeamQuestionItem = z.infer<typeof teamQuestionItemSchema>;
+export type TeamQuestionItem = Readonly<Omit<ParsedTeamQuestionItem, 'options'> & {
+  options: readonly TeamQuestionOption[];
+}>;
 
 export const teamQuestionAnswersSchema = z.record(z.string().min(1), z.union([
   z.string(),
@@ -307,6 +310,7 @@ export const teamMessagePayloadSchema = z.discriminatedUnion('type', [
     type: z.literal('question_answer'),
     questionId: z.string().min(1),
     answers: teamQuestionAnswersSchema,
+    dismissed: z.literal(true).optional(),
   }).strict(),
 ]);
 export type TeamMessagePayload = z.infer<typeof teamMessagePayloadSchema>;
@@ -331,6 +335,7 @@ export type TeamMessage = z.infer<typeof teamMessageSchema>;
 export interface TeamMessageSentEvent {
   readonly message: TeamMessage;
   readonly modelAttachments?: readonly TeamMessageModelAttachment[];
+  readonly suppressedRecipientAgentIds?: readonly string[];
 }
 
 const legacyTeamBatchSchema = z.object({

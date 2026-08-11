@@ -64,6 +64,14 @@ export interface ISessionCollaborationService {
     readonly clientMessageId: string;
     readonly recipientAgentIds?: readonly string[];
   }): Promise<TeamMessage>;
+  publishUserQuestion(input: {
+    readonly questionId: string;
+    readonly questions: readonly TeamQuestionItem[];
+  }): Promise<TeamMessage>;
+  answerUserQuestion(input: {
+    readonly questionId: string;
+    readonly answers: TeamQuestionAnswers | null;
+  }): Promise<TeamMessage>;
   requestLeaderQuestion(input: {
     readonly agentId: string;
     readonly questionId: string;

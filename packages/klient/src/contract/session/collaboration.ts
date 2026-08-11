@@ -207,7 +207,7 @@ export const teamQuestionOptionSchema = z.object({
   label: z.string().min(1),
   description: z.string().optional(),
 }).strict();
-export type TeamQuestionOption = z.infer<typeof teamQuestionOptionSchema>;
+export type TeamQuestionOption = Readonly<z.infer<typeof teamQuestionOptionSchema>>;
 
 export const teamQuestionItemSchema = z.object({
   question: z.string().min(1),
@@ -215,7 +215,10 @@ export const teamQuestionItemSchema = z.object({
   options: z.array(teamQuestionOptionSchema).min(2).max(4),
   multiSelect: z.boolean().optional(),
 }).strict();
-export type TeamQuestionItem = z.infer<typeof teamQuestionItemSchema>;
+type ParsedTeamQuestionItem = z.infer<typeof teamQuestionItemSchema>;
+export type TeamQuestionItem = Readonly<Omit<ParsedTeamQuestionItem, 'options'> & {
+  options: readonly TeamQuestionOption[];
+}>;
 
 export const teamQuestionAnswersSchema = z.record(z.string().min(1), z.union([
   z.string(),
@@ -233,6 +236,7 @@ export const teamMessagePayloadSchema = z.discriminatedUnion('type', [
     type: z.literal('question_answer'),
     questionId: z.string().min(1),
     answers: teamQuestionAnswersSchema,
+    dismissed: z.literal(true).optional(),
   }).strict(),
 ]);
 export type TeamMessagePayload = z.infer<typeof teamMessagePayloadSchema>;
@@ -402,6 +406,20 @@ export const sessionCollaborationContract = {
       attachments: z.array(teamMessageAttachmentSchema).max(8).optional(),
       modelAttachments: z.array(teamMessageModelAttachmentSchema).max(8).optional(),
       recipientAgentIds: z.array(z.string().min(1)).min(1).max(16).optional(),
+    }).strict()]),
+    output: teamMessageSchema,
+  },
+  publishUserQuestion: {
+    input: z.tuple([z.object({
+      questionId: z.string().min(1),
+      questions: z.array(teamQuestionItemSchema).min(1).max(4),
+    }).strict()]),
+    output: teamMessageSchema,
+  },
+  answerUserQuestion: {
+    input: z.tuple([z.object({
+      questionId: z.string().min(1),
+      answers: z.union([teamQuestionAnswersSchema, z.null()]),
     }).strict()]),
     output: teamMessageSchema,
   },

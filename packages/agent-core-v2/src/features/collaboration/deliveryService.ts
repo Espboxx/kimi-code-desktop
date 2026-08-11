@@ -62,6 +62,9 @@ export class AgentCollaborationDeliveryService extends Service implements IAgent
           });
       }),
     );
+    this.wakeQueue = this.wakeQueue
+      .then(() => this.enqueueWakeForRecoveredUserAnswer())
+      .catch(() => undefined);
   }
 
   private async enqueueWakeFor(event: TeamMessageSentEvent): Promise<void> {
@@ -74,7 +77,11 @@ export class AgentCollaborationDeliveryService extends Service implements IAgent
       this.modelAttachments.delete(message.id);
       return;
     }
-    if (message.payload?.type === 'question_answer') {
+    if (event.suppressedRecipientAgentIds?.includes(this.agentId) === true) {
+      this.modelAttachments.delete(message.id);
+      return;
+    }
+    if (message.payload?.type === 'question_answer' && message.sender.actorKind !== 'user') {
       this.modelAttachments.delete(message.id);
       return;
     }
@@ -93,6 +100,26 @@ export class AgentCollaborationDeliveryService extends Service implements IAgent
     }
     if (this.pendingWake?.state === 'pending') return;
 
+    const wake = new TeamActivityStepRequest(() => {
+      if (this.pendingWake === wake) this.pendingWake = undefined;
+    });
+    this.pendingWake = wake;
+    this.loop.enqueue(wake);
+  }
+
+  private async enqueueWakeForRecoveredUserAnswer(): Promise<void> {
+    await this.collaboration.ready;
+    if (!this.collaboration.isEnabled() || !this.collaboration.isActive()) return;
+    const snapshot = await this.collaboration.snapshot();
+    const teamId = snapshot.team?.id;
+    if (teamId === undefined) return;
+    const afterSeq = this.wire.getModel(CollaborationDeliveryModel)[teamId] ?? 0;
+    const delivery = await this.collaboration.delivery({ agentId: this.agentId, afterSeq });
+    const answer = delivery?.messages.some(
+      (message) => message.sender.actorKind === 'user'
+        && message.payload?.type === 'question_answer',
+    ) === true;
+    if (!answer || this.pendingWake?.state === 'pending') return;
     const wake = new TeamActivityStepRequest(() => {
       if (this.pendingWake === wake) this.pendingWake = undefined;
     });

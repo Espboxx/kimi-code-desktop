@@ -29,6 +29,7 @@ const teamPolicyInput = z.object({
   maxDurationMs: z.number().int().positive().optional(),
 }).strict();
 const teamRecipients = z.array(nonEmptyString).min(1).max(16).optional();
+const teamQuestionAnswers = z.record(z.string().min(1), z.union([z.string(), z.literal(true)]));
 const expectedTeamSeq = z.number().int().nonnegative();
 const profileName = z
   .string()
@@ -184,6 +185,11 @@ export const desktopCommandSchemas = {
     clientMessageId: nonEmptyString,
     media: z.array(teamImageInput).max(8).default([]),
     recipientAgentIds: teamRecipients,
+  }).strict(),
+  'team.answerQuestion': z.object({
+    sessionId: nonEmptyString,
+    questionId: nonEmptyString,
+    answers: z.union([teamQuestionAnswers, z.null()]),
   }).strict(),
   'team.updatePolicy': z.object({
     sessionId: nonEmptyString,

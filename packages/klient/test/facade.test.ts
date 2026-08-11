@@ -350,6 +350,37 @@ describe('session collaboration routing', () => {
       }],
     });
 
+    await expect(session.collaboration.publishUserQuestion({
+      questionId: 'question-1',
+      questions: [{
+        question: 'Continue?',
+        options: [{ label: 'Continue' }, { label: 'Stop' }],
+      }],
+    })).resolves.toEqual(message);
+    expect(channel.calls[3]).toEqual({
+      scope: { sessionId: 's1' },
+      service: 'sessionCollaborationService',
+      method: 'publishUserQuestion',
+      args: [{
+        questionId: 'question-1',
+        questions: [{
+          question: 'Continue?',
+          options: [{ label: 'Continue' }, { label: 'Stop' }],
+        }],
+      }],
+    });
+
+    await expect(session.collaboration.answerUserQuestion({
+      questionId: 'question-1',
+      answers: { 'Continue?': 'Continue' },
+    })).resolves.toEqual(message);
+    expect(channel.calls[4]).toEqual({
+      scope: { sessionId: 's1' },
+      service: 'sessionCollaborationService',
+      method: 'answerUserQuestion',
+      args: [{ questionId: 'question-1', answers: { 'Continue?': 'Continue' } }],
+    });
+
     const operation = { version: 1 as const, type: 'message.sent' as const, seq: 2, at: 2, message };
     const seen: unknown[] = [];
     session.events.on('collaboration.operation', (event) => seen.push(event));

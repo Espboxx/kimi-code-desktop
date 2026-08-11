@@ -3,9 +3,11 @@ import type {
   ApprovalRequest,
   Event,
   QuestionHandler,
+  QuestionHandlerRequest,
   QuestionRequest,
   Session,
   TeamOperation,
+  TeamQuestionAnswers,
   TeamSnapshot,
   TodoItem,
 } from '@moonshot-ai/kimi-code-sdk';
@@ -58,7 +60,12 @@ describe('SessionRuntime interactions', () => {
     });
     await runtime.initialize();
 
-    const answered = fixture.questionHandler?.({ toolCallId: 'question-1', questions: [] } as unknown as QuestionRequest);
+    const answered = fixture.questionHandler?.({
+      sessionId: 's1',
+      agentId: 'main',
+      toolCallId: 'question-1',
+      questions: [],
+    });
     runtime.resolveInteraction('question:question-1', { answer: 'yes' });
     await expect(answered).resolves.toEqual({ answer: 'yes' });
 
@@ -66,6 +73,69 @@ describe('SessionRuntime interactions', () => {
     await runtime.close();
     await expect(cancelled).resolves.toEqual({ decision: 'cancelled' });
     expect(fixture.close).toHaveBeenCalledOnce();
+  });
+
+  it('persists a Team leader question and resolves its live turn from the channel answer', async () => {
+    const fixture = createSessionFixture({ initialTeam: activeTeamSnapshot() });
+    const notifications: KimiDesktopNotification[] = [];
+    const runtime = new SessionRuntime({
+      session: fixture.session,
+      mediaCacheDir: 'D:\\workspace\\.media-cache',
+      emit: (notification) => notifications.push(notification),
+      onRawEvent: () => undefined,
+      onStateChanged: () => undefined,
+      onSessionMetadataChanged: () => undefined,
+    });
+    await runtime.initialize();
+    const request: QuestionHandlerRequest = {
+      sessionId: 's1',
+      agentId: 'main',
+      toolCallId: 'leader-question-1',
+      questions: [{
+        question: 'Continue after restart?',
+        header: 'Recovery',
+        options: [{ label: 'Continue' }, { label: 'Stop' }],
+      }],
+    };
+
+    const result = fixture.questionHandler?.(request);
+    await vi.waitFor(() => {
+      expect(fixture.publishTeamUserQuestion).toHaveBeenCalledWith({
+        questionId: 'leader-question-1',
+        questions: request.questions,
+      });
+    });
+    expect(notifications.some((notification) => notification.type === 'interaction.pending')).toBe(false);
+
+    await runtime.answerTeamQuestion('leader-question-1', {
+      'Continue after restart?': 'Continue',
+    });
+
+    await expect(result).resolves.toEqual({
+      answers: { 'Continue after restart?': 'Continue' },
+      method: 'enter',
+    });
+    expect(fixture.answerTeamUserQuestion).toHaveBeenCalledWith({
+      questionId: 'leader-question-1',
+      answers: { 'Continue after restart?': 'Continue' },
+    });
+    expect(notifications.some((notification) => notification.type === 'interaction.resolved')).toBe(false);
+    await runtime.close();
+  });
+
+  it('answers a restored Team leader question without a process-local interaction', async () => {
+    const fixture = createSessionFixture({ initialTeam: activeTeamSnapshot() });
+    const runtime = createRuntime(fixture);
+    await runtime.initialize();
+
+    await expect(runtime.answerTeamQuestion('leader-question-restored', null)).resolves.toMatchObject({
+      payload: { type: 'question_answer', dismissed: true },
+    });
+    expect(fixture.answerTeamUserQuestion).toHaveBeenCalledWith({
+      questionId: 'leader-question-restored',
+      answers: null,
+    });
+    await runtime.close();
   });
 
   it('publishes busy state immediately from main turn lifecycle events', async () => {
@@ -391,6 +461,8 @@ function createSessionFixture(options: SessionFixtureOptions = {}): {
   readonly setTodos: ReturnType<typeof vi.fn>;
   readonly ensureTeam: ReturnType<typeof vi.fn>;
   readonly sendTeamMessage: ReturnType<typeof vi.fn>;
+  readonly publishTeamUserQuestion: ReturnType<typeof vi.fn>;
+  readonly answerTeamUserQuestion: ReturnType<typeof vi.fn>;
   readonly swarm: ReturnType<typeof vi.fn>;
   readonly steer: ReturnType<typeof vi.fn>;
   readonly emitEvent: (event: Event) => void;
@@ -468,6 +540,43 @@ function createSessionFixture(options: SessionFixtureOptions = {}): {
     clientMessageId,
     createdAt: 2,
   }));
+  const publishTeamUserQuestion = vi.fn(async ({ questionId, questions }: {
+    readonly questionId: string;
+    readonly questions: QuestionRequest['questions'];
+  }) => ({
+    id: `question-${questionId}`,
+    teamId: ensuredTeam.team?.id ?? 'team-1',
+    channelId: 'general' as const,
+    seq: ensuredTeam.latestSeq + 1,
+    channelSeq: 1,
+    sender: { actorKind: 'agent' as const, actorId: 'main', role: 'leader' as const },
+    recipientAgentIds: ['main'],
+    body: 'Leader question',
+    payload: { type: 'question' as const, questionId, questions },
+    clientMessageId: `user-question:${questionId}`,
+    createdAt: 2,
+  }));
+  const answerTeamUserQuestion = vi.fn(async ({ questionId, answers }: {
+    readonly questionId: string;
+    readonly answers: TeamQuestionAnswers | null;
+  }) => ({
+    id: `answer-${questionId}`,
+    teamId: ensuredTeam.team?.id ?? 'team-1',
+    channelId: 'general' as const,
+    seq: ensuredTeam.latestSeq + 2,
+    channelSeq: 2,
+    sender: { actorKind: 'user' as const, actorId: 'desktop-user', role: 'user' as const },
+    recipientAgentIds: ['main'],
+    body: answers === null ? 'Skipped' : 'Answered',
+    payload: {
+      type: 'question_answer' as const,
+      questionId,
+      answers: answers ?? {},
+      dismissed: answers === null ? true as const : undefined,
+    },
+    clientMessageId: `user-question-answer:${questionId}`,
+    createdAt: 3,
+  }));
   const swarm = vi.fn(async () => undefined);
   const steer = vi.fn(async () => undefined);
   const session = {
@@ -512,6 +621,8 @@ function createSessionFixture(options: SessionFixtureOptions = {}): {
     getTeamHistory: async () => [],
     getTeamOperations: async ({ afterSeq }: { readonly afterSeq: number }) => [],
     sendTeamMessage,
+    publishTeamUserQuestion,
+    answerTeamUserQuestion,
     getTodos: async () => todos,
     setTodos,
     setApprovalHandler: (handler?: ApprovalHandler) => { approvalHandler = handler; },
@@ -540,12 +651,41 @@ function createSessionFixture(options: SessionFixtureOptions = {}): {
     setTodos,
     ensureTeam,
     sendTeamMessage,
+    publishTeamUserQuestion,
+    answerTeamUserQuestion,
     swarm,
     steer,
     emitEvent: (event) => eventHandler?.(event),
     emitTeamOperation: (operation) => teamHandler?.(operation),
     get approvalHandler() { return approvalHandler; },
     get questionHandler() { return questionHandler; },
+  };
+}
+
+function activeTeamSnapshot(): TeamSnapshot {
+  return {
+    protocolVersion: 2,
+    state: 'ready',
+    team: { id: 'team-1', sessionId: 's1', channelId: 'general', leaderAgentId: 'main', createdAt: 1 },
+    members: [{ agentId: 'main', role: 'leader', joinedAt: 1, joinedSeq: 1 }],
+    batches: [],
+    tasks: [],
+    assignments: [],
+    attempts: [],
+    artifacts: [],
+    reviews: [],
+    policy: {
+      maxConcurrency: 4,
+      maxMembers: 16,
+      maxDelegationDepth: 2,
+      executionRetries: 1,
+      validationRetries: 2,
+    },
+    scheduler: { status: 'running', activeCount: 0, queuedCount: 0, updatedAt: 1 },
+    budget: { startedAt: 1, inputTokens: 0, outputTokens: 0, totalTokens: 0, elapsedMs: 0 },
+    integration: { status: 'idle', updatedAt: 1 },
+    latestSeq: 1,
+    latestChannelSeq: 0,
   };
 }
 

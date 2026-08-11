@@ -315,6 +315,8 @@ import type {
   TeamMessageModelAttachment,
   TeamOperation,
   TeamPolicyInput,
+  TeamQuestionAnswers,
+  TeamQuestionItem,
   TeamSnapshot,
   Unsubscribe,
   WorkspaceTrustInfo,
@@ -1579,6 +1581,32 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
       attachments: input.attachments,
       modelAttachments: input.modelAttachments,
       recipientAgentIds: input.recipientAgentIds,
+    });
+  }
+
+  async publishTeamUserQuestion(
+    input: SessionIdRpcInput & {
+      readonly questionId: string;
+      readonly questions: readonly TeamQuestionItem[];
+    },
+  ): Promise<TeamMessage> {
+    await this.agentFacade(input.sessionId);
+    return this.klient.session(input.sessionId).collaboration.publishUserQuestion({
+      questionId: input.questionId,
+      questions: input.questions,
+    });
+  }
+
+  async answerTeamUserQuestion(
+    input: SessionIdRpcInput & {
+      readonly questionId: string;
+      readonly answers: TeamQuestionAnswers | null;
+    },
+  ): Promise<TeamMessage> {
+    await this.agentFacade(input.sessionId);
+    return this.klient.session(input.sessionId).collaboration.answerUserQuestion({
+      questionId: input.questionId,
+      answers: input.answers,
     });
   }
 

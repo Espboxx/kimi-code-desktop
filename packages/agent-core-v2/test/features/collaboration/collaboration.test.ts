@@ -47,6 +47,10 @@ import { IBlobStore } from '#/persistence/interface/blobStore';
 import { IFileSystemStorageService } from '#/persistence/interface/storage';
 import { ISessionContext, makeSessionContext } from '#/session/sessionContext/sessionContext';
 import {
+  ISessionQuestionService,
+  type QuestionRequest,
+} from '#/session/question/question';
+import {
   ISessionLifecycleHooks,
   type SessionLifecycleHookSlots,
 } from '#/session/sessionLifecycleHooks/sessionLifecycleHooks';
@@ -71,6 +75,7 @@ function buildService(
   options: {
     readonly swarm?: ISessionSwarmService;
     readonly teamWorkspace?: ITeamWorkspaceService;
+    readonly pendingQuestions?: readonly QuestionRequest[];
   } = {},
 ): {
   readonly disposables: DisposableStore;
@@ -92,6 +97,13 @@ function buildService(
     sessionScope: SESSION_SCOPE,
     cwd: '/workspace',
   }));
+  ix.stub(ISessionQuestionService, {
+    request: async () => null,
+    enqueue: (request) => ({ ...request, id: request.id ?? request.toolCallId ?? 'question-test' }),
+    answer: () => {},
+    dismiss: () => {},
+    listPending: () => options.pendingQuestions ?? [],
+  });
   const lifecycleHooks = createHooks<SessionLifecycleHookSlots, keyof SessionLifecycleHookSlots>([
     'onDidCreateSession',
     'onWillCloseSession',
@@ -1100,6 +1112,159 @@ describe('SessionCollaborationService', () => {
           answers: { 'Which parser should we use?': 'Native' },
         },
       });
+    } finally {
+      delivery.dispose();
+    }
+  });
+
+  it('persists a structured leader question and resolves it with a user answer', async () => {
+    const pendingQuestions: QuestionRequest[] = [{
+      toolCallId: 'leader-question-1',
+      questions: [{
+        question: 'Which recovery path should run?',
+        header: 'Recovery',
+        options: [
+          { label: 'Resume turn', description: 'Continue the parked turn' },
+          { label: 'Start turn', description: 'Start a recovered turn' },
+        ],
+      }],
+    }];
+    const { service } = buildService(true, new InMemoryStorageService(), { pendingQuestions });
+    await service.ensureTeam();
+
+    const question = await service.publishUserQuestion({
+      questionId: 'leader-question-1',
+      questions: pendingQuestions[0]!.questions,
+    });
+    const answer = await service.answerUserQuestion({
+      questionId: 'leader-question-1',
+      answers: { 'Which recovery path should run?': 'Resume turn' },
+    });
+
+    expect(question).toMatchObject({
+      sender: { actorKind: 'agent', actorId: 'main', role: 'leader' },
+      recipientAgentIds: ['main'],
+      payload: { type: 'question', questionId: 'leader-question-1' },
+    });
+    expect(answer).toMatchObject({
+      sender: { actorKind: 'user', role: 'user' },
+      recipientAgentIds: ['main'],
+      payload: {
+        type: 'question_answer',
+        questionId: 'leader-question-1',
+        answers: { 'Which recovery path should run?': 'Resume turn' },
+      },
+    });
+  });
+
+  it('persists a skipped leader question as a dismissed user answer', async () => {
+    const { service } = buildService();
+    await service.ensureTeam();
+    await service.publishUserQuestion({
+      questionId: 'leader-question-skip',
+      questions: [{
+        question: 'Continue the recovery?',
+        options: [{ label: 'Continue' }, { label: 'Stop' }],
+      }],
+    });
+
+    const answer = await service.answerUserQuestion({
+      questionId: 'leader-question-skip',
+      answers: null,
+    });
+
+    expect(answer).toMatchObject({
+      payload: {
+        type: 'question_answer',
+        questionId: 'leader-question-skip',
+        answers: {},
+        dismissed: true,
+      },
+    });
+    expect(answer.body).toContain('User skipped question');
+  });
+
+  it('does not wake the leader twice when its original question is still pending', async () => {
+    const pendingQuestions: QuestionRequest[] = [{
+      toolCallId: 'leader-question-live',
+      questions: [{
+        question: 'Use the live turn?',
+        options: [{ label: 'Yes' }, { label: 'No' }],
+      }],
+    }];
+    const { service } = buildService(true, new InMemoryStorageService(), { pendingQuestions });
+    await service.ensureTeam();
+    const question = await service.publishUserQuestion({
+      questionId: 'leader-question-live',
+      questions: pendingQuestions[0]!.questions,
+    });
+    const leaderLoop = stubLoopWithHooks();
+    const delivery = new AgentCollaborationDeliveryService(
+      { agentId: 'main' } as IAgentScopeContext,
+      service,
+      stubContextMemory(),
+      stubWire(),
+      leaderLoop,
+    );
+
+    try {
+      const answer = await service.answerUserQuestion({
+        questionId: 'leader-question-live',
+        answers: { 'Use the live turn?': 'Yes' },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(leaderLoop.launches).toHaveLength(0);
+      await expect(service.delivery({ agentId: 'main', afterSeq: question.seq })).resolves.toMatchObject({
+        toSeq: answer.seq,
+        messages: [],
+      });
+    } finally {
+      delivery.dispose();
+    }
+  });
+
+  it('wakes the leader from an unanswered delivery after a session restart', async () => {
+    const persistence = new InMemoryStorageService();
+    const first = buildService(true, persistence);
+    await first.service.ensureTeam();
+    await first.service.publishUserQuestion({
+      questionId: 'leader-question-restart',
+      questions: [{
+        question: 'Resume after restart?',
+        options: [{ label: 'Resume' }, { label: 'Stop' }],
+      }],
+    });
+    await first.service.answerUserQuestion({
+      questionId: 'leader-question-restart',
+      answers: { 'Resume after restart?': 'Resume' },
+    });
+    first.disposables.dispose();
+
+    const second = buildService(true, persistence);
+    await second.service.ready;
+    const leaderLoop = stubLoopWithHooks();
+    const context = stubContextMemory();
+    const delivery = new AgentCollaborationDeliveryService(
+      { agentId: 'main' } as IAgentScopeContext,
+      second.service,
+      context,
+      stubWire(),
+      leaderLoop,
+    );
+
+    try {
+      await vi.waitFor(() => {
+        expect(leaderLoop.launches).toHaveLength(1);
+      });
+      await runWillBeginStepHooks(leaderLoop);
+      expect(context.messages.at(-1)?.content).toEqual([
+        expect.objectContaining({
+          type: 'text',
+          text: expect.stringContaining('Resume after restart?: Resume'),
+        }),
+      ]);
     } finally {
       delivery.dispose();
     }

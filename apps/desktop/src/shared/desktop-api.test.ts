@@ -114,6 +114,15 @@ describe('desktop IPC schema', () => {
       action: 'pause',
       payload: { sessionId: 's1', expectedSeq: -1 },
     })).toThrow();
+    expect(parseDesktopCommand({
+      domain: 'team',
+      action: 'answerQuestion',
+      payload: {
+        sessionId: 's1',
+        questionId: 'question-1',
+        answers: { 'Continue?': 'Continue' },
+      },
+    })).toMatchObject({ name: 'team.answerQuestion' });
     expect(() => parseDesktopCommand({
       domain: 'team',
       action: 'submit',
@@ -150,6 +159,12 @@ describe('desktop IPC schema', () => {
     await api.team.submit('s1', 'Coordinate', 'retry-2', media);
     expect(calls).toHaveBeenCalledWith('team', 'submit', {
       sessionId: 's1', body: 'Coordinate', clientMessageId: 'retry-2', media,
+    });
+    await api.team.answerQuestion('s1', 'question-1', { 'Continue?': 'Continue' });
+    expect(calls).toHaveBeenCalledWith('team', 'answerQuestion', {
+      sessionId: 's1',
+      questionId: 'question-1',
+      answers: { 'Continue?': 'Continue' },
     });
     await api.team.pause('s1', 7, 'inspect');
     expect(calls).toHaveBeenCalledWith('team', 'pause', {

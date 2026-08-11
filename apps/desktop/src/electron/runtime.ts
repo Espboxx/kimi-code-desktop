@@ -714,6 +714,14 @@ export class KimiDesktopRuntime {
           input.recipientAgentIds,
         );
       }
+      case 'team.answerQuestion': {
+        const input = payload<{
+          sessionId: string;
+          questionId: string;
+          answers: import('@moonshot-ai/kimi-code-sdk').TeamQuestionAnswers | null;
+        }>(command);
+        return this.runtimeFor(input.sessionId).answerTeamQuestion(input.questionId, input.answers);
+      }
       case 'team.updatePolicy': {
         const input = payload<{
           sessionId: string;

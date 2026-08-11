@@ -8,6 +8,7 @@ import type {
   TeamMessage,
   TeamOperation,
   TeamPolicyInput,
+  TeamQuestionAnswers,
   TeamSnapshot,
 } from './team-types';
 import type { TeamStateSnapshot } from './team-state';
@@ -29,6 +30,8 @@ export type {
   TeamOperation,
   TeamPolicy,
   TeamPolicyInput,
+  TeamQuestionAnswers,
+  TeamQuestionItem,
   TeamReview,
   TeamSchedulerState,
   TeamSnapshot,
@@ -501,6 +504,11 @@ export interface KimiDesktopApi {
       media?: readonly TeamImageInput[],
       recipientAgentIds?: readonly string[],
     ): Promise<TeamSubmitResult>;
+    answerQuestion(
+      sessionId: string,
+      questionId: string,
+      answers: TeamQuestionAnswers | null,
+    ): Promise<TeamMessage>;
     updatePolicy(
       sessionId: string,
       policy: TeamPolicyInput,
@@ -652,6 +660,8 @@ export function createKimiDesktopApi(invoke: Invoke, subscribe: KimiDesktopApi['
         call('team', 'send', { sessionId, body, clientMessageId, recipientAgentIds }),
       submit: (sessionId, body, clientMessageId, media = [], recipientAgentIds) =>
         call('team', 'submit', { sessionId, body, clientMessageId, media, recipientAgentIds }),
+      answerQuestion: (sessionId, questionId, answers) =>
+        call('team', 'answerQuestion', { sessionId, questionId, answers }),
       updatePolicy: (sessionId, policy, expectedSeq) =>
         call('team', 'updatePolicy', { sessionId, policy, expectedSeq }),
       pause: (sessionId, expectedSeq, reason) =>

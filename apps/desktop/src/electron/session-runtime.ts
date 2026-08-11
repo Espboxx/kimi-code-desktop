@@ -6,6 +6,7 @@ import {
   type Event,
   type PromptInput,
   type QuestionRequest,
+  type QuestionHandlerRequest,
   type QuestionResult,
   type Session,
   type TeamArtifactContent,
@@ -14,6 +15,7 @@ import {
   type TeamMessageModelAttachment,
   type TeamOperation,
   type TeamPolicyInput,
+  type TeamQuestionAnswers,
   type TeamSnapshot,
   type TodoItem,
 } from '@moonshot-ai/kimi-code-sdk';
@@ -35,6 +37,7 @@ import { DesktopTranscriptProjector } from './transcript-projector';
 interface PendingInteractionBase {
   readonly interactionId: string;
   readonly agentId: string;
+  projected: boolean;
 }
 
 type PendingInteraction =
@@ -336,6 +339,22 @@ export class SessionRuntime {
     });
   }
 
+  async answerTeamQuestion(
+    questionId: string,
+    answers: TeamQuestionAnswers | null,
+  ): Promise<TeamMessage> {
+    this.ensureOpen();
+    const message = await this.session.answerTeamUserQuestion({ questionId, answers });
+    const item = this.pending.get(`question:${questionId}`);
+    if (item?.kind === 'question') {
+      const result: QuestionResult = answers === null
+        ? null
+        : { answers: { ...answers }, method: 'enter' };
+      this.completeInteraction(item, result);
+    }
+    return message;
+  }
+
   submitTeamMessage(
     body: string,
     clientMessageId: string,
@@ -473,25 +492,33 @@ export class SessionRuntime {
       const question = questionResultSchema.parse(response);
       parsed = question;
     }
-    this.pending.delete(interactionId);
-    item.resolve(parsed as never);
-    const state = interactionState(item.kind, parsed);
+    this.completeInteraction(item, parsed);
+  }
+
+  private completeInteraction(
+    item: PendingInteraction,
+    response: ApprovalResponse | QuestionResult,
+  ): void {
+    this.pending.delete(item.interactionId);
+    item.resolve(response as never);
+    if (!item.projected) return;
+    const state = interactionState(item.kind, response);
     const interaction: TranscriptInteraction = {
-      interactionId,
+      interactionId: item.interactionId,
       interactionKind: item.kind,
       toolCallId: item.request.toolCallId,
       state,
       request: item.request,
-      response: parsed,
+      response,
     };
     this.applyOps(item.agentId, this.projector(item.agentId).upsertInteraction(interaction));
     this.emit({
       type: 'interaction.resolved',
       sessionId: this.id,
       agentId: item.agentId,
-      interactionId,
+      interactionId: item.interactionId,
       state,
-      response: parsed,
+      response,
     });
     this.onStateChanged();
   }
@@ -575,6 +602,7 @@ export class SessionRuntime {
       const pending: PendingInteraction = {
         interactionId,
         agentId,
+        projected: true,
         kind: 'approval',
         request,
         resolve: (response) => { resolve(response); },
@@ -592,23 +620,50 @@ export class SessionRuntime {
     this.emit({ type: 'session.status', sessionId: this.id, status: this.status });
   }
 
-  private requestQuestion(request: QuestionRequest): Promise<QuestionResult> {
+  private requestQuestion(request: QuestionHandlerRequest): Promise<QuestionResult> {
     return new Promise((resolve) => {
       const interactionId = `question:${request.toolCallId ?? randomUUID()}`;
-      const agentId = request.toolCallId === undefined ? 'main' : this.agentForToolCall(request.toolCallId);
+      const agentId = request.agentId;
       const pending: PendingInteraction = {
         interactionId,
         agentId,
+        projected: false,
         kind: 'question',
         request,
         resolve: (response) => { resolve(response); },
       };
       this.pending.set(interactionId, pending);
-      this.publishPending(pending);
+      if (!this.isTeamLeaderQuestion(request)) {
+        this.publishPending(pending);
+        return;
+      }
+      void this.session.publishTeamUserQuestion({
+        questionId: request.toolCallId!,
+        questions: request.questions.map((question) => ({
+          question: question.question,
+          header: question.header,
+          options: question.options.map((option) => ({
+            label: option.label,
+            description: option.description,
+          })),
+          multiSelect: question.multiSelect,
+        })),
+      }).catch(() => {
+        if (this.disposed || !this.pending.has(interactionId)) return;
+        this.publishPending(pending);
+      });
     });
   }
 
+  private isTeamLeaderQuestion(request: QuestionHandlerRequest): boolean {
+    return request.toolCallId !== undefined
+      && this.team?.snapshot.protocolVersion === 2
+      && this.team.snapshot.state === 'ready'
+      && this.team.snapshot.team?.leaderAgentId === request.agentId;
+  }
+
   private publishPending(item: PendingInteraction): void {
+    item.projected = true;
     const interaction: TranscriptInteraction = {
       interactionId: item.interactionId,
       interactionKind: item.kind,

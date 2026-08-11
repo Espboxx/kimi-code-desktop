@@ -11,14 +11,17 @@ import {
 } from '@moonshot-ai/transcript';
 import { describe, expect, it } from 'vitest';
 
+import type { TeamMessage } from '../shared/desktop-api';
 import {
   agentActivityLabel,
   buildAgentActivityForest,
 } from './agent-activity';
 import {
   collectTeamAgentActivities,
+  collectPendingLeaderQuestions,
   collectPendingAgentInteractions,
   interactionSummary,
+  mergePendingLeaderQuestionActivity,
 } from './swarm-ui';
 
 describe('multi-agent UI coordination', () => {
@@ -165,6 +168,34 @@ describe('Agent activity view model', () => {
   });
 });
 
+describe('Team leader question recovery', () => {
+  it('returns only unanswered questions published by the Team leader', () => {
+    const messages: TeamMessage[] = [
+      teamQuestionMessage('leader-question-1', 'main', 1),
+      teamQuestionMessage('member-question-1', 'agent-1', 2),
+      teamQuestionMessage('leader-question-2', 'main', 3),
+      teamAnswerMessage('leader-question-1', 4),
+    ];
+
+    expect(collectPendingLeaderQuestions(messages, 'main').map((item) => item.questionId)).toEqual([
+      'leader-question-2',
+    ]);
+  });
+
+  it('keeps the leader visible as waiting when a durable question is pending', () => {
+    const pending = collectPendingLeaderQuestions([
+      teamQuestionMessage('leader-question-1', 'main', 1),
+    ], 'main')[0];
+
+    expect(mergePendingLeaderQuestionActivity([
+      { agentId: 'agent-1', status: 'running', action: '执行工具 Bash' },
+    ], 'main', pending)).toEqual([
+      { agentId: 'main', status: 'waiting', action: '等待回答：Continue?' },
+      { agentId: 'agent-1', status: 'running', action: '执行工具 Bash' },
+    ]);
+  });
+});
+
 function transcriptFixture(): TranscriptStore {
   const store = new TranscriptStore('s1');
   const main = store.ensureAgent('main', { agentId: 'main', type: 'main', label: 'Main Agent' });
@@ -181,4 +212,51 @@ function transcriptFixture(): TranscriptStore {
 
 function upsert(interaction: TranscriptInteraction): TranscriptOperation {
   return { op: 'interaction.upsert', interaction };
+}
+
+function teamQuestionMessage(questionId: string, agentId: string, seq: number): TeamMessage {
+  return {
+    id: `message-${String(seq)}`,
+    teamId: 'team-1',
+    channelId: 'general',
+    seq,
+    channelSeq: seq,
+    sender: {
+      actorKind: 'agent',
+      actorId: agentId,
+      role: agentId === 'main' ? 'leader' : 'member',
+    },
+    recipientAgentIds: ['main'],
+    body: 'Question',
+    payload: {
+      type: 'question',
+      questionId,
+      questions: [{
+        question: 'Continue?',
+        options: [{ label: 'Continue' }, { label: 'Stop' }],
+      }],
+    },
+    clientMessageId: `question:${questionId}`,
+    createdAt: seq,
+  };
+}
+
+function teamAnswerMessage(questionId: string, seq: number): TeamMessage {
+  return {
+    id: `message-${String(seq)}`,
+    teamId: 'team-1',
+    channelId: 'general',
+    seq,
+    channelSeq: seq,
+    sender: { actorKind: 'user', actorId: 'desktop-user', role: 'user' },
+    recipientAgentIds: ['main'],
+    body: 'Answer',
+    payload: {
+      type: 'question_answer',
+      questionId,
+      answers: { 'Continue?': 'Continue' },
+    },
+    clientMessageId: `answer:${questionId}`,
+    createdAt: seq,
+  };
 }

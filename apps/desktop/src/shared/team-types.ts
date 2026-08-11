@@ -219,6 +219,7 @@ export type TeamMessagePayload =
       readonly type: 'question_answer';
       readonly questionId: string;
       readonly answers: TeamQuestionAnswers;
+      readonly dismissed?: true;
     };
 
 export interface TeamMessage {

@@ -1,6 +1,6 @@
 import type { AgentDescriptor, TranscriptInteraction, TranscriptStore } from '@moonshot-ai/transcript';
 
-import type { TeamMember } from '../shared/desktop-api';
+import type { TeamMember, TeamMessage, TeamQuestionItem } from '../shared/desktop-api';
 import {
   agentActivityIsActive,
   type AgentActivityForest,
@@ -21,6 +21,12 @@ export interface TeamAgentActivity {
   readonly action: string;
 }
 
+export interface PendingLeaderQuestion {
+  readonly message: TeamMessage;
+  readonly questionId: string;
+  readonly questions: readonly TeamQuestionItem[];
+}
+
 export function collectTeamAgentActivities(
   forest: AgentActivityForest | undefined,
   members: readonly TeamMember[],
@@ -31,6 +37,47 @@ export function collectTeamAgentActivities(
     if (node === undefined || !agentActivityIsActive(node.status)) return [];
     return [{ agentId: member.agentId, status: node.status, action: node.action }];
   });
+}
+
+export function collectPendingLeaderQuestions(
+  messages: readonly TeamMessage[],
+  leaderAgentId: string,
+): readonly PendingLeaderQuestion[] {
+  const pending = new Map<string, PendingLeaderQuestion>();
+  for (const message of messages) {
+    if (
+      message.payload?.type === 'question'
+      && message.sender.actorKind === 'agent'
+      && message.sender.actorId === leaderAgentId
+    ) {
+      pending.set(message.payload.questionId, {
+        message,
+        questionId: message.payload.questionId,
+        questions: message.payload.questions,
+      });
+      continue;
+    }
+    if (message.payload?.type === 'question_answer' && message.sender.actorKind === 'user') {
+      pending.delete(message.payload.questionId);
+    }
+  }
+  return [...pending.values()];
+}
+
+export function mergePendingLeaderQuestionActivity(
+  activities: readonly TeamAgentActivity[],
+  leaderAgentId: string,
+  pending: PendingLeaderQuestion | undefined,
+): readonly TeamAgentActivity[] {
+  if (pending === undefined) return activities;
+  const waiting: TeamAgentActivity = {
+    agentId: leaderAgentId,
+    status: 'waiting',
+    action: `等待回答：${pending.questions[0]?.question ?? '组长问题'}`,
+  };
+  const leaderIndex = activities.findIndex((activity) => activity.agentId === leaderAgentId);
+  if (leaderIndex < 0) return [waiting, ...activities];
+  return activities.map((activity, index) => index === leaderIndex ? waiting : activity);
 }
 
 export function collectPendingAgentInteractions(

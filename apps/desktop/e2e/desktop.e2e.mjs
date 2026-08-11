@@ -1064,6 +1064,18 @@ try {
 
   await selectTeamByTitle(page, 'Desktop Team E2E');
   await page.locator('.workbench-tab-main[title^="团队频道"]').waitFor({ state: 'visible' });
+  const pendingLeaderQuestionAssignments = await page.locator('.team-assignment-node').count();
+  await page.locator('.team-composer textarea').fill('Ask a persistent leader question before restart.');
+  await page.locator('.team-message-send').click();
+  const pendingLeaderQuestion = page.locator('.team-user-question[data-question-id="team-restart-question-call-1"]');
+  await pendingLeaderQuestion.waitFor({ state: 'visible', timeout: 30_000 });
+  assert.match(await pendingLeaderQuestion.innerText(), /Which recovery target should continue\?/);
+  assert.match(await page.locator('.team-leader-activity').innerText(), /等待回答/);
+  assert.equal(
+    await page.locator('.team-assignment-node').count(),
+    pendingLeaderQuestionAssignments,
+    'leader question must not create a fake assignment',
+  );
   await selectSessionByTitle(page, 'Desktop E2E Session');
 
   await openSettingsAndVerify(page);
@@ -1123,6 +1135,21 @@ try {
     assert.fail(`Team tab did not restore: ${JSON.stringify({ error: error instanceof Error ? error.message : String(error), restoreDiagnostic })}`);
   }
   await restoredTeamTab.click();
+  const restoredLeaderQuestion = restoredPage.locator('.team-user-question[data-question-id="team-restart-question-call-1"]');
+  await restoredLeaderQuestion.waitFor({ state: 'visible', timeout: 30_000 });
+  assert.match(await restoredPage.locator('.team-leader-activity').innerText(), /等待回答/);
+  assert.equal(
+    await restoredPage.locator('.team-assignment-node').count(),
+    pendingLeaderQuestionAssignments,
+    'restored leader question must not create a fake assignment',
+  );
+  await restoredLeaderQuestion.locator('.question-option').filter({ hasText: 'Focused recovery' }).click();
+  await restoredLeaderQuestion.locator('.button-primary').click();
+  await restoredLeaderQuestion.waitFor({ state: 'hidden', timeout: 30_000 });
+  await restoredPage.locator('.team-member-list button:has(span[title="main"])').click();
+  await restoredPage.locator('.team-agent-surface').waitFor({ state: 'visible' });
+  await waitForAssistant(restoredPage, 'Team leader continued after the restored question.', 45_000);
+  await returnToTeamChannel(restoredPage, restoredPage.locator('.team-page'));
   const restoredTeamComposerHeight = await restoredPage.locator('.team-composer textarea')
     .evaluate((element) => Math.round(element.getBoundingClientRect().height));
   assert.equal(restoredTeamComposerHeight, persistedTeamComposerHeight, 'Team composer height was not restored independently');
@@ -1134,6 +1161,11 @@ try {
   assert.equal(await restoredTeamImage.evaluate((image) => image.getBoundingClientRect().width >= 64), true);
   assert.match(await restoredPage.locator('.team-page').innerText(), /界面侦察/);
   assert.match(await restoredPage.locator('.team-page').innerText(), /构建专家/);
+  assert.equal(
+    processLogs.some((entry) => entry.includes('prompt.not_found')),
+    false,
+    `restored Team question used a stale prompt: ${JSON.stringify(processLogs)}`,
+  );
   await selectSessionByTitle(restoredPage, 'Desktop E2E Session');
   await restoredPage.locator('.inspector-tabs button').nth(1).click();
   await restoredPage.waitForFunction(() => document.querySelectorAll('.inspector .agent-activity-row').length >= 3);
@@ -1149,6 +1181,7 @@ try {
   const restoredComposerHeight = await restoredPage.locator('.composer textarea').evaluate((element) => Math.round(element.getBoundingClientRect().height));
   assert.equal(restoredComposerHeight, persistedComposerHeight, 'composer height was not restored across app restart');
   await selectSessionByTitle(restoredPage, 'Desktop E2E Secondary');
+  await restoredPage.waitForFunction(() => document.querySelectorAll('.todo-fixed-panel .todo-item').length === 0);
   assert.equal(await restoredPage.locator('.todo-fixed-panel .todo-item').count(), 0, 'TodoList leaked across sessions');
   await assertActiveSessionSettings(restoredPage, {
     sessionId: secondarySessionId,
@@ -1758,6 +1791,27 @@ async function startProvider() {
         hasImage: JSON.stringify(messages).includes('image_url'),
       });
 
+      if (historyText.includes('[User answer: team-restart-question-call-1]')) {
+        sendText(response, 'Team leader continued after the restored question.', ++responseId);
+        return;
+      }
+      if (
+        historyText.includes('Ask a persistent leader question before restart.')
+        && !hasToolCallId(messages, 'team-restart-question-call-1')
+      ) {
+        sendTool(response, 'AskUserQuestion', {
+          questions: [{
+            question: 'Which recovery target should continue?',
+            header: 'Recovery target',
+            options: [
+              { label: 'Focused recovery', description: 'Resume only the interrupted Team leader' },
+              { label: 'Full recovery', description: 'Resume every Team participant' },
+            ],
+            multi_select: false,
+          }],
+        }, 'team-restart-question-call-1', ++responseId);
+        return;
+      }
       if (
         historyText.includes('Launch a Team Mode batch and wait for live updates.')
         && historyText.includes('<notification')
@@ -1992,6 +2046,11 @@ function findToolName(messages, toolCallId) {
 function hasToolCall(messages, toolName) {
   return messages.some((message) => Array.isArray(message?.tool_calls)
     && message.tool_calls.some((call) => call?.function?.name === toolName));
+}
+
+function hasToolCallId(messages, toolCallId) {
+  return messages.some((message) => Array.isArray(message?.tool_calls)
+    && message.tool_calls.some((call) => call?.id === toolCallId));
 }
 
 function sendText(response, content, id) {

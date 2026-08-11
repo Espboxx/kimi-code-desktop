@@ -52,8 +52,15 @@ import {
   ComposerFrame,
   type ComposerAttachmentView,
 } from './ComposerPrimitives';
-import { collectTeamAgentActivities, type TeamAgentActivity } from './swarm-ui';
+import {
+  collectTeamAgentActivities,
+  collectPendingLeaderQuestions,
+  mergePendingLeaderQuestionActivity,
+  type PendingLeaderQuestion,
+  type TeamAgentActivity,
+} from './swarm-ui';
 import { ModelSelect, type SessionModelOption } from './SessionControls';
+import { QuestionForm } from './QuestionForm';
 import { SidePanelFrame } from './SidePrimitives';
 import { classNames } from './ui-utils';
 import { buildTeamMentionAliases, rehypeTeamMentions } from './team-message-markdown';
@@ -88,6 +95,7 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
   const [reassignModel, setReassignModel] = useState('');
   const [policyDraft, setPolicyDraft] = useState<TeamPolicyDraft>();
   const streamRef = useRef<HTMLDivElement>(null);
+  const questionRefs = useRef(new Map<string, HTMLElement>());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nearBottomRef = useRef(true);
   const modelChangeRef = useRef<Promise<boolean>>(Promise.resolve(true));
@@ -108,11 +116,24 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
     () => buildTeamMentionAliases(snapshot.members, snapshot.assignments),
     [snapshot.assignments, snapshot.members],
   );
-  const activeAgents = useMemo(
-    () => collectTeamAgentActivities(activity, snapshot.members),
-    [activity, snapshot.members],
-  );
   const leaderAgentId = team?.leaderAgentId ?? 'main';
+  const pendingLeaderQuestions = useMemo(
+    () => collectPendingLeaderQuestions(state.messages, leaderAgentId),
+    [leaderAgentId, state.messages],
+  );
+  const pendingLeaderQuestion = pendingLeaderQuestions[0];
+  const pendingQuestionByMessageId = useMemo(
+    () => new Map(pendingLeaderQuestions.map((question) => [question.message.id, question])),
+    [pendingLeaderQuestions],
+  );
+  const activeAgents = useMemo(
+    () => mergePendingLeaderQuestionActivity(
+      collectTeamAgentActivities(activity, snapshot.members),
+      leaderAgentId,
+      pendingLeaderQuestion,
+    ),
+    [activity, leaderAgentId, pendingLeaderQuestion, snapshot.members],
+  );
   const leaderActivity = activeAgents.find((item) => item.agentId === leaderAgentId);
   const activityKey = activeAgents
     .map((item) => `${item.agentId}:${item.status}:${item.action}`)
@@ -126,6 +147,15 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
     label: image.label,
     previewUrl: image.url,
   }));
+  const focusPendingLeaderQuestion = useCallback(() => {
+    if (pendingLeaderQuestion === undefined) {
+      onSelectAgent(leaderAgentId);
+      return;
+    }
+    const element = questionRefs.current.get(pendingLeaderQuestion.message.id);
+    element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    element?.querySelector<HTMLButtonElement>('.question-option')?.focus();
+  }, [leaderAgentId, onSelectAgent, pendingLeaderQuestion]);
 
   useEffect(() => {
     const element = streamRef.current;
@@ -330,22 +360,45 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
             }}
           >
             {state.messages.length === 0 && <div className="team-message-empty">general 频道还没有消息</div>}
-            {state.messages.map((message) => (
-              <TeamMessageBubble
-                assignments={snapshot.assignments}
-                members={snapshot.members}
-                mentionAliases={mentionAliases}
-                message={message}
-                onSelectAgent={onSelectAgent}
-                key={message.id}
-              />
-            ))}
+            {state.messages.map((message) => {
+              const pendingQuestion = pendingQuestionByMessageId.get(message.id);
+              return pendingQuestion === undefined
+                ? (
+                    <TeamMessageBubble
+                      assignments={snapshot.assignments}
+                      members={snapshot.members}
+                      mentionAliases={mentionAliases}
+                      message={message}
+                      onSelectAgent={onSelectAgent}
+                      key={message.id}
+                    />
+                  )
+                : (
+                    <TeamUserQuestionCard
+                      pending={pendingQuestion}
+                      disabled={!writable}
+                      onSelectAgent={onSelectAgent}
+                      onRef={(element) => {
+                        if (element === null) questionRefs.current.delete(message.id);
+                        else questionRefs.current.set(message.id, element);
+                      }}
+                      sessionId={sessionId}
+                      key={message.id}
+                    />
+                  );
+            })}
             {activeAgents.length > 0 && (
               <TeamActivityStrip
                 activities={activeAgents}
                 assignments={snapshot.assignments}
                 members={snapshot.members}
-                onSelectAgent={onSelectAgent}
+                onSelectActivity={(agentId) => {
+                  if (agentId === leaderAgentId && pendingLeaderQuestion !== undefined) {
+                    focusPendingLeaderQuestion();
+                  } else {
+                    onSelectAgent(agentId);
+                  }
+                }}
               />
             )}
           </div>
@@ -487,7 +540,9 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
                 <LeaderActivityCard
                   activity={leaderActivity}
                   displayName={leader.displayName}
-                  onSelectAgent={onSelectAgent}
+                  onActivate={leaderActivity.agentId === leaderAgentId && pendingLeaderQuestion !== undefined
+                    ? focusPendingLeaderQuestion
+                    : () => { onSelectAgent(leaderActivity.agentId); }}
                 />
               )}
               {assignmentForest.length === 0
@@ -576,11 +631,11 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
   );
 }
 
-function TeamActivityStrip({ activities, members, assignments, onSelectAgent }: {
+function TeamActivityStrip({ activities, members, assignments, onSelectActivity }: {
   readonly activities: readonly TeamAgentActivity[];
   readonly members: readonly TeamMember[];
   readonly assignments: readonly TeamAssignment[];
-  readonly onSelectAgent: (agentId: string) => void;
+  readonly onSelectActivity: (agentId: string) => void;
 }) {
   return (
     <div className="team-activity-strip" aria-label="团队实时动态" aria-live="polite">
@@ -593,7 +648,7 @@ function TeamActivityStrip({ activities, members, assignments, onSelectAgent }: 
           <button
             className={classNames('team-activity-bubble', `status-${activity.status}`)}
             type="button"
-            onClick={() => { onSelectAgent(activity.agentId); }}
+            onClick={() => { onSelectActivity(activity.agentId); }}
             title={`${presentation.displayName} · ${profession} · ${status} · ${activity.action}`}
             aria-label={`${presentation.displayName}，${profession}，${status}：${activity.action}`}
             key={activity.agentId}
@@ -611,10 +666,10 @@ function TeamActivityStrip({ activities, members, assignments, onSelectAgent }: 
   );
 }
 
-function LeaderActivityCard({ activity, displayName, onSelectAgent }: {
+function LeaderActivityCard({ activity, displayName, onActivate }: {
   readonly activity: TeamAgentActivity;
   readonly displayName: string;
-  readonly onSelectAgent: (agentId: string) => void;
+  readonly onActivate: () => void;
 }) {
   const status = agentActivityLabel(activity.status);
   return (
@@ -626,7 +681,7 @@ function LeaderActivityCard({ activity, displayName, onSelectAgent }: {
       <h3>组长当前工作</h3>
       <button
         type="button"
-        onClick={() => { onSelectAgent(activity.agentId); }}
+        onClick={onActivate}
         title={`${displayName} · ${status} · ${activity.action}`}
         aria-label={`${displayName}，${status}：${activity.action}`}
       >
@@ -1098,6 +1153,55 @@ function decodeArtifactText(content: TeamArtifactContent): string {
 
 function shortId(id: string): string {
   return id.length <= 14 ? id : `${id.slice(0, 8)}…`;
+}
+
+function TeamUserQuestionCard({ pending, sessionId, disabled, onSelectAgent, onRef }: {
+  readonly pending: PendingLeaderQuestion;
+  readonly sessionId: string;
+  readonly disabled: boolean;
+  readonly onSelectAgent: (agentId: string) => void;
+  readonly onRef: (element: HTMLElement | null) => void;
+}) {
+  const message = pending.message;
+  return (
+    <article
+      className="team-message agent leader team-user-question"
+      data-question-id={pending.questionId}
+      ref={onRef}
+    >
+      <button
+        className="team-message-avatar"
+        type="button"
+        onClick={() => { onSelectAgent(message.sender.actorId); }}
+        title={`组长 · ${message.sender.actorId}`}
+      >
+        <Bot size={14} />
+      </button>
+      <div className="team-message-frame">
+        <header className="team-message-meta">
+          <strong>组长</strong>
+          <span>等待你的回答</span>
+          <time>{formatTime(message.createdAt)}</time>
+        </header>
+        <QuestionForm
+          questions={pending.questions}
+          heading="组长需要你的决定"
+          disabled={disabled}
+          className="team-user-question-form"
+          onSubmit={(answers) => window.kimiDesktop.team.answerQuestion(
+            sessionId,
+            pending.questionId,
+            answers,
+          ).then(() => undefined)}
+          onSkip={() => window.kimiDesktop.team.answerQuestion(
+            sessionId,
+            pending.questionId,
+            null,
+          ).then(() => undefined)}
+        />
+      </div>
+    </article>
+  );
 }
 
 function TeamMessageBubble({ message, members, assignments, mentionAliases, onSelectAgent }: {

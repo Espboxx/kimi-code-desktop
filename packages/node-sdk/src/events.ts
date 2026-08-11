@@ -111,4 +111,9 @@ export type MaybePromise<T> = T | Promise<T>;
 
 export type ApprovalHandler = (request: ApprovalRequest) => MaybePromise<ApprovalResponse>;
 
-export type QuestionHandler = (request: QuestionRequest) => MaybePromise<QuestionResult>;
+export type QuestionHandlerRequest = QuestionRequest & {
+  readonly sessionId: string;
+  readonly agentId: string;
+};
+
+export type QuestionHandler = (request: QuestionHandlerRequest) => MaybePromise<QuestionResult>;

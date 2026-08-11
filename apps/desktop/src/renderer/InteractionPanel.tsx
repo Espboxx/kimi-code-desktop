@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { AlertCircle, Check, X } from 'lucide-react';
 import type { TranscriptInteraction } from '@moonshot-ai/transcript';
 
-import { array, classNames, record, text } from './ui-utils';
+import { array, record, text } from './ui-utils';
+import { QuestionForm, type QuestionFormItem } from './QuestionForm';
 
 interface InteractionPanelProps {
   readonly interaction: TranscriptInteraction;
@@ -55,75 +56,33 @@ function ApprovalPanel({ interaction, sessionId }: InteractionPanelProps) {
 
 function QuestionPanel({ interaction, sessionId }: InteractionPanelProps) {
   const request = record(interaction.request);
-  const questions = array(request['questions']);
-  const [answers, setAnswers] = useState<Record<string, string[]>>({});
-  const [busy, setBusy] = useState(false);
-  const toggle = (question: string, label: string, multi: boolean) => {
-    setAnswers((current) => {
-      const selected = current[question] ?? [];
-      if (!multi) return { ...current, [question]: [label] };
-      return {
-        ...current,
-        [question]: selected.includes(label)
-          ? selected.filter((value) => value !== label)
-          : [...selected, label],
-      };
-    });
-  };
-  const submit = async () => {
-    setBusy(true);
-    try {
-      const flattened = Object.fromEntries(Object.entries(answers).map(([question, values]) => [question, values.join(', ')]));
-      await window.kimiDesktop.interaction.resolve(sessionId, interaction.interactionId, { answers: flattened, method: 'enter' });
-    } finally {
-      setBusy(false);
-    }
-  };
-  const skip = async () => {
-    setBusy(true);
-    try {
-      await window.kimiDesktop.interaction.resolve(sessionId, interaction.interactionId, null);
-    } finally {
-      setBusy(false);
-    }
-  };
+  const questions = array(request['questions']).map((raw, index): QuestionFormItem => {
+    const question = record(raw);
+    return {
+      question: text(question['question'], `问题 ${String(index + 1)}`),
+      header: text(question['header']) || undefined,
+      body: text(question['body']) || undefined,
+      options: array(question['options']).map((rawOption, optionIndex) => {
+        const option = record(rawOption);
+        return {
+          label: text(option['label'], `选项 ${String(optionIndex + 1)}`),
+          description: text(option['description']) || undefined,
+        };
+      }),
+      multiSelect: question['multiSelect'] === true,
+    };
+  });
   return (
-    <div className="interaction-panel question-panel">
-      <div className="interaction-heading"><strong>Kimi 有问题</strong></div>
-      {questions.map((raw, index) => {
-        const question = record(raw);
-        const label = text(question['question'], `问题 ${index + 1}`);
-        const multi = question['multiSelect'] === true;
-        return (
-          <fieldset key={`${label}-${index}`}>
-            <legend>{label}</legend>
-            {text(question['body']).length > 0 && <p>{text(question['body'])}</p>}
-            <div className="question-options">
-              {array(question['options']).map((rawOption, optionIndex) => {
-                const option = record(rawOption);
-                const optionLabel = text(option['label'], `选项 ${optionIndex + 1}`);
-                const selected = answers[label]?.includes(optionLabel) === true;
-                return (
-                  <button
-                    type="button"
-                    className={classNames('question-option', selected && 'selected')}
-                    onClick={() => { toggle(label, optionLabel, multi); }}
-                    key={optionLabel}
-                  >
-                    <span>{optionLabel}</span>
-                    {text(option['description']).length > 0 && <small>{text(option['description'])}</small>}
-                  </button>
-                );
-              })}
-            </div>
-          </fieldset>
-        );
-      })}
-      <div className="interaction-actions">
-        <button className="button-primary" onClick={() => void submit()} disabled={busy || Object.keys(answers).length < questions.length}>提交</button>
-        <button onClick={() => void skip()} disabled={busy}>跳过</button>
-      </div>
-    </div>
+    <QuestionForm
+      questions={questions}
+      heading="Kimi 有问题"
+      onSubmit={(answers) => window.kimiDesktop.interaction.resolve(
+        sessionId,
+        interaction.interactionId,
+        { answers, method: 'enter' },
+      )}
+      onSkip={() => window.kimiDesktop.interaction.resolve(sessionId, interaction.interactionId, null)}
+    />
   );
 }
 

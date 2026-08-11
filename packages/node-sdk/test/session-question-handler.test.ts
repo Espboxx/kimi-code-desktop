@@ -136,7 +136,7 @@ class FakeSDKRpcClient {
     const handler = this.questionHandlers.get(sessionId);
     if (handler === undefined) return null;
     try {
-      return await handler({ ...request, sessionId, agentId } as QuestionRequest);
+      return await handler({ ...request, sessionId, agentId });
     } catch {
       return null;
     }

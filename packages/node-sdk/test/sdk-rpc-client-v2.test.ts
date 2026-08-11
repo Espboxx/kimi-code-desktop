@@ -446,6 +446,17 @@ describe('SDKRpcClientV2 (agent-core-v2 wiring MVP)', () => {
       await expect(session.getTeamHistory()).resolves.toEqual([
         expect.not.objectContaining({ modelAttachments: expect.anything() }),
       ]);
+      await expect(session.publishTeamUserQuestion({
+        questionId: 'leader-question-1',
+        questions: [{
+          question: 'Continue?',
+          options: [{ label: 'Continue' }, { label: 'Stop' }],
+        }],
+      })).resolves.toMatchObject({
+        sender: { actorId: 'main', role: 'leader' },
+        recipientAgentIds: ['main'],
+        payload: { type: 'question', questionId: 'leader-question-1' },
+      });
     } finally {
       await harness.close();
     }
@@ -460,6 +471,14 @@ describe('SDKRpcClientV2 (agent-core-v2 wiring MVP)', () => {
     await expect(session.ensureTeam()).rejects.toThrow('requires v2');
     await expect(session.getTeamSnapshot()).rejects.toThrow('requires v2');
     await expect(session.sendTeamMessage({ body: 'hello', clientMessageId: 'client-1' })).rejects.toThrow('requires v2');
+    await expect(session.publishTeamUserQuestion({
+      questionId: 'question-1',
+      questions: [{ question: 'Continue?', options: [{ label: 'Yes' }, { label: 'No' }] }],
+    })).rejects.toThrow('requires v2');
+    await expect(session.answerTeamUserQuestion({
+      questionId: 'question-1',
+      answers: null,
+    })).rejects.toThrow('requires v2');
     await expect(session.pauseTeam({ expectedSeq: 1 })).rejects.toThrow('requires v2');
     await expect(session.previewTeamIntegration()).rejects.toThrow('requires v2');
     expect(() => session.onTeamOperation(() => undefined)).toThrow('requires v2');

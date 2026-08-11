@@ -1767,6 +1767,15 @@ progress {
   background: var(--accent-bg);
 }
 
+.question-form-error {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 7px 0;
+  color: var(--red);
+  font-size: 10px;
+}
+
 .pending-interaction-dock {
   display: grid;
   width: min(920px, calc(100% - 28px));
@@ -3978,6 +3987,19 @@ progress {
 
 .team-message.leader .team-message-bubble {
   border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+}
+
+.team-user-question .team-message-frame {
+  width: min(72%, 760px);
+}
+
+.team-user-question-form {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--amber) 58%, var(--border));
+  border-radius: 4px 14px 14px 14px;
+  background: color-mix(in srgb, var(--amber-bg) 72%, var(--panel-2));
+  box-shadow: 0 5px 18px color-mix(in srgb, var(--border) 32%, transparent);
 }
 
 .team-message-bubble.markdown-body {
