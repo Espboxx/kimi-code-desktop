@@ -19,11 +19,32 @@ const team = {
 
 function baseline(): TeamSnapshot {
   return {
+    protocolVersion: 2,
     state: 'ready',
     team,
     members: [{ agentId: 'main', displayName: '组长', role: 'leader', joinedAt: 1, joinedSeq: 1 }],
     batches: [],
+    tasks: [],
     assignments: [],
+    attempts: [],
+    artifacts: [],
+    reviews: [],
+    policy: {
+      maxConcurrency: 4,
+      maxMembers: 16,
+      maxDelegationDepth: 2,
+      executionRetries: 1,
+      validationRetries: 2,
+    },
+    scheduler: { status: 'running', activeCount: 0, queuedCount: 0, updatedAt: 1 },
+    budget: {
+      startedAt: 1,
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      elapsedMs: 0,
+    },
+    integration: { status: 'idle', updatedAt: 1 },
     latestSeq: 1,
     latestChannelSeq: 0,
   };
@@ -34,18 +55,33 @@ describe('TeamReplica', () => {
     const replica = new TeamReplica();
     replica.reset('s1', createTeamState(baseline()));
     const batch: TeamOperation = {
-      version: 1,
+      version: 2,
+      operationId: 'op-2',
       type: 'batch.created',
       seq: 2,
       at: 2,
       batch: { id: 'b1', callerAgentId: 'main', status: 'running', createdAt: 2, updatedAt: 2 },
-      assignments: [{
-        id: 'a1', batchId: 'b1', displayName: '构建专家', profileName: 'coder', description: 'Implement',
-        status: 'queued', createdAt: 2, updatedAt: 2,
+      tasks: [{
+        id: 'a1',
+        taskKey: 'implement',
+        batchId: 'b1',
+        dependsOn: [],
+        delegationDepth: 0,
+        displayName: '构建专家',
+        profileName: 'coder',
+        description: 'Implement',
+        promptRef: 'prompt-1',
+        workspaceMode: 'isolated_write',
+        validationMode: 'required',
+        status: 'ready',
+        artifactIds: [],
+        createdAt: 2,
+        updatedAt: 2,
       }],
     };
     const message: TeamOperation = {
-      version: 1,
+      version: 2,
+      operationId: 'op-3',
       type: 'message.sent',
       seq: 3,
       at: 3,

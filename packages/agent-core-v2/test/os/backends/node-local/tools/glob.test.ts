@@ -18,7 +18,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { ensureRgPath, type RgProbe } from '#/os/backends/node-local/tools/rgLocator';
 import { PathSecurityError, type PathClass } from '#/tool/path-access';
 import { noopTelemetryService } from '#/app/telemetry/telemetry';
-import type { ISessionWorkspaceContext } from '#/session/workspaceContext/workspaceContext';
+import type { IAgentExecutionWorkspace } from '#/agent/executionWorkspace/executionWorkspace';
 import { stubWorkspaceContext } from '../../../../session/workspaceContext/stub-workspace-context';
 import {
   type GlobInput,
@@ -206,7 +206,7 @@ function toolContentString(result: ExecutableToolResult): string {
 }
 
 function makeTool(
-  workspaceConfig: ISessionWorkspaceContext,
+  workspaceConfig: IAgentExecutionWorkspace,
   opts: {
     home?: string;
     pathClass?: PathClass;

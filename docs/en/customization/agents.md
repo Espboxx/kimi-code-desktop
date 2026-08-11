@@ -22,6 +22,30 @@ Each dispatch is presented in the terminal as an approval request (unless it mat
 
 Sub-agents support running in the background: results are automatically returned to the main Agent upon completion, with no manual polling needed. You can also call back an existing sub-agent instance to continue the same task.
 
+## Team mode
+
+Team mode is a session-scoped coordinator for work that needs several specialized subagents, task dependencies, isolated code changes, and one reviewed integration. It is available by default but starts only when you explicitly activate it for the current session:
+
+```sh
+/team start
+/team start concurrency=4 members=16 tokens=200000 duration=30m
+```
+
+Without overrides, a Team runs at most 4 tasks concurrently, keeps at most 16 members, allows 2 levels of nested delegation, retries execution once, and retries validation twice. Token and duration budgets are optional. When a configured budget is exhausted, Kimi Code pauses new scheduling and model requests; requests already in flight may still finish.
+
+After activation, `AgentSwarm` becomes a durable, non-blocking task-graph launcher. Each new item has a stable task key, display name, agent profile, workspace policy, validation policy, and optional model assignment. `depends_on` edges hold a task until its prerequisites complete. The launcher returns after accepting the batch, while the Team scheduler continues work in the background and records tasks, attempts, artifacts, reviews, messages, budget usage, and integration state.
+
+Workspace handling depends on the task:
+
+- Read tasks share the main workspace through read-only tools.
+- Write tasks require a Git repository and run in isolated worktrees. Kimi Code refuses to prepare or apply Team write work while the main worktree is dirty.
+- Every write candidate is checked by an independent validator in a separate validation worktree. Approved candidates are combined in an aggregate integration worktree.
+- The main worktree stays unchanged until you preview the aggregate Diff and explicitly confirm `/team apply`. Applying or discarding closes that Team result; start a new session for another Team run.
+
+Use `/team` or `/team status` to inspect the scheduler, task graph, budget, and integration state. You can pause or resume scheduling, cancel, retry, or reassign a task, send a broadcast or direct message, inspect artifacts, and preview, apply, or discard the aggregate result. See [Slash commands](../reference/slash-commands.md#team-mode) for the complete command list.
+
+Team state is persisted with the session. Restoring a session marks unfinished work as interrupted and leaves the scheduler paused; run `/team resume` after reviewing the state. Sessions containing the earlier Team v1 log remain available for inspection but are read-only and do not mix new v2 operations into the legacy log.
+
 ## Context Isolation and Resource Cost
 
 Each sub-agent has a fully independent context window. It can only see the task description explicitly passed by the main Agent and cannot see the main Agent's conversation history. The sub-agent's own intermediate reasoning and tool call records do not flow back; only the final result appears in the main Agent's context.

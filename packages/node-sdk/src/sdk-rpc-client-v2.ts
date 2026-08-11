@@ -309,9 +309,11 @@ import type {
   SkillSummary,
   TelemetryClient,
   TodoItem,
+  TeamArtifactContent,
   TeamMessage,
   TeamMessageAttachment,
   TeamOperation,
+  TeamPolicyInput,
   TeamSnapshot,
   Unsubscribe,
   WorkspaceTrustInfo,
@@ -1528,9 +1530,11 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     return () => disposable.dispose();
   }
 
-  async ensureTeam(input: SessionIdRpcInput): Promise<TeamSnapshot> {
+  async ensureTeam(
+    input: SessionIdRpcInput & { readonly policy?: TeamPolicyInput },
+  ): Promise<TeamSnapshot> {
     await this.agentFacade(input.sessionId);
-    return this.klient.session(input.sessionId).collaboration.ensureTeam();
+    return this.klient.session(input.sessionId).collaboration.ensureTeam(input.policy);
   }
 
   async getTeamSnapshot(input: SessionIdRpcInput): Promise<TeamSnapshot> {
@@ -1563,6 +1567,7 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
       readonly body: string;
       readonly clientMessageId: string;
       readonly attachments?: readonly TeamMessageAttachment[];
+      readonly recipientAgentIds?: readonly string[];
     },
   ): Promise<TeamMessage> {
     await this.agentFacade(input.sessionId);
@@ -1570,6 +1575,110 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
       body: input.body,
       clientMessageId: input.clientMessageId,
       attachments: input.attachments,
+      recipientAgentIds: input.recipientAgentIds,
+    });
+  }
+
+  async updateTeamPolicy(
+    input: SessionIdRpcInput & {
+      readonly policy: TeamPolicyInput;
+      readonly expectedSeq: number;
+    },
+  ): Promise<TeamSnapshot> {
+    await this.agentFacade(input.sessionId);
+    return this.klient.session(input.sessionId).collaboration.updatePolicy({
+      policy: input.policy,
+      expectedSeq: input.expectedSeq,
+    });
+  }
+
+  async pauseTeam(
+    input: SessionIdRpcInput & { readonly expectedSeq: number; readonly reason?: string },
+  ): Promise<TeamSnapshot> {
+    await this.agentFacade(input.sessionId);
+    return this.klient.session(input.sessionId).collaboration.pause({
+      expectedSeq: input.expectedSeq,
+      reason: input.reason,
+    });
+  }
+
+  async resumeTeam(
+    input: SessionIdRpcInput & { readonly expectedSeq: number },
+  ): Promise<TeamSnapshot> {
+    await this.agentFacade(input.sessionId);
+    return this.klient.session(input.sessionId).collaboration.resume({
+      expectedSeq: input.expectedSeq,
+    });
+  }
+
+  async cancelTeamTask(
+    input: SessionIdRpcInput & { readonly taskId: string; readonly expectedSeq: number },
+  ): Promise<TeamSnapshot> {
+    await this.agentFacade(input.sessionId);
+    return this.klient.session(input.sessionId).collaboration.cancelTask({
+      taskId: input.taskId,
+      expectedSeq: input.expectedSeq,
+    });
+  }
+
+  async retryTeamTask(
+    input: SessionIdRpcInput & { readonly taskId: string; readonly expectedSeq: number },
+  ): Promise<TeamSnapshot> {
+    await this.agentFacade(input.sessionId);
+    return this.klient.session(input.sessionId).collaboration.retryTask({
+      taskId: input.taskId,
+      expectedSeq: input.expectedSeq,
+    });
+  }
+
+  async reassignTeamTask(
+    input: SessionIdRpcInput & {
+      readonly taskId: string;
+      readonly expectedSeq: number;
+      readonly profileName?: string;
+      readonly model?: string;
+    },
+  ): Promise<TeamSnapshot> {
+    await this.agentFacade(input.sessionId);
+    return this.klient.session(input.sessionId).collaboration.reassignTask({
+      taskId: input.taskId,
+      expectedSeq: input.expectedSeq,
+      profileName: input.profileName,
+      model: input.model,
+    });
+  }
+
+  async getTeamArtifact(
+    input: SessionIdRpcInput & { readonly artifactId: string },
+  ): Promise<TeamArtifactContent> {
+    await this.agentFacade(input.sessionId);
+    return this.klient.session(input.sessionId).collaboration.artifact({
+      artifactId: input.artifactId,
+    });
+  }
+
+  async previewTeamIntegration(
+    input: SessionIdRpcInput,
+  ): Promise<TeamArtifactContent | undefined> {
+    await this.agentFacade(input.sessionId);
+    return this.klient.session(input.sessionId).collaboration.previewIntegration();
+  }
+
+  async applyTeamIntegration(
+    input: SessionIdRpcInput & { readonly expectedSeq: number },
+  ): Promise<TeamSnapshot> {
+    await this.agentFacade(input.sessionId);
+    return this.klient.session(input.sessionId).collaboration.applyIntegration({
+      expectedSeq: input.expectedSeq,
+    });
+  }
+
+  async discardTeamIntegration(
+    input: SessionIdRpcInput & { readonly expectedSeq: number },
+  ): Promise<TeamSnapshot> {
+    await this.agentFacade(input.sessionId);
+    return this.klient.session(input.sessionId).collaboration.discardIntegration({
+      expectedSeq: input.expectedSeq,
     });
   }
 

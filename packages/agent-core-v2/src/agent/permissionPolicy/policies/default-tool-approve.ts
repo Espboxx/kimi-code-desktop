@@ -21,6 +21,8 @@ const DEFAULT_APPROVE_TOOLS = new Set([
   'TeamSend',
   'TeamStatus',
   'TeamWait',
+  'TeamTaskReport',
+  'TeamReviewSubmit',
   'AskUserQuestion',
   'Skill',
   'EnterPlanMode',

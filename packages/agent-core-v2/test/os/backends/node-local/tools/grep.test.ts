@@ -14,6 +14,7 @@ import type {
 import { IAgentToolActivationService } from '#/agent/toolActivation/toolActivation';
 import { AgentToolActivationService } from '#/agent/toolActivation/toolActivationService';
 import { IAgentProfileService, type ProfileData } from '#/agent/profile/profile';
+import { IAgentExecutionWorkspace } from '#/agent/executionWorkspace/executionWorkspace';
 import {
   _clearAgentToolContributionsForTests,
   AgentToolContribution,
@@ -315,7 +316,9 @@ describe('GrepTool', () => {
           reg.defineInstance(IHostProcessService, createTestProcessService(kaos));
           reg.defineInstance(IHostFileSystem, createTestFs(kaos));
           reg.defineInstance(IHostEnvironment, createTestEnv(kaos));
-          reg.defineInstance(ISessionWorkspaceContext, stubWorkspaceContext('/workspace'));
+          const workspaceContext = stubWorkspaceContext('/workspace');
+          reg.defineInstance(ISessionWorkspaceContext, workspaceContext);
+          reg.defineInstance(IAgentExecutionWorkspace, workspaceContext);
           reg.defineInstance(ITelemetryService, noopTelemetryService);
           reg.defineInstance(ISessionSkillCatalog, {
             _serviceBrand: undefined,

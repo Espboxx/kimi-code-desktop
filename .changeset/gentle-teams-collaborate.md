@@ -1,5 +1,6 @@
 ---
+"@moonshot-ai/kimi-code": minor
 "@moonshot-ai/kimi-code-sdk": minor
 ---
 
-Expose Team initialization, snapshots, operation and history catch-up, idempotent text and image messaging, and live subscriptions on v2 sessions.
+Add durable Team task graphs with isolated write worktrees, independent validation, budgets, messaging, and an explicit aggregate apply, and expose their controls through the SDK. Run `/team start` in the TUI to activate a Team.

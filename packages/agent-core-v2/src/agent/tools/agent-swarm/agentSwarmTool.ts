@@ -79,6 +79,10 @@ interface AgentSwarmSpawnSpec {
   readonly displayName?: string;
   readonly profileName: string;
   readonly model?: string;
+  readonly taskKey?: string;
+  readonly dependsOn: readonly string[];
+  readonly workspaceMode: 'shared_readonly' | 'isolated_write';
+  readonly validationMode: 'none' | 'required';
 }
 
 interface AgentSwarmResumeSpec {
@@ -87,9 +91,25 @@ interface AgentSwarmResumeSpec {
   readonly agentId: string;
   readonly item?: string;
   readonly prompt: string;
+  readonly taskKey?: string;
+  readonly dependsOn: readonly string[];
+  readonly workspaceMode: 'shared_readonly' | 'isolated_write';
+  readonly validationMode: 'none' | 'required';
 }
 
 type AgentSwarmSpec = AgentSwarmSpawnSpec | AgentSwarmResumeSpec;
+
+interface NormalizedSwarmItem {
+  readonly item: string;
+  readonly taskKey?: string;
+  readonly dependsOn: readonly string[];
+  readonly displayName?: string;
+  readonly profileName: string;
+  readonly model?: string;
+  readonly workspaceMode: 'shared_readonly' | 'isolated_write';
+  readonly validationMode: 'none' | 'required';
+  readonly resumeAgentId?: string;
+}
 
 interface SwarmRunResult {
   readonly spec: AgentSwarmSpec;
@@ -184,9 +204,23 @@ export class AgentSwarmTool implements IAgentSwarmTool {
   ): Promise<string> {
     const teamMode = this.teamModeEnabled();
     const timeoutMs = resolveSubagentTimeoutMs(this.config);
-    const specs = await createAgentSwarmSpecs(args, (agentId) =>
-      this.swarmService.getSwarmItem({ callerAgentId: this.callerAgentId, agentId }),
+    const specs = await createAgentSwarmSpecs(
+      args,
+      (agentId) => this.swarmService.getSwarmItem({ callerAgentId: this.callerAgentId, agentId }),
+      teamMode,
     );
+    if (teamMode && Object.keys(args.resume_agent_ids ?? {}).length > 0) {
+      throw new Error2(
+        ErrorCodes.VALIDATION_FAILED,
+        'Team Mode uses item-level resume_agent_id so every logical task keeps its task_key and dependencies.',
+      );
+    }
+    if (teamMode && specs.some((spec) => spec.taskKey === undefined)) {
+      throw new Error2(
+        ErrorCodes.VALIDATION_FAILED,
+        'Team Mode requires every AgentSwarm item to provide task_key.',
+      );
+    }
     if (teamMode && specs.some((spec) => spec.kind === 'spawn' && spec.displayName === undefined)) {
       throw new Error2(
         ErrorCodes.VALIDATION_FAILED,
@@ -304,6 +338,8 @@ export class AgentSwarmTool implements IAgentSwarmTool {
           const profileName = spec.kind === 'spawn' ? spec.profileName : metadata?.profileName ?? 'subagent';
           return {
             assignmentId: `assignment_${randomUUID()}`,
+            taskKey: spec.taskKey,
+            dependsOn: spec.dependsOn,
             displayName: spec.kind === 'spawn' ? spec.displayName : metadata?.displayName,
             profileName,
             model: spec.kind === 'spawn'
@@ -311,6 +347,9 @@ export class AgentSwarmTool implements IAgentSwarmTool {
               : metadata?.model,
             description: childDescription(args.description, spec.index, profileName),
             item: spec.item,
+            prompt: spec.prompt,
+            workspaceMode: spec.workspaceMode,
+            validationMode: spec.validationMode,
             resumeAgentId: spec.kind === 'resume' ? spec.agentId : undefined,
           };
         }),
@@ -360,27 +399,10 @@ export class AgentSwarmTool implements IAgentSwarmTool {
     });
     if (teamReceipt !== undefined) {
       const receipt = teamReceipt;
-      const assignmentByIndex = new Map(
-        specs.map((spec, index) => [spec.index, receipt.assignments[index]!.id]),
-      );
-      let launch: ReturnType<ISessionSwarmService['launch']>;
       try {
-        launch = this.swarmService.launch({
-          callerAgentId: this.callerAgentId,
+        await this.requireCollaboration().scheduleSwarmBatch({
+          batchId: receipt.batchId,
           tasks,
-          onResult: (result) => {
-            const assignmentId = assignmentByIndex.get((result.task.data as AgentSwarmSpec).index);
-            if (assignmentId === undefined) return;
-            return this.requireCollaboration().settleAssignment({
-              assignmentId,
-              status: result.status === 'completed'
-                ? 'completed'
-                : result.status === 'aborted'
-                  ? 'cancelled'
-                  : 'failed',
-              error: result.error,
-            });
-          },
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -394,17 +416,6 @@ export class AgentSwarmTool implements IAgentSwarmTool {
         await this.requireCollaboration().settleBatch({ batchId: receipt.batchId, status: 'failed' });
         throw error;
       }
-      void launch.completion.then(
-        (results) => this.requireCollaboration().settleBatch({
-          batchId: receipt.batchId,
-          status: results.every((result) => result.status === 'completed')
-            ? 'completed'
-            : results.some((result) => result.status === 'failed')
-              ? 'failed'
-              : 'cancelled',
-        }),
-        () => this.requireCollaboration().settleBatch({ batchId: receipt.batchId, status: 'interrupted' }),
-      ).catch(() => undefined);
       return renderSwarmLaunchReceipt(receipt.batchId, receipt.assignments);
     }
     const results = await this.swarmService.run({
@@ -427,13 +438,16 @@ export class AgentSwarmTool implements IAgentSwarmTool {
   }
 
   private teamModeEnabled(): boolean {
-    return this.collaboration !== undefined && this.flags.enabled(TEAM_COLLABORATION_FLAG_ID);
+    return this.collaboration !== undefined
+      && this.flags.enabled(TEAM_COLLABORATION_FLAG_ID)
+      && this.collaboration.isActive();
   }
 
   private availableProfileLines(): string {
     const own = this.profile.data();
     const allowlist = this.collaboration !== undefined
       && this.flags.enabled(TEAM_COLLABORATION_FLAG_ID)
+      && this.collaboration.isActive()
       && this.callerAgentId === 'main'
       ? undefined
       : subagentAllowlistFor(this.catalog, own);
@@ -493,24 +507,43 @@ registerAgentToolService(IAgentSwarmTool, AgentSwarmTool, { name: 'AgentSwarm', 
 async function createAgentSwarmSpecs(
   args: AgentSwarmToolInput,
   getResumeItem: (agentId: string) => Promise<string | undefined>,
+  allowSingleItem = false,
 ): Promise<AgentSwarmSpec[]> {
   const resumeEntries = Object.entries(args.resume_agent_ids ?? {}).map(([agentId, prompt]) => ({
     agentId: agentId.trim(),
     prompt: prompt.trim(),
   }));
   const defaultProfileName = normalizeOptionalString(args.subagent_type) ?? DEFAULT_SUBAGENT_TYPE;
-  const items = (args.items ?? []).map((item) => typeof item === 'string'
-    ? { item: item.trim(), profileName: defaultProfileName, model: args.model }
-    : {
+  const items: NormalizedSwarmItem[] = (args.items ?? []).map((item): NormalizedSwarmItem => typeof item === 'string'
+    ? {
+        item: item.trim(),
+        profileName: defaultProfileName,
+        model: args.model,
+        dependsOn: [] as readonly string[],
+        workspaceMode: defaultProfileName === 'explore' ? 'shared_readonly' as const : 'isolated_write' as const,
+        validationMode: defaultProfileName === 'explore' ? 'none' as const : 'required' as const,
+      }
+    : (() => {
+        const profileName = normalizeOptionalString(item.subagent_type) ?? defaultProfileName;
+        const workspaceMode = item.workspace_access === 'read' || (item.workspace_access === undefined && profileName === 'explore')
+          ? 'shared_readonly' as const
+          : 'isolated_write' as const;
+        return {
         item: item.item.trim(),
-        displayName: item.display_name.trim(),
-        profileName: item.subagent_type.trim(),
+        taskKey: normalizeOptionalString(item.task_key),
+        dependsOn: item.depends_on ?? [],
+        displayName: normalizeOptionalString(item.display_name),
+        profileName,
         model: item.model ?? args.model,
-      });
+        workspaceMode,
+        validationMode: workspaceMode === 'isolated_write' ? 'required' as const : 'none' as const,
+        resumeAgentId: normalizeOptionalString(item.resume_agent_id),
+      };
+      })());
   const itemCount = items.length;
   const resumeCount = resumeEntries.length;
   const totalCount = resumeCount + itemCount;
-  if (!hasMinimumAgentSwarmInputs(itemCount, resumeCount)) {
+  if (!hasMinimumAgentSwarmInputs(itemCount, resumeCount, allowSingleItem)) {
     throw new Error2(
       ErrorCodes.VALIDATION_FAILED,
       'AgentSwarm requires at least 2 items unless resume_agent_ids is provided.',
@@ -547,6 +580,9 @@ async function createAgentSwarmSpecs(
       agentId: entry.agentId,
       item: await getResumeItem(entry.agentId),
       prompt: entry.prompt,
+      dependsOn: [],
+      workspaceMode: 'isolated_write',
+      validationMode: 'required',
     });
   }
   if (items.length > 0) {
@@ -562,22 +598,44 @@ async function createAgentSwarmSpecs(
         );
       }
       seenPrompts.set(prompt, index + 1);
-      specs.push({
-        kind: 'spawn',
-        index: specs.length + 1,
-        item: entry.item,
-        prompt,
-        displayName: entry.displayName,
-        profileName: entry.profileName,
-        model: entry.model,
-      });
+      if (entry.resumeAgentId !== undefined) {
+        specs.push({
+          kind: 'resume',
+          index: specs.length + 1,
+          agentId: entry.resumeAgentId,
+          item: entry.item,
+          prompt,
+          taskKey: entry.taskKey,
+          dependsOn: entry.dependsOn,
+          workspaceMode: entry.workspaceMode,
+          validationMode: entry.validationMode,
+        });
+      } else {
+        specs.push({
+          kind: 'spawn',
+          index: specs.length + 1,
+          item: entry.item,
+          prompt,
+          taskKey: entry.taskKey,
+          dependsOn: entry.dependsOn,
+          displayName: entry.displayName,
+          profileName: entry.profileName,
+          model: entry.model,
+          workspaceMode: entry.workspaceMode,
+          validationMode: entry.validationMode,
+        });
+      }
     });
   }
   return specs;
 }
 
-function hasMinimumAgentSwarmInputs(itemCount: number, resumeCount: number): boolean {
-  return resumeCount > 0 || itemCount >= 2;
+function hasMinimumAgentSwarmInputs(
+  itemCount: number,
+  resumeCount: number,
+  allowSingleItem: boolean,
+): boolean {
+  return resumeCount > 0 || itemCount >= (allowSingleItem ? 1 : 2);
 }
 
 function childDescription(swarmDescription: string, index: number, profileName: string): string {

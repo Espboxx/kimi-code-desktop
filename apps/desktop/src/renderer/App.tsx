@@ -626,7 +626,14 @@ export function App() {
   };
   const teamBadges = Object.fromEntries(Object.entries(state.teams).map(([sessionId, teamState]) => [sessionId, {
     unread: Math.max(0, teamState.snapshot.latestChannelSeq - (seenTeamSeqs[sessionId] ?? 0)),
-    running: teamState.snapshot.assignments.filter((assignment) => assignment.status === 'running' || assignment.status === 'queued').length,
+    running: teamState.snapshot.assignments.filter((assignment) => [
+      'queued',
+      'blocked',
+      'ready',
+      'running',
+      'awaiting_validation',
+      'integrating',
+    ].includes(assignment.status)).length,
     failed: teamState.snapshot.assignments.filter((assignment) => assignment.status === 'failed').length,
   }]));
   const teamAgentLabels = Object.fromEntries(Object.entries(state.teams).flatMap(([sessionId, teamState]) =>

@@ -2,8 +2,8 @@
  * `collaboration` domain — experimental Team Mode feature assembly.
  *
  * Contributes the session collaboration service, per-agent delivery service,
- * and TeamSend/TeamStatus/TeamWait tools while keeping static flag and wire
- * registrations import-discoverable.
+ * and the Team coordination, reporting, validation, and profile-authoring
+ * tools while keeping static flag and wire registrations import-discoverable.
  */
 
 import { IFlagService } from '#/app/flag/flag';
@@ -19,13 +19,18 @@ import { WorkspaceAgentProfileManagerService } from '#/workspace/workspaceAgentP
 
 import { ISessionCollaborationService } from './collaboration';
 import { SessionCollaborationService } from './collaborationService';
+import { ITeamBudgetGuardService, TeamBudgetGuardService } from './budgetGuard';
 import { IAgentCollaborationDeliveryService } from './delivery';
 import { AgentCollaborationDeliveryService } from './deliveryService';
 import './deliveryOps';
 import { TEAM_COLLABORATION_FLAG_ID } from './flag';
+import { ITeamWorkspaceService } from './teamWorkspace';
+import { TeamWorkspaceService } from './teamWorkspaceService';
 import { ITeamSendTool, TeamSendTool } from './tools/teamSend';
 import { ITeamStatusTool, TeamStatusTool } from './tools/teamStatus';
 import { ITeamWaitTool, TeamWaitTool } from './tools/teamWait';
+import { ITeamTaskReportTool, TeamTaskReportTool } from './tools/teamTaskReport';
+import { ITeamReviewSubmitTool, TeamReviewSubmitTool } from './tools/teamReviewSubmit';
 import {
   AgentProfileCreateTool,
   IAgentProfileCreateTool,
@@ -38,12 +43,22 @@ export class CollaborationFeature extends Feature {
     super();
     this.contributeService(
       LifecycleScope.Session,
+      ITeamWorkspaceService,
+      TeamWorkspaceService,
+    );
+    this.contributeService(
+      LifecycleScope.Session,
       ISessionCollaborationService,
       SessionCollaborationService,
     );
     this.contributeAgentService(
       IAgentCollaborationDeliveryService,
       AgentCollaborationDeliveryService,
+    );
+    this.contributeAgentService(
+      ITeamBudgetGuardService,
+      TeamBudgetGuardService,
+      { activation: ScopeActivation.OnScopeCreated },
     );
     this.contributeService(
       LifecycleScope.Workspace,
@@ -64,6 +79,16 @@ export class CollaborationFeature extends Feature {
     this.contributeTool(ITeamSendTool, TeamSendTool, { name: 'TeamSend', domain: 'collaboration', when });
     this.contributeTool(ITeamStatusTool, TeamStatusTool, { name: 'TeamStatus', domain: 'collaboration', when });
     this.contributeTool(ITeamWaitTool, TeamWaitTool, { name: 'TeamWait', domain: 'collaboration', when });
+    this.contributeTool(ITeamTaskReportTool, TeamTaskReportTool, {
+      name: 'TeamTaskReport',
+      domain: 'collaboration',
+      when,
+    });
+    this.contributeTool(ITeamReviewSubmitTool, TeamReviewSubmitTool, {
+      name: 'TeamReviewSubmit',
+      domain: 'collaboration',
+      when,
+    });
     this.contributeTool(IAgentProfileCreateTool, AgentProfileCreateTool, {
       name: 'AgentProfileCreate',
       domain: 'collaboration',

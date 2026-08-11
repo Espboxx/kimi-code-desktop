@@ -14,6 +14,10 @@ import { escapeXmlAttr } from '#/_base/utils/xml-escape';
 import type { AgentTaskInfo } from '#/agent/task/task';
 import { IAgentBlobService } from '#/agent/blob/agentBlobService';
 import { AgentBlobServiceImpl } from '#/agent/blob/agentBlobServiceImpl';
+import {
+  IAgentExecutionWorkspace,
+  makeAgentExecutionWorkspace,
+} from '#/agent/executionWorkspace/executionWorkspace';
 import { WorkspaceStateService } from '#/workspace/state/workspaceStateService';
 import { IHostEnvironment } from '#/os/interface/hostEnvironment';
 import { IAgentContextInjectorService } from '#/agent/contextInjector/contextInjector';
@@ -883,6 +887,7 @@ function collectScopeSeed(
 class PersistenceAppendLogStore implements IAppendLogStore {
   declare readonly _serviceBrand: undefined;
   private readonly history: WireRecord[] = [];
+  private readonly auxiliaryLogs = new Map<string, unknown[]>();
 
   constructor(
     private readonly persistence: WireRecordPersistence,
@@ -890,14 +895,26 @@ class PersistenceAppendLogStore implements IAppendLogStore {
     private readonly onRead: (event: WireRecord) => void,
   ) { }
 
-  append<R>(_scope: string, _key: string, record: R): void {
+  append<R>(scope: string, key: string, record: R): void {
+    if (key !== AGENT_WIRE_RECORD_KEY) {
+      const entries = this.auxiliaryLogs.get(this.auxiliaryKey(scope, key)) ?? [];
+      entries.push(structuredClone(record));
+      this.auxiliaryLogs.set(this.auxiliaryKey(scope, key), entries);
+      return;
+    }
     const event = record as WireRecord;
     this.onAppend(event);
     this.persistence.append(event);
     this.history.push(cloneRecord(event));
   }
 
-  async *read<R>(_scope: string, _key: string): AsyncIterable<R> {
+  async *read<R>(scope: string, key: string): AsyncIterable<R> {
+    if (key !== AGENT_WIRE_RECORD_KEY) {
+      for (const record of this.auxiliaryLogs.get(this.auxiliaryKey(scope, key)) ?? []) {
+        yield structuredClone(record) as R;
+      }
+      return;
+    }
     for await (const event of this.persistence.read()) {
       this.onRead(event);
       this.history.push(cloneRecord(event));
@@ -905,7 +922,14 @@ class PersistenceAppendLogStore implements IAppendLogStore {
     }
   }
 
-  rewrite<R>(_scope: string, _key: string, records: readonly R[]): Promise<void> {
+  rewrite<R>(scope: string, key: string, records: readonly R[]): Promise<void> {
+    if (key !== AGENT_WIRE_RECORD_KEY) {
+      this.auxiliaryLogs.set(
+        this.auxiliaryKey(scope, key),
+        records.map((record) => structuredClone(record)),
+      );
+      return Promise.resolve();
+    }
     this.persistence.rewrite(records as readonly WireRecord[]);
     return Promise.resolve();
   }
@@ -928,6 +952,10 @@ class PersistenceAppendLogStore implements IAppendLogStore {
 
   historySnapshot(): WireRecord[] {
     return this.history.map(cloneRecord);
+  }
+
+  private auxiliaryKey(scope: string, key: string): string {
+    return `${scope}\0${key}`;
   }
 }
 
@@ -1290,6 +1318,14 @@ export class AgentTestContext {
               scope: (subKey?: string): string =>
                 subKey === undefined || subKey === '' ? agentScope : `${agentScope}/${subKey}`,
             });
+            reg.defineInstance(
+              IAgentExecutionWorkspace,
+              makeAgentExecutionWorkspace(workspace, {
+                workDir: this.cwd,
+                access: 'write',
+                additionalDirs: workspace.additionalDirs,
+              }),
+            );
             reg.defineInstance(ITelemetryService, agentTelemetry);
           },
         ],

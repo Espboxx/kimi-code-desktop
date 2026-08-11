@@ -20,14 +20,29 @@ export const MAX_AGENT_SWARM_SUBAGENTS = 128;
 
 export const AgentSwarmStructuredItemSchema = z.object({
   item: z.string().trim().min(1).describe('Task value used to fill the prompt template.'),
-  display_name: teamDisplayNameSchema.describe(
+  task_key: z.string().trim().min(1).max(80).optional().describe(
+    'Stable unique task key. Required for every item in Team Mode and referenced by depends_on.',
+  ),
+  depends_on: z.array(z.string().trim().min(1).max(80)).max(32).optional().describe(
+    'Task keys that must complete and integrate before this task may start.',
+  ),
+  display_name: teamDisplayNameSchema.optional().describe(
     'Short unique persistent name for this Team member. Required for new agents in Team Mode. Use 1-24 letters or numbers, with underscores and hyphens allowed after the first character. Do not use main or agent-N.',
   ),
-  subagent_type: z.string().trim().min(1).describe(
+  subagent_type: z.string().trim().min(1).optional().describe(
     'Agent profession selected for this task. Compare the listed Introduction and Best for guidance before choosing.',
   ),
   model: z.string().trim().min(1).optional().describe(
     'Exact configured model alias for this task. Required per new item in Team Mode when more than one model is available; overrides the batch-level model.',
+  ),
+  workspace_access: z.enum(['read', 'write']).optional().describe(
+    'Maximum workspace access for this task. Team Mode defaults known read-only profiles to read and all other profiles to write.',
+  ),
+  validation: z.enum(['none', 'required']).optional().describe(
+    'Independent validation policy. Write tasks always require validation in Team Mode.',
+  ),
+  resume_agent_id: z.string().trim().min(1).optional().describe(
+    'Reusable Team member agent id for this logical task. Team Mode uses this item-level field instead of resume_agent_ids.',
   ),
 }).strict();
 

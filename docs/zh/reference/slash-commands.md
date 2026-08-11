@@ -51,11 +51,32 @@
 | `/plan clear` | — | 清除当前 plan 方案 | 否 |
 | `/swarm on\|off` | — | 开启或关闭 swarm mode，但不发送提示词。 | 是 |
 | `/swarm <task>` | — | 先开启 swarm mode，再把 `<task>` 作为普通提示词发送。如果该轮次正常完成，swarm mode 会自动关闭。若当前是 `manual` 权限模式，启动前会提示是否切换到 `auto` 或 `yolo`。 | 否 |
+| `/team [...]` | — | 启动、查看、通信和控制当前会话的持久 Team | 是 |
 | `/goal [...]` | — | 开始或管理目标模式 | 见下文 |
 
 ::: warning 注意
 `/yolo` 会跳过普通工具调用的审批确认，使用前请确保了解可能的风险。Plan 模式的退出审批不会被 `/yolo` 跳过；Plan 模式下的 `Bash` 也按 `/yolo` 的普通放行规则处理。
 :::
+
+## Team 模式
+
+Team 模式用于协调由专业子 Agent 组成的持久任务图。在要求主 Agent 委派 Team 工作前，先在当前会话运行一次 `/team start`。工作区隔离、独立验证、预算与重启行为详见 [Agent 与子 Agent — Team 模式](../customization/agents.md#team-模式)。
+
+| 命令 | 操作 | 可用状态 |
+| --- | --- | --- |
+| `/team` 或 `/team status` | 显示 Team 协议、调度器、策略、预算、集成和任务状态 | 随时可用 |
+| `/team start [<key=value> ...]` | 为当前会话启动 Team v2。策略键包括 `concurrency`、`members`、`depth`、`executionRetries`、`validationRetries`、`tokens` 和 `duration` | 随时可用 |
+| `/team policy <key=value> [...]` | 更新一个或多个策略值。`duration` 可使用毫秒数，或附加 `ms`、`s`、`m`、`h` 单位 | 随时可用 |
+| `/team pause [<reason>]` | 暂停新的 Team 调度，但保留全部状态 | 随时可用 |
+| `/team resume` | 恢复调度，包括重启后恢复出的中断任务 | 随时可用 |
+| `/team cancel <task-id\|task-key>` | 取消一个 Team 任务 | 随时可用 |
+| `/team retry <task-id\|task-key>` | 重试失败、已取消或已中断的任务 | 随时可用 |
+| `/team reassign <task-id\|task-key> [profile=<name>] [model=<alias>]` | 在执行前或未完成任务停止后修改 Agent profile、模型，或同时修改两者；至少提供一个选项 | 随时可用 |
+| `/team message <agent-id\|display-name\|all> <message>` | 向一名成员发送私信，或向 Team 广播 | 随时可用 |
+| `/team artifact <artifact-id>` | 显示 Team 报告、补丁、验证结果或其他产物 | 随时可用 |
+| `/team preview` | 显示汇总集成 Diff，不修改主 worktree | 随时可用 |
+| `/team apply` | 先预览汇总 Diff，再打开显式确认，并仅应用一次 | 随时可用 |
+| `/team discard` | 丢弃待应用的汇总集成结果 | 随时可用 |
 
 ## 目标模式
 

@@ -41,6 +41,10 @@ import { IAgentTaskService } from '#/agent/task/task';
 import { ISessionContext } from '#/session/sessionContext/sessionContext';
 import { ISessionMetadata } from '#/session/sessionMetadata/sessionMetadata';
 import { IAgentScopeContext, makeAgentScopeContext } from '#/agent/scopeContext/scopeContext';
+import {
+  IAgentExecutionWorkspace,
+  makeAgentExecutionWorkspace,
+} from '#/agent/executionWorkspace/executionWorkspace';
 import { IAgentLoopService } from '#/agent/loop/loop';
 import { IAgentProfileService } from '#/agent/profile/profile';
 import { abortError } from '#/_base/utils/abort';
@@ -51,6 +55,7 @@ import { IAgentToolActivationService } from '#/agent/toolActivation/toolActivati
 import { ISessionInteractionService } from '#/session/interaction/interaction';
 import { IWireService } from '#/wire/wire';
 import { ITelemetryService } from '#/app/telemetry/telemetry';
+import { ISessionWorkspaceContext } from '#/session/workspaceContext/workspaceContext';
 import {
   type AgentListFilter,
   type CreateAgentOptions,
@@ -84,6 +89,7 @@ export class AgentLifecycleService extends Disposable implements IAgentLifecycle
     @IConfigService private readonly config: IConfigService,
     @ISessionInteractionService private readonly interaction: ISessionInteractionService,
     @ITelemetryService private readonly telemetry: ITelemetryService,
+    @ISessionWorkspaceContext private readonly workspace: ISessionWorkspaceContext,
   ) {
     super();
     this._register(this.onDidCreate((handle) => this.subscribeInteractionBus(handle)));
@@ -153,6 +159,17 @@ export class AgentLifecycleService extends Disposable implements IAgentLifecycle
       {
         extra: [
           [IAgentScopeContext, makeAgentScopeContext({ agentId, agentScope })],
+          [
+            IAgentExecutionWorkspace,
+            makeAgentExecutionWorkspace(
+              this.workspace,
+              opts.executionWorkspace ?? {
+                workDir: this.ctx.cwd,
+                access: 'write',
+                additionalDirs: this.workspace.additionalDirs,
+              },
+            ),
+          ],
           [ITelemetryService, this.telemetry.withContext({ agent_id: agentId })],
         ],
       },

@@ -73,7 +73,7 @@ import { IHostFileSystem } from '#/os/interface/hostFileSystem';
 import { IHostProcessService } from '#/os/interface/hostProcess';
 import { unwrapErrorCause } from '#/_base/errors/errors';
 import { ISessionSkillCatalog } from '#/session/sessionSkillCatalog/skillCatalog';
-import { ISessionWorkspaceContext } from '#/session/workspaceContext/workspaceContext';
+import { IAgentExecutionWorkspace } from '#/agent/executionWorkspace/executionWorkspace';
 import { ITelemetryService } from '#/app/telemetry/telemetry';
 import {
   ToolAccesses,
@@ -126,7 +126,7 @@ export class GlobTool implements IGlobTool {
     @IHostFileSystem private readonly fs: IHostFileSystem,
     @IHostEnvironment private readonly env: IHostEnvironment,
     @IHostProcessService private readonly processService: IHostProcessService,
-    @ISessionWorkspaceContext private readonly workspaceCtx: ISessionWorkspaceContext,
+    @IAgentExecutionWorkspace private readonly workspaceCtx: IAgentExecutionWorkspace,
     @ITelemetryService private readonly telemetry: ITelemetryService,
     @ISessionSkillCatalog private readonly skillCatalog?: ISessionSkillCatalog,
   ) {

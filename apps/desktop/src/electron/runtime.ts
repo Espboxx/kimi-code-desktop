@@ -15,6 +15,7 @@ import {
   type PermissionMode,
   type Session,
   type SessionSummary,
+  type TeamPolicyInput,
 } from '@moonshot-ai/kimi-code-sdk';
 
 import type {
@@ -353,7 +354,6 @@ export class KimiDesktopRuntime {
       case 'session.create': {
         const input = payload<DesktopSessionCreateOptions>(command);
         const { surface = 'chat', ...sessionInput } = input;
-        if (surface === 'team') await this.ensureDesktopTeamCollaboration();
         const session = await this.harness.createSession({
           workDir: this.requireWorkspaceRoot(),
           ...applySessionCreationDefaults(this.config.value, sessionInput),
@@ -668,9 +668,8 @@ export class KimiDesktopRuntime {
         return this.runtimeFor(input.sessionId).getTeamSnapshot();
       }
       case 'team.ensure': {
-        const input = payload<{ sessionId: string }>(command);
-        await this.ensureDesktopTeamCollaboration();
-        return this.runtimeFor(input.sessionId).ensureTeam();
+        const input = payload<{ sessionId: string; policy?: TeamPolicyInput }>(command);
+        return this.runtimeFor(input.sessionId).ensureTeam(input.policy);
       }
       case 'team.operations': {
         const input = payload<{ sessionId: string; afterSeq: number; limit?: number }>(command);
@@ -681,8 +680,18 @@ export class KimiDesktopRuntime {
         return this.runtimeFor(input.sessionId).getTeamHistory(input.beforeChannelSeq, input.limit);
       }
       case 'team.send': {
-        const input = payload<{ sessionId: string; body: string; clientMessageId: string }>(command);
-        return this.runtimeFor(input.sessionId).sendTeamMessage(input.body, input.clientMessageId);
+        const input = payload<{
+          sessionId: string;
+          body: string;
+          clientMessageId: string;
+          recipientAgentIds?: readonly string[];
+        }>(command);
+        return this.runtimeFor(input.sessionId).sendTeamMessage(
+          input.body,
+          input.clientMessageId,
+          undefined,
+          input.recipientAgentIds,
+        );
       }
       case 'team.submit': {
         const input = payload<{
@@ -690,15 +699,75 @@ export class KimiDesktopRuntime {
           body: string;
           clientMessageId: string;
           media: { type: 'image_url'; url: string; name: string }[];
+          recipientAgentIds?: readonly string[];
         }>(command);
-        await this.ensureDesktopTeamCollaboration();
         const runtime = this.runtimeFor(input.sessionId);
         const media = await Promise.all(input.media.map((item) => prepareDesktopMedia(item, {
           workspaceRoot: this.requireWorkspaceRoot(),
           allowedRoots: this.allowedRoots(runtime),
           cacheDir: join(this.harness.homeDir, 'cache', 'desktop-media'),
         })));
-        return runtime.submitTeamMessage(input.body, input.clientMessageId, media);
+        return runtime.submitTeamMessage(
+          input.body,
+          input.clientMessageId,
+          media,
+          input.recipientAgentIds,
+        );
+      }
+      case 'team.updatePolicy': {
+        const input = payload<{
+          sessionId: string;
+          policy: TeamPolicyInput;
+          expectedSeq: number;
+        }>(command);
+        return this.runtimeFor(input.sessionId).updateTeamPolicy(input.policy, input.expectedSeq);
+      }
+      case 'team.pause': {
+        const input = payload<{ sessionId: string; expectedSeq: number; reason?: string }>(command);
+        return this.runtimeFor(input.sessionId).pauseTeam(input.expectedSeq, input.reason);
+      }
+      case 'team.resume': {
+        const input = payload<{ sessionId: string; expectedSeq: number }>(command);
+        return this.runtimeFor(input.sessionId).resumeTeam(input.expectedSeq);
+      }
+      case 'team.cancelTask': {
+        const input = payload<{ sessionId: string; taskId: string; expectedSeq: number }>(command);
+        return this.runtimeFor(input.sessionId).cancelTeamTask(input.taskId, input.expectedSeq);
+      }
+      case 'team.retryTask': {
+        const input = payload<{ sessionId: string; taskId: string; expectedSeq: number }>(command);
+        return this.runtimeFor(input.sessionId).retryTeamTask(input.taskId, input.expectedSeq);
+      }
+      case 'team.reassignTask': {
+        const input = payload<{
+          sessionId: string;
+          taskId: string;
+          expectedSeq: number;
+          profileName?: string;
+          model?: string;
+        }>(command);
+        return this.runtimeFor(input.sessionId).reassignTeamTask(
+          input.taskId,
+          input.expectedSeq,
+          input.profileName,
+          input.model,
+        );
+      }
+      case 'team.artifact': {
+        const input = payload<{ sessionId: string; artifactId: string }>(command);
+        return this.runtimeFor(input.sessionId).getTeamArtifact(input.artifactId);
+      }
+      case 'team.previewIntegration': {
+        const input = payload<{ sessionId: string }>(command);
+        return this.runtimeFor(input.sessionId).previewTeamIntegration();
+      }
+      case 'team.applyIntegration': {
+        const input = payload<{ sessionId: string; expectedSeq: number }>(command);
+        return this.runtimeFor(input.sessionId).applyTeamIntegration(input.expectedSeq);
+      }
+      case 'team.discardIntegration': {
+        const input = payload<{ sessionId: string; expectedSeq: number }>(command);
+        return this.runtimeFor(input.sessionId).discardTeamIntegration(input.expectedSeq);
       }
 
       case 'goal.get':
@@ -806,18 +875,6 @@ export class KimiDesktopRuntime {
       diagnostics: redactSecrets(diagnostics),
       experimentalFeatures: redactSecrets(experimentalFeatures) as readonly unknown[],
     };
-  }
-
-  private async ensureDesktopTeamCollaboration(): Promise<void> {
-    const feature = this.config.experimentalFeatures.find((candidate) => {
-      const value = objectValue(candidate);
-      return value?.['id'] === 'team_collaboration';
-    });
-    if (objectValue(feature)?.['enabled'] === true) return;
-    await this.harness.setConfig({
-      experimental: { team_collaboration: true },
-    } as KimiConfigPatch);
-    await this.refreshConfig();
   }
 
   private async refreshAuth(): Promise<void> {

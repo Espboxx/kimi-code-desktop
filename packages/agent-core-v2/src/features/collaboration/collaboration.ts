@@ -8,8 +8,11 @@
 
 import { createDecorator } from '#/_base/di/instantiation';
 import type { Event } from '#/_base/event';
+import type { SessionSwarmTask } from '#/session/swarm/sessionSwarm';
+import type { TokenUsage } from '#/kosong/contract/usage';
 
 import type {
+  TeamArtifactContent,
   TeamAssignmentStatus,
   TeamBatchAssignmentInput,
   TeamBatchReceipt,
@@ -18,6 +21,8 @@ import type {
   TeamMessage,
   TeamMessageAttachment,
   TeamOperation,
+  TeamPolicyInput,
+  TeamReview,
   TeamSnapshot,
 } from './types';
 
@@ -27,7 +32,10 @@ export interface ISessionCollaborationService {
   readonly onDidOperate: Event<TeamOperation>;
 
   isEnabled(): boolean;
-  ensureTeam(): Promise<TeamSnapshot>;
+  isActive(): boolean;
+  assertModelRequestAllowed(): Promise<void>;
+  recordModelRequestUsage(usage: TokenUsage): Promise<void>;
+  ensureTeam(policy?: TeamPolicyInput): Promise<TeamSnapshot>;
   snapshot(): Promise<TeamSnapshot>;
   operations(input: { readonly afterSeq: number; readonly limit?: number }): Promise<readonly TeamOperation[]>;
   history(input?: { readonly beforeChannelSeq?: number; readonly limit?: number }): Promise<readonly TeamMessage[]>;
@@ -35,21 +43,34 @@ export interface ISessionCollaborationService {
     readonly body: string;
     readonly clientMessageId: string;
     readonly attachments?: readonly TeamMessageAttachment[];
+    readonly recipientAgentIds?: readonly string[];
+  }): Promise<TeamMessage>;
+  submitUserMessage(input: {
+    readonly body: string;
+    readonly clientMessageId: string;
+    readonly attachments?: readonly TeamMessageAttachment[];
+    readonly recipientAgentIds?: readonly string[];
   }): Promise<TeamMessage>;
   sendAgentMessage(input: {
     readonly agentId: string;
     readonly body: string;
     readonly clientMessageId: string;
+    readonly recipientAgentIds?: readonly string[];
   }): Promise<TeamMessage>;
   waitForOperation(input: {
     readonly afterSeq: number;
     readonly timeoutMs: number;
     readonly signal: AbortSignal;
+    readonly agentId?: string;
   }): Promise<TeamOperation | undefined>;
   prepareSwarmBatch(input: {
     readonly callerAgentId: string;
     readonly assignments: readonly TeamBatchAssignmentInput[];
   }): Promise<TeamBatchReceipt>;
+  scheduleSwarmBatch(input: {
+    readonly batchId: string;
+    readonly tasks: readonly SessionSwarmTask[];
+  }): Promise<void>;
   bindAssignment(input: {
     readonly assignmentId: string;
     readonly agentId: string;
@@ -61,6 +82,32 @@ export interface ISessionCollaborationService {
     readonly error?: string;
   }): Promise<void>;
   settleBatch(input: { readonly batchId: string; readonly status: TeamBatchStatus }): Promise<void>;
+  updatePolicy(input: { readonly policy: TeamPolicyInput; readonly expectedSeq: number }): Promise<TeamSnapshot>;
+  pause(input: { readonly expectedSeq: number; readonly reason?: string }): Promise<TeamSnapshot>;
+  resume(input: { readonly expectedSeq: number }): Promise<TeamSnapshot>;
+  cancelTask(input: { readonly taskId: string; readonly expectedSeq: number }): Promise<TeamSnapshot>;
+  retryTask(input: { readonly taskId: string; readonly expectedSeq: number }): Promise<TeamSnapshot>;
+  reassignTask(input: {
+    readonly taskId: string;
+    readonly expectedSeq: number;
+    readonly profileName?: string;
+    readonly model?: string;
+  }): Promise<TeamSnapshot>;
+  submitTaskReport(input: {
+    readonly agentId: string;
+    readonly taskId: string;
+    readonly summary: string;
+  }): Promise<void>;
+  submitReview(input: {
+    readonly reviewerAgentId: string;
+    readonly taskId: string;
+    readonly decision: TeamReview['decision'];
+    readonly summary: string;
+  }): Promise<TeamReview>;
+  artifact(input: { readonly artifactId: string }): Promise<TeamArtifactContent>;
+  previewIntegration(): Promise<TeamArtifactContent | undefined>;
+  applyIntegration(input: { readonly expectedSeq: number }): Promise<TeamSnapshot>;
+  discardIntegration(input: { readonly expectedSeq: number }): Promise<TeamSnapshot>;
   delivery(input: { readonly agentId: string; readonly afterSeq: number }): Promise<TeamDelivery | undefined>;
 }
 

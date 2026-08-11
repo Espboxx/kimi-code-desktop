@@ -28,9 +28,11 @@ import type {
 import type { SkillSummary } from '@moonshot-ai/agent-core-v2/app/skillCatalog/types';
 import type { TodoItem } from '@moonshot-ai/agent-core-v2/session/todo/todoItem';
 import type {
+  TeamArtifactContent,
   TeamMessage,
   TeamMessageAttachment,
   TeamOperation,
+  TeamPolicyInput,
   TeamSnapshot,
 } from '../../contract/session/collaboration.js';
 
@@ -90,7 +92,7 @@ export interface SessionTodosFacade {
 }
 
 export interface SessionCollaborationFacade {
-  ensureTeam(): Promise<TeamSnapshot>;
+  ensureTeam(policy?: TeamPolicyInput): Promise<TeamSnapshot>;
   snapshot(): Promise<TeamSnapshot>;
   operations(input: { readonly afterSeq: number; readonly limit?: number }): Promise<readonly TeamOperation[]>;
   history(input?: { readonly beforeChannelSeq?: number; readonly limit?: number }): Promise<readonly TeamMessage[]>;
@@ -98,7 +100,26 @@ export interface SessionCollaborationFacade {
     readonly body: string;
     readonly clientMessageId: string;
     readonly attachments?: readonly TeamMessageAttachment[];
+    readonly recipientAgentIds?: readonly string[];
   }): Promise<TeamMessage>;
+  updatePolicy(input: {
+    readonly policy: TeamPolicyInput;
+    readonly expectedSeq: number;
+  }): Promise<TeamSnapshot>;
+  pause(input: { readonly expectedSeq: number; readonly reason?: string }): Promise<TeamSnapshot>;
+  resume(input: { readonly expectedSeq: number }): Promise<TeamSnapshot>;
+  cancelTask(input: { readonly taskId: string; readonly expectedSeq: number }): Promise<TeamSnapshot>;
+  retryTask(input: { readonly taskId: string; readonly expectedSeq: number }): Promise<TeamSnapshot>;
+  reassignTask(input: {
+    readonly taskId: string;
+    readonly expectedSeq: number;
+    readonly profileName?: string;
+    readonly model?: string;
+  }): Promise<TeamSnapshot>;
+  artifact(input: { readonly artifactId: string }): Promise<TeamArtifactContent>;
+  previewIntegration(): Promise<TeamArtifactContent | undefined>;
+  applyIntegration(input: { readonly expectedSeq: number }): Promise<TeamSnapshot>;
+  discardIntegration(input: { readonly expectedSeq: number }): Promise<TeamSnapshot>;
 }
 
 /**
@@ -275,8 +296,8 @@ export function createSessionFacade(call: ScopedCaller, sessionId: string): Sess
     },
 
     collaboration: {
-      ensureTeam: () =>
-        call(scope, 'sessionCollaborationService', 'ensureTeam', []) as Promise<TeamSnapshot>,
+      ensureTeam: (policy = {}) =>
+        call(scope, 'sessionCollaborationService', 'ensureTeam', [policy]) as Promise<TeamSnapshot>,
       snapshot: () =>
         call(scope, 'sessionCollaborationService', 'snapshot', []) as Promise<TeamSnapshot>,
       operations: (input) =>
@@ -285,6 +306,28 @@ export function createSessionFacade(call: ScopedCaller, sessionId: string): Sess
         call(scope, 'sessionCollaborationService', 'history', [input]) as Promise<readonly TeamMessage[]>,
       sendUserMessage: (input) =>
         call(scope, 'sessionCollaborationService', 'sendUserMessage', [input]) as Promise<TeamMessage>,
+      updatePolicy: (input) =>
+        call(scope, 'sessionCollaborationService', 'updatePolicy', [input]) as Promise<TeamSnapshot>,
+      pause: (input) =>
+        call(scope, 'sessionCollaborationService', 'pause', [input]) as Promise<TeamSnapshot>,
+      resume: (input) =>
+        call(scope, 'sessionCollaborationService', 'resume', [input]) as Promise<TeamSnapshot>,
+      cancelTask: (input) =>
+        call(scope, 'sessionCollaborationService', 'cancelTask', [input]) as Promise<TeamSnapshot>,
+      retryTask: (input) =>
+        call(scope, 'sessionCollaborationService', 'retryTask', [input]) as Promise<TeamSnapshot>,
+      reassignTask: (input) =>
+        call(scope, 'sessionCollaborationService', 'reassignTask', [input]) as Promise<TeamSnapshot>,
+      artifact: (input) =>
+        call(scope, 'sessionCollaborationService', 'artifact', [input]) as Promise<TeamArtifactContent>,
+      previewIntegration: () =>
+        call(scope, 'sessionCollaborationService', 'previewIntegration', []) as Promise<
+          TeamArtifactContent | undefined
+        >,
+      applyIntegration: (input) =>
+        call(scope, 'sessionCollaborationService', 'applyIntegration', [input]) as Promise<TeamSnapshot>,
+      discardIntegration: (input) =>
+        call(scope, 'sessionCollaborationService', 'discardIntegration', [input]) as Promise<TeamSnapshot>,
     },
 
     agents: async () => {

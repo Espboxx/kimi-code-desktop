@@ -6,6 +6,7 @@ import type { TokenUsage } from '#/kosong/contract/usage';
 import type { LLMRequestTrace } from '#/kosong/contract/requestTrace';
 import type { ModelRequestTiming } from '#/kosong/model/modelRequester';
 import type { LogContext } from '#/_base/log/log';
+import type { Hooks } from '#/hooks';
 
 export type AgentLLMRequestLogFields = Readonly<LogContext>;
 
@@ -49,12 +50,26 @@ export interface AgentLLMRequestTask {
   readonly result: Promise<AgentLLMRequestFinish>;
 }
 
+export interface AgentLLMRequestBoundaryContext {
+  readonly source?: AgentLLMRequestSource;
+  readonly signal?: AbortSignal;
+}
+
+export interface AgentLLMRequestCompletedContext extends AgentLLMRequestBoundaryContext {
+  readonly finish: AgentLLMRequestFinish;
+}
+
 export interface PreparedTurnRequestConfig {
   readonly thinkingEffort: ThinkingEffort;
 }
 
 export interface IAgentLLMRequesterService {
   readonly _serviceBrand: undefined;
+
+  readonly hooks: Hooks<{
+    onWillRequest: AgentLLMRequestBoundaryContext;
+    onDidRequest: AgentLLMRequestCompletedContext;
+  }>;
 
   prepareTurnConfig(turnId: number): PreparedTurnRequestConfig | undefined;
 

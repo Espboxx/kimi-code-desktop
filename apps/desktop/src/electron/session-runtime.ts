@@ -8,9 +8,11 @@ import {
   type QuestionRequest,
   type QuestionResult,
   type Session,
+  type TeamArtifactContent,
   type TeamMessage,
   type TeamMessageAttachment,
   type TeamOperation,
+  type TeamPolicyInput,
   type TeamSnapshot,
   type TodoItem,
 } from '@moonshot-ai/kimi-code-sdk';
@@ -140,9 +142,9 @@ export class SessionRuntime {
     return this.team;
   }
 
-  async ensureTeam(): Promise<TeamSnapshot> {
+  async ensureTeam(policy?: TeamPolicyInput): Promise<TeamSnapshot> {
     this.ensureOpen();
-    const snapshot = await this.session.ensureTeam();
+    const snapshot = await this.session.ensureTeam(policy);
     const messages = await this.session.getTeamHistory({ limit: 200 });
     this.team = createTeamState(snapshot, messages);
     this.notifyTeamDetected(snapshot);
@@ -320,24 +322,36 @@ export class SessionRuntime {
     body: string,
     clientMessageId: string,
     attachments?: readonly TeamMessageAttachment[],
+    recipientAgentIds?: readonly string[],
   ): Promise<TeamMessage> {
     this.ensureOpen();
-    return this.session.sendTeamMessage({ body, clientMessageId, attachments });
+    return this.session.sendTeamMessage({
+      body,
+      clientMessageId,
+      attachments,
+      recipientAgentIds,
+    });
   }
 
   submitTeamMessage(
     body: string,
     clientMessageId: string,
     media: readonly DesktopMediaInput[] = [],
+    recipientAgentIds?: readonly string[],
   ): Promise<TeamSubmitResult> {
     this.ensureOpen();
-    const fingerprint = teamSubmissionFingerprint(body, media);
+    const fingerprint = teamSubmissionFingerprint(body, media, recipientAgentIds);
     const existing = this.teamSubmissions.get(clientMessageId);
     if (existing !== undefined) {
       if (existing.fingerprint !== fingerprint) throw teamSubmissionConflict(clientMessageId);
       return existing.result;
     }
-    const result = this.performTeamSubmission(body, clientMessageId, media).catch((error) => {
+    const result = this.performTeamSubmission(
+      body,
+      clientMessageId,
+      media,
+      recipientAgentIds,
+    ).catch((error) => {
       this.teamSubmissions.delete(clientMessageId);
       throw error;
     });
@@ -346,6 +360,61 @@ export class SessionRuntime {
       this.teamSubmissions.delete(this.teamSubmissions.keys().next().value as string);
     }
     return result;
+  }
+
+  updateTeamPolicy(policy: TeamPolicyInput, expectedSeq: number): Promise<TeamSnapshot> {
+    this.ensureOpen();
+    return this.session.updateTeamPolicy({ policy, expectedSeq });
+  }
+
+  pauseTeam(expectedSeq: number, reason?: string): Promise<TeamSnapshot> {
+    this.ensureOpen();
+    return this.session.pauseTeam({ expectedSeq, reason });
+  }
+
+  resumeTeam(expectedSeq: number): Promise<TeamSnapshot> {
+    this.ensureOpen();
+    return this.session.resumeTeam({ expectedSeq });
+  }
+
+  cancelTeamTask(taskId: string, expectedSeq: number): Promise<TeamSnapshot> {
+    this.ensureOpen();
+    return this.session.cancelTeamTask({ taskId, expectedSeq });
+  }
+
+  retryTeamTask(taskId: string, expectedSeq: number): Promise<TeamSnapshot> {
+    this.ensureOpen();
+    return this.session.retryTeamTask({ taskId, expectedSeq });
+  }
+
+  reassignTeamTask(
+    taskId: string,
+    expectedSeq: number,
+    profileName?: string,
+    model?: string,
+  ): Promise<TeamSnapshot> {
+    this.ensureOpen();
+    return this.session.reassignTeamTask({ taskId, expectedSeq, profileName, model });
+  }
+
+  getTeamArtifact(artifactId: string): Promise<TeamArtifactContent> {
+    this.ensureOpen();
+    return this.session.getTeamArtifact(artifactId);
+  }
+
+  previewTeamIntegration(): Promise<TeamArtifactContent | undefined> {
+    this.ensureOpen();
+    return this.session.previewTeamIntegration();
+  }
+
+  applyTeamIntegration(expectedSeq: number): Promise<TeamSnapshot> {
+    this.ensureOpen();
+    return this.session.applyTeamIntegration({ expectedSeq });
+  }
+
+  discardTeamIntegration(expectedSeq: number): Promise<TeamSnapshot> {
+    this.ensureOpen();
+    return this.session.discardTeamIntegration({ expectedSeq });
   }
 
   async runShell(command: string): Promise<ShellSnapshot> {
@@ -643,6 +712,7 @@ export class SessionRuntime {
     body: string,
     clientMessageId: string,
     media: readonly DesktopMediaInput[],
+    recipientAgentIds?: readonly string[],
   ): Promise<TeamSubmitResult> {
     const attachments = media.map((item): TeamMessageAttachment => ({
       type: 'image_url',
@@ -653,11 +723,12 @@ export class SessionRuntime {
       body,
       clientMessageId,
       attachments.length === 0 ? undefined : attachments,
+      recipientAgentIds,
     );
     const wake = this.busy ? 'steer' : 'swarm';
     await this.submit({
       mode: wake,
-      text: teamWakePrompt(message.channelSeq, message.body),
+      text: teamWakePrompt(message.channelSeq, message.body, message.recipientAgentIds),
       media,
     });
     return { message, wake };
@@ -762,9 +833,16 @@ export class SessionRuntime {
   }
 }
 
-export function teamWakePrompt(channelSeq: number, body: string): string {
+export function teamWakePrompt(
+  channelSeq: number,
+  body: string,
+  recipientAgentIds?: readonly string[],
+): string {
   return [
     `A user message was posted to the Team general channel at #${String(channelSeq)}.`,
+    recipientAgentIds === undefined
+      ? 'The message was broadcast to the whole Team.'
+      : `The message was addressed to these Team members: ${recipientAgentIds.join(', ')}.`,
     '<team_user_message>',
     body,
     '</team_user_message>',
@@ -779,7 +857,11 @@ function teamSubmissionConflict(clientMessageId: string): Error {
   });
 }
 
-function teamSubmissionFingerprint(body: string, media: readonly DesktopMediaInput[]): string {
+function teamSubmissionFingerprint(
+  body: string,
+  media: readonly DesktopMediaInput[],
+  recipientAgentIds?: readonly string[],
+): string {
   const hash = createHash('sha256').update(body);
   for (const item of media) {
     hash.update('\0').update(item.type);
@@ -787,6 +869,7 @@ function teamSubmissionFingerprint(body: string, media: readonly DesktopMediaInp
     hash.update('\0').update(item.displayUrl);
     hash.update('\0').update(item.name ?? '');
   }
+  for (const agentId of recipientAgentIds ?? []) hash.update('\0recipient\0').update(agentId);
   return hash.digest('hex');
 }
 

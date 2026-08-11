@@ -5,6 +5,7 @@
 import { z } from 'zod';
 
 import { createDecorator } from '#/_base/di/instantiation';
+import { IAgentScopeContext } from '#/agent/scopeContext/scopeContext';
 import { toInputJsonSchema } from '#/tool/input-schema';
 import { ToolAccesses, type AgentTool, type ToolExecution } from '#/tool/toolContract';
 
@@ -25,7 +26,14 @@ export class TeamWaitTool implements ITeamWaitTool {
     'Wait without polling for the next team message or assignment status change and return the full operation.';
   readonly parameters = toInputJsonSchema(TeamWaitInputSchema);
 
-  constructor(@ISessionCollaborationService private readonly collaboration: ISessionCollaborationService) {}
+  private readonly agentId: string;
+
+  constructor(
+    @ISessionCollaborationService private readonly collaboration: ISessionCollaborationService,
+    @IAgentScopeContext scope?: IAgentScopeContext,
+  ) {
+    this.agentId = scope?.agentId ?? 'main';
+  }
 
   resolveExecution(input: TeamWaitInput): ToolExecution {
     return {
@@ -38,6 +46,7 @@ export class TeamWaitTool implements ITeamWaitTool {
           afterSeq: snapshot.latestSeq,
           timeoutMs: (input.timeout_seconds ?? 60) * 1_000,
           signal: context.signal,
+          agentId: this.agentId,
         });
         return {
           output: operation === undefined

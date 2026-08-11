@@ -73,6 +73,7 @@ Term mapping (Chinese <-> English, and proper noun handling):
 | Plan 模式 | Plan mode | yes | yes (Plan mode) |
 | YOLO 模式 | YOLO mode | yes | yes (YOLO mode) |
 | Thinking 模式 | Thinking mode | yes | yes (Thinking mode) |
+| Team 模式 | Team mode | yes (Team) | yes (Team) |
 | MCP | MCP | yes | yes |
 | Kimi Code CLI | Kimi Code CLI | yes | yes |
 | Agent Skills | Agent Skills | yes | yes |

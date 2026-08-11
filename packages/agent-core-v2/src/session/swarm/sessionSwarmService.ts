@@ -13,9 +13,10 @@
  * `binding` resolved by the caller; without
  * one, spawns inherit the caller agent's model and thinking level. Spawn
  * bindings are resolved through the model catalog before lifecycle allocation.
- * Resumed agents keep the model recorded in their own wire journal — with
- * per-subagent models there is no "child follows the parent's current model"
- * invariant to enforce. Bound at Session scope.
+ * Ordinary resumed agents keep the profile and model recorded in their own
+ * wire journal. A durable Team task may explicitly reconfigure the agent's
+ * execution workspace and rebind its task-owned profile/model before resume.
+ * Bound at Session scope.
  */
 
 import type { TokenUsage } from '#/kosong/contract/usage';
@@ -28,6 +29,7 @@ import { linkAbortSignal, userCancellationReason } from '#/_base/utils/abort';
 import { Disposable } from '#/_base/di/lifecycle';
 import type { IAgentScopeHandle } from '#/_base/di/scope';
 import { IAgentProfileService } from '#/agent/profile/profile';
+import { IAgentExecutionWorkspace } from '#/agent/executionWorkspace/executionWorkspace';
 import { IAgentPermissionModeService } from '#/agent/permissionMode/permissionMode';
 import { IAgentLoopService } from '#/agent/loop/loop';
 import { IAgentUserToolService } from '#/agent/userTool/userTool';
@@ -203,6 +205,10 @@ export class SessionSwarmService extends Disposable implements ISessionSwarmServ
     }
   }
 
+  cancelBatch({ batchId }: { readonly batchId: string }): void {
+    this.inFlight.get(batchId)?.controller.abort(userCancellationReason());
+  }
+
   async settle(): Promise<void> {
     while (this.inFlight.size > 0) {
       await Promise.allSettled([...this.inFlight.values()].map((entry) => entry.completion));
@@ -248,6 +254,7 @@ export class SessionSwarmService extends Disposable implements ISessionSwarmServ
           thinking: binding.thinking,
         },
         labels: subagentLabels(callerAgentId, { swarmItem: options.swarmItem }),
+        executionWorkspace: options.executionWorkspace,
       });
     } catch (error) {
       throw wrapSubagentModelError(error, binding.model, callerData.modelAlias, this.config);
@@ -274,7 +281,7 @@ export class SessionSwarmService extends Disposable implements ISessionSwarmServ
       model: subagentDisplayModel(this.config, binding.model),
     });
     const promptText = await applyProfilePromptPrefix(profile, options.prompt, {
-      cwd: this.sessionContext.cwd,
+      cwd: options.executionWorkspace?.workDir ?? this.sessionContext.cwd,
       runner: this.processRunner,
       log: this.log,
     });
@@ -295,11 +302,29 @@ export class SessionSwarmService extends Disposable implements ISessionSwarmServ
     const caller = this.requireHandle(callerAgentId, 'Caller agent');
     const child = this.requireHandle(agentId, 'Agent instance');
     this.requireIdleSubagent(agentId, child);
+    const workspaceChanged = options.executionWorkspace === undefined
+      ? false
+      : child.accessor.get(IAgentExecutionWorkspace).configure(options.executionWorkspace);
+    const profile = child.accessor.get(IAgentProfileService);
+    const currentProfile = profile.data();
+    const rebind = options.rebind;
+    const profileChanged = rebind !== undefined && (
+      currentProfile.profileName !== rebind.profileName
+      || (rebind.model !== undefined && currentProfile.modelAlias !== rebind.model)
+    );
+    if (profileChanged) {
+      await profile.bind({
+        profile: rebind.profileName,
+        model: rebind.model ?? currentProfile.modelAlias,
+        thinking: currentProfile.thinkingLevel,
+      });
+    } else if (workspaceChanged) {
+      await profile.refreshSystemPrompt();
+    }
     await options.onAgentBound?.(agentId);
-    const profileName =
-      child.accessor.get(IAgentProfileService).data().profileName ?? RESUMED_PROFILE_FALLBACK;
+    const profileName = profile.data().profileName ?? RESUMED_PROFILE_FALLBACK;
     if (!retryTurn) {
-      const resumedModel = child.accessor.get(IAgentProfileService).data().modelAlias;
+      const resumedModel = profile.data().modelAlias;
       emitAgentRunSpawned(caller, agentId, {
         profileName,
         parentToolCallId: options.parentToolCallId,

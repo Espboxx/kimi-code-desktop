@@ -227,11 +227,26 @@ describe('SessionRuntime interactions', () => {
 
   it('publishes a separate Team baseline and contiguous live operations', async () => {
     const initialTeam: TeamSnapshot = {
+      protocolVersion: 2,
       state: 'ready',
       team: { id: 'team-1', sessionId: 's1', channelId: 'general', leaderAgentId: 'main', createdAt: 1 },
       members: [{ agentId: 'main', role: 'leader', joinedAt: 1, joinedSeq: 1 }],
       batches: [],
+      tasks: [],
       assignments: [],
+      attempts: [],
+      artifacts: [],
+      reviews: [],
+      policy: {
+        maxConcurrency: 4,
+        maxMembers: 16,
+        maxDelegationDepth: 2,
+        executionRetries: 1,
+        validationRetries: 2,
+      },
+      scheduler: { status: 'running', activeCount: 0, queuedCount: 0, updatedAt: 1 },
+      budget: { startedAt: 1, inputTokens: 0, outputTokens: 0, totalTokens: 0, elapsedMs: 0 },
+      integration: { status: 'idle', updatedAt: 1 },
       latestSeq: 1,
       latestChannelSeq: 0,
     };
@@ -248,7 +263,8 @@ describe('SessionRuntime interactions', () => {
     await runtime.initialize();
 
     fixture.emitTeamOperation({
-      version: 1,
+      version: 2,
+      operationId: 'op-2',
       type: 'message.sent',
       seq: 2,
       at: 2,
@@ -344,11 +360,14 @@ describe('SessionRuntime interactions', () => {
     await runtime.initialize();
     fixture.emitEvent({ type: 'turn.started', sessionId: 's1', agentId: 'main', turnId: 1 } as Event);
 
-    await expect(runtime.submitTeamMessage('New priority', 'client-2')).resolves.toMatchObject({
+    await expect(runtime.submitTeamMessage('New priority', 'client-2', [], ['agent-2'])).resolves.toMatchObject({
       wake: 'steer',
     });
+    expect(fixture.sendTeamMessage).toHaveBeenCalledWith(expect.objectContaining({
+      recipientAgentIds: ['agent-2'],
+    }));
     expect(fixture.steer).toHaveBeenCalledWith([
-      { type: 'text', text: teamWakePrompt(1, 'New priority') },
+      { type: 'text', text: teamWakePrompt(1, 'New priority', ['agent-2']) },
     ]);
     expect(fixture.swarm).not.toHaveBeenCalled();
     await runtime.close();
@@ -400,16 +419,31 @@ function createSessionFixture(options: SessionFixtureOptions = {}): {
     todoHandler?.(todos);
   });
   const ensuredTeam: TeamSnapshot = options.initialTeam ?? {
+    protocolVersion: 2,
     state: 'ready',
     team: { id: 'team-1', sessionId: 's1', channelId: 'general', leaderAgentId: 'main', createdAt: 1 },
     members: [{ agentId: 'main', role: 'leader', joinedAt: 1, joinedSeq: 1 }],
     batches: [],
+    tasks: [],
     assignments: [],
+    attempts: [],
+    artifacts: [],
+    reviews: [],
+    policy: {
+      maxConcurrency: 4,
+      maxMembers: 16,
+      maxDelegationDepth: 2,
+      executionRetries: 1,
+      validationRetries: 2,
+    },
+    scheduler: { status: 'running', activeCount: 0, queuedCount: 0, updatedAt: 1 },
+    budget: { startedAt: 1, inputTokens: 0, outputTokens: 0, totalTokens: 0, elapsedMs: 0 },
+    integration: { status: 'idle', updatedAt: 1 },
     latestSeq: 1,
     latestChannelSeq: 0,
   };
   const ensureTeam = vi.fn(async () => ensuredTeam);
-  const sendTeamMessage = vi.fn(async ({ body, clientMessageId, attachments }: {
+  const sendTeamMessage = vi.fn(async ({ body, clientMessageId, attachments, recipientAgentIds }: {
     readonly body: string;
     readonly clientMessageId: string;
     readonly attachments?: readonly {
@@ -417,6 +451,7 @@ function createSessionFixture(options: SessionFixtureOptions = {}): {
       readonly url: string;
       readonly name?: string;
     }[];
+    readonly recipientAgentIds?: readonly string[];
   }) => ({
     id: `message-${clientMessageId}`,
     teamId: ensuredTeam.team?.id ?? 'team-1',
@@ -424,6 +459,7 @@ function createSessionFixture(options: SessionFixtureOptions = {}): {
     seq: ensuredTeam.latestSeq + 1,
     channelSeq: 1,
     sender: { actorKind: 'user' as const, actorId: 'desktop-user', role: 'user' as const },
+    recipientAgentIds,
     body,
     attachments,
     clientMessageId,
@@ -448,10 +484,25 @@ function createSessionFixture(options: SessionFixtureOptions = {}): {
     },
     ensureTeam,
     getTeamSnapshot: async () => options.initialTeam ?? ({
+      protocolVersion: 2,
       state: 'ready',
       members: [],
       batches: [],
+      tasks: [],
       assignments: [],
+      attempts: [],
+      artifacts: [],
+      reviews: [],
+      policy: {
+        maxConcurrency: 4,
+        maxMembers: 16,
+        maxDelegationDepth: 2,
+        executionRetries: 1,
+        validationRetries: 2,
+      },
+      scheduler: { status: 'running', activeCount: 0, queuedCount: 0, updatedAt: 1 },
+      budget: { startedAt: 1, inputTokens: 0, outputTokens: 0, totalTokens: 0, elapsedMs: 0 },
+      integration: { status: 'idle', updatedAt: 1 },
       latestSeq: 0,
       latestChannelSeq: 0,
     }),

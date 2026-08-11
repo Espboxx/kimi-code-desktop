@@ -4,8 +4,7 @@ import { IGitService } from '#/app/git/git';
 import type { IGitService as GitService } from '#/app/git/git';
 import { IHostEnvironment } from '#/os/interface/hostEnvironment';
 import type { IHostEnvironment as HostEnvironment } from '#/os/interface/hostEnvironment';
-import { ISessionWorkspaceContext } from '#/session/workspaceContext/workspaceContext';
-import type { ISessionWorkspaceContext as WorkspaceContext } from '#/session/workspaceContext/workspaceContext';
+import { IAgentExecutionWorkspace, type IAgentExecutionWorkspace as WorkspaceContext } from '#/agent/executionWorkspace/executionWorkspace';
 import type {
   PermissionPolicy,
   PermissionPolicyResult,
@@ -17,7 +16,7 @@ export class GitCwdWriteApprovePermissionPolicyService implements PermissionPoli
 
   constructor(
     @IHostEnvironment private readonly env: HostEnvironment,
-    @ISessionWorkspaceContext private readonly workspace: WorkspaceContext,
+    @IAgentExecutionWorkspace private readonly workspace: WorkspaceContext,
     @IGitService private readonly git: GitService,
   ) {}
 

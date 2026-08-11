@@ -3,20 +3,37 @@ import type {
   AgentTranscriptSnapshot,
   TranscriptOperation,
 } from '@moonshot-ai/transcript';
-import type { TeamMessage, TeamOperation, TeamSnapshot } from './team-types';
+import type {
+  TeamArtifactContent,
+  TeamMessage,
+  TeamOperation,
+  TeamPolicyInput,
+  TeamSnapshot,
+} from './team-types';
 import type { TeamStateSnapshot } from './team-state';
 import type { DesktopSurface } from './team-session';
 
 export type {
   TeamAssignment,
   TeamAssignmentStatus,
+  TeamArtifact,
+  TeamArtifactContent,
+  TeamAttempt,
   TeamBatch,
   TeamBatchStatus,
+  TeamBudgetReport,
+  TeamIntegrationState,
   TeamMember,
   TeamMessage,
   TeamMessageAttachment,
   TeamOperation,
+  TeamPolicy,
+  TeamPolicyInput,
+  TeamReview,
+  TeamSchedulerState,
   TeamSnapshot,
+  TeamSnapshotV2,
+  TeamTask,
 } from './team-types';
 export type { TeamStateSnapshot } from './team-state';
 export type { DesktopSurface } from './team-session';
@@ -467,17 +484,43 @@ export interface KimiDesktopApi {
     ): Promise<void>;
   };
   readonly team: {
-    ensure(sessionId: string): Promise<TeamSnapshot>;
+    ensure(sessionId: string, policy?: TeamPolicyInput): Promise<TeamSnapshot>;
     snapshot(sessionId: string): Promise<TeamSnapshot>;
     operations(sessionId: string, afterSeq: number, limit?: number): Promise<readonly TeamOperation[]>;
     history(sessionId: string, beforeChannelSeq?: number, limit?: number): Promise<readonly TeamMessage[]>;
-    send(sessionId: string, body: string, clientMessageId: string): Promise<TeamMessage>;
+    send(
+      sessionId: string,
+      body: string,
+      clientMessageId: string,
+      recipientAgentIds?: readonly string[],
+    ): Promise<TeamMessage>;
     submit(
       sessionId: string,
       body: string,
       clientMessageId: string,
       media?: readonly TeamImageInput[],
+      recipientAgentIds?: readonly string[],
     ): Promise<TeamSubmitResult>;
+    updatePolicy(
+      sessionId: string,
+      policy: TeamPolicyInput,
+      expectedSeq: number,
+    ): Promise<TeamSnapshot>;
+    pause(sessionId: string, expectedSeq: number, reason?: string): Promise<TeamSnapshot>;
+    resume(sessionId: string, expectedSeq: number): Promise<TeamSnapshot>;
+    cancelTask(sessionId: string, taskId: string, expectedSeq: number): Promise<TeamSnapshot>;
+    retryTask(sessionId: string, taskId: string, expectedSeq: number): Promise<TeamSnapshot>;
+    reassignTask(
+      sessionId: string,
+      taskId: string,
+      expectedSeq: number,
+      profileName?: string,
+      model?: string,
+    ): Promise<TeamSnapshot>;
+    artifact(sessionId: string, artifactId: string): Promise<TeamArtifactContent>;
+    previewIntegration(sessionId: string): Promise<TeamArtifactContent | undefined>;
+    applyIntegration(sessionId: string, expectedSeq: number): Promise<TeamSnapshot>;
+    discardIntegration(sessionId: string, expectedSeq: number): Promise<TeamSnapshot>;
   };
   readonly goal: {
     get(sessionId?: string): Promise<unknown>;
@@ -601,13 +644,31 @@ export function createKimiDesktopApi(invoke: Invoke, subscribe: KimiDesktopApi['
         call('task', 'replaceTodos', { sessionId, expected, todos }),
     },
     team: {
-      ensure: (sessionId) => call('team', 'ensure', { sessionId }),
+      ensure: (sessionId, policy) => call('team', 'ensure', { sessionId, policy }),
       snapshot: (sessionId) => call('team', 'snapshot', { sessionId }),
       operations: (sessionId, afterSeq, limit) => call('team', 'operations', { sessionId, afterSeq, limit }),
       history: (sessionId, beforeChannelSeq, limit) => call('team', 'history', { sessionId, beforeChannelSeq, limit }),
-      send: (sessionId, body, clientMessageId) => call('team', 'send', { sessionId, body, clientMessageId }),
-      submit: (sessionId, body, clientMessageId, media = []) =>
-        call('team', 'submit', { sessionId, body, clientMessageId, media }),
+      send: (sessionId, body, clientMessageId, recipientAgentIds) =>
+        call('team', 'send', { sessionId, body, clientMessageId, recipientAgentIds }),
+      submit: (sessionId, body, clientMessageId, media = [], recipientAgentIds) =>
+        call('team', 'submit', { sessionId, body, clientMessageId, media, recipientAgentIds }),
+      updatePolicy: (sessionId, policy, expectedSeq) =>
+        call('team', 'updatePolicy', { sessionId, policy, expectedSeq }),
+      pause: (sessionId, expectedSeq, reason) =>
+        call('team', 'pause', { sessionId, expectedSeq, reason }),
+      resume: (sessionId, expectedSeq) => call('team', 'resume', { sessionId, expectedSeq }),
+      cancelTask: (sessionId, taskId, expectedSeq) =>
+        call('team', 'cancelTask', { sessionId, taskId, expectedSeq }),
+      retryTask: (sessionId, taskId, expectedSeq) =>
+        call('team', 'retryTask', { sessionId, taskId, expectedSeq }),
+      reassignTask: (sessionId, taskId, expectedSeq, profileName, model) =>
+        call('team', 'reassignTask', { sessionId, taskId, expectedSeq, profileName, model }),
+      artifact: (sessionId, artifactId) => call('team', 'artifact', { sessionId, artifactId }),
+      previewIntegration: (sessionId) => call('team', 'previewIntegration', { sessionId }),
+      applyIntegration: (sessionId, expectedSeq) =>
+        call('team', 'applyIntegration', { sessionId, expectedSeq }),
+      discardIntegration: (sessionId, expectedSeq) =>
+        call('team', 'discardIntegration', { sessionId, expectedSeq }),
     },
     goal: {
       get: (sessionId) => call('goal', 'get', { sessionId }),

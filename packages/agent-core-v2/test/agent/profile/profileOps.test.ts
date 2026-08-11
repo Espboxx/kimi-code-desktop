@@ -21,6 +21,7 @@ import { ITelemetryService } from '#/app/telemetry/telemetry';
 import { IAgentTelemetryContextService } from '#/app/telemetry/agentTelemetryContext';
 import { AgentTelemetryContextService } from '#/app/telemetry/agentTelemetryContextService';
 import { IAgentScopeContext, makeAgentScopeContext } from '#/agent/scopeContext/scopeContext';
+import { IAgentExecutionWorkspace } from '#/agent/executionWorkspace/executionWorkspace';
 import { IAgentStateService } from '#/agent/state/agentState';
 import { AgentStateService } from '#/agent/state/agentStateService';
 import { IHostEnvironment } from '#/os/interface/hostEnvironment';
@@ -40,6 +41,7 @@ import { AGENT_WIRE_RECORD_KEY, type WireRecord } from '#/wire/record';
 import '#/kosong/provider/providers/kimi/kimi.contrib';
 
 import { registerTestAgentWire, restoreTestAgentWire, testWireScope } from '../../wire/stubs';
+import { stubWorkspaceContext } from '../../session/workspaceContext/stub-workspace-context';
 
 const SCOPE = 'wire';
 const KEY = 'profile-test';
@@ -204,6 +206,7 @@ function buildHost(key: string): {
   host.stub(IBootstrapService, stubUnused());
   host.stub(ISessionContext, createSessionContextStub());
   host.stub(ISessionWorkspaceContext, stubUnused());
+  host.stub(IAgentExecutionWorkspace, stubWorkspaceContext('/tmp'));
   host.stub(ISessionAgentProfileCatalog, {
     _serviceBrand: undefined,
     ready: Promise.resolve(),

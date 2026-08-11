@@ -133,6 +133,58 @@ export function defineKlientConformance(
       }
     });
 
+    it('session collaboration v2 controls behave identically across transports', async () => {
+      const workDir = await mkdtemp(join(tmpdir(), 'klient-conf-team-'));
+      const created = await target.klient.global.sessions.create({ workDir });
+      try {
+        const collaboration = target.klient.session(created.id).collaboration;
+        let snapshot = await collaboration.ensureTeam({ maxConcurrency: 2 });
+        expect(snapshot).toMatchObject({
+          protocolVersion: 2,
+          state: 'ready',
+          policy: { maxConcurrency: 2 },
+          scheduler: { status: 'running' },
+        });
+        if (snapshot.protocolVersion !== 2) throw new Error('expected Team protocol v2');
+
+        snapshot = await collaboration.updatePolicy({
+          policy: { maxMembers: 20 },
+          expectedSeq: snapshot.latestSeq,
+        });
+        if (snapshot.protocolVersion !== 2) throw new Error('expected Team protocol v2');
+        expect(snapshot.policy.maxMembers).toBe(20);
+
+        snapshot = await collaboration.pause({
+          expectedSeq: snapshot.latestSeq,
+          reason: 'conformance inspection',
+        });
+        if (snapshot.protocolVersion !== 2) throw new Error('expected Team protocol v2');
+        expect(snapshot.scheduler).toMatchObject({
+          status: 'paused',
+          pauseReason: 'conformance inspection',
+        });
+
+        snapshot = await collaboration.resume({ expectedSeq: snapshot.latestSeq });
+        if (snapshot.protocolVersion !== 2) throw new Error('expected Team protocol v2');
+        expect(snapshot.scheduler.status).toBe('running');
+
+        const message = await collaboration.sendUserMessage({
+          body: 'Inspect this task',
+          clientMessageId: `conformance-${transport}`,
+          recipientAgentIds: ['main'],
+        });
+        expect(message.recipientAgentIds).toEqual(['main']);
+        expect((await collaboration.history()).map((item) => item.id)).toContain(message.id);
+        expect((await collaboration.operations({ afterSeq: 0 })).some(
+          (operation) => operation.version === 2 && operation.type === 'message.sent',
+        )).toBe(true);
+        await expect(collaboration.previewIntegration()).resolves.toBeUndefined();
+      } finally {
+        await target.klient.session(created.id).close();
+        await rm(workDir, { recursive: true, force: true });
+      }
+    });
+
     it('providers.set/get/delete works and emits kosong.providers.changed', async () => {
       const events: Array<{
         added: readonly string[];

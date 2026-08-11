@@ -33,6 +33,7 @@ import type { IConfigService } from '#/app/config/config';
 import { ProcessTask } from '#/agent/tools/os/bash/process-task';
 import type { IHostEnvironment } from '#/os/interface/hostEnvironment';
 import type { IAgentToolPolicyService } from '#/agent/toolPolicy/toolPolicy';
+import type { IAgentExecutionWorkspace } from '#/agent/executionWorkspace/executionWorkspace';
 import { type ISessionContext, makeSessionContext } from '#/session/sessionContext/sessionContext';
 import type { IProcess, ISessionProcessRunner } from '#/session/process/processRunner';
 import { type BashInput, BashInputSchema } from '#/agent/tools/os/bash/bash';
@@ -289,14 +290,29 @@ function createTestEnv(env: IHostEnvironment = posixEnv): IHostEnvironment {
   return env;
 }
 
-function createTestCtx(cwd = '/workspace'): ISessionContext {
-  return makeSessionContext({
+function createTestCtx(cwd = '/workspace'): ISessionContext & IAgentExecutionWorkspace {
+  const session = makeSessionContext({
     sessionId: 's',
     workspaceId: 'w',
     sessionDir: cwd,
     sessionScope: 'sessions/w/s',
     cwd,
   });
+  return {
+    ...session,
+    workDir: cwd,
+    access: 'write',
+    confined: false,
+    additionalDirs: [],
+    resolve: (path) => path,
+    isWithin: () => true,
+    assertAllowed: (path) => path,
+    configure: () => false,
+  };
+}
+
+function createReadOnlyTestCtx(cwd = '/workspace'): IAgentExecutionWorkspace {
+  return { ...createTestCtx(cwd), access: 'read', confined: true };
 }
 
 
@@ -716,7 +732,7 @@ function stubConfig(values: Record<string, unknown> = {}): IConfigService {
 function bashTool(
   runner: ISessionProcessRunner,
   env: IHostEnvironment = createTestEnv(),
-  ctx: ISessionContext = createTestCtx(),
+  ctx: IAgentExecutionWorkspace = createTestCtx(),
   background: IAgentTaskService = createFakeTaskService().service,
   toolPolicy: IAgentToolPolicyService = stubToolPolicy(),
   config: IConfigService = stubConfig(),
@@ -849,6 +865,36 @@ describe('BashTool', () => {
     await executeTool(tool, context({ command: 'pwd', timeout: 60 }));
 
     expect(exec.mock.calls[0]?.[0]).toEqual(['/bin/bash', '-c', "cd '/var/app' && pwd"]);
+  });
+
+  it('allows inspection commands in a read-only Team workspace', async () => {
+    const { runner, exec } = createTestRunner(processWithOutput({ stdout: 'match\n' }));
+    const tool = bashTool(runner, posixEnv, createReadOnlyTestCtx());
+
+    const result = await executeTool(tool, context({ command: 'rg TODO', timeout: 60 }));
+
+    expect(result).toMatchObject({ isError: false, output: 'match\n' });
+    expect(exec).toHaveBeenCalledWith(
+      ['/bin/bash', '-c', "cd '/workspace' && rg TODO"],
+      expect.objectContaining({ env: expect.objectContaining({ GIT_OPTIONAL_LOCKS: '0' }) }),
+    );
+  });
+
+  it('rejects indirect or Git-mutating commands in a read-only Team workspace', async () => {
+    const { runner, exec } = createTestRunner(processWithOutput());
+    const tool = bashTool(runner, posixEnv, createReadOnlyTestCtx());
+
+    for (const command of [
+      'echo $(python -c "open(\'changed.txt\', \'w\').close()")',
+      'git branch scratch',
+      'find . -exec python mutate.py {} +',
+    ]) {
+      await expect(executeTool(tool, context({ command, timeout: 60 }))).resolves.toMatchObject({
+        isError: true,
+        output: expect.stringContaining('read-only workspace'),
+      });
+    }
+    expect(exec).not.toHaveBeenCalled();
   });
 
   it('uses Git Bash semantics on Windows', async () => {

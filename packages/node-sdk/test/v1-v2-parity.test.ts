@@ -346,7 +346,13 @@ function projectGoalSnapshot(snapshot: GoalSnapshot | null): unknown {
   const projected: Record<string, unknown> = { ...snapshot };
   delete projected['goalId'];
   delete projected['wallClockMs'];
+  deleteIfUndefined(projected, 'completionCriterion');
+  deleteIfUndefined(projected, 'terminalReason');
   return projected;
+}
+
+function deleteIfUndefined(projected: Record<string, unknown>, key: string): void {
+  if (projected[key] === undefined) delete projected[key];
 }
 
 /** See the KNOWN_DIFFS background-task note above for what this projects and why. */
@@ -369,6 +375,9 @@ function projectSessionSummary(summary: SessionSummary, home: HomePair): unknown
   // so the field cannot compare across engines.
   delete projected['lastTurnReason'];
   if (projected['title'] === 'New Session') delete projected['title'];
+  deleteIfUndefined(projected, 'title');
+  deleteIfUndefined(projected, 'lastPrompt');
+  deleteIfUndefined(projected, 'warning');
   return projected;
 }
 
@@ -384,6 +393,10 @@ function projectResumedSession(resumed: ResumedSessionSummary, home: HomePair): 
   if (metadata['title'] === 'New Session' || metadata['title'] === '') {
     delete metadata['title'];
   }
+  deleteIfUndefined(metadata, 'forkedFrom');
+  deleteIfUndefined(metadata, 'lastPrompt');
+  const agentMetadata = metadata['agents'] as Record<string, Record<string, unknown>>;
+  for (const entry of Object.values(agentMetadata)) deleteIfUndefined(entry, 'swarmItem');
   return projected;
 }
 
@@ -436,9 +449,10 @@ function projectResumedAgents(
  *   DESCRIPTIONS are engine-owned constants that legitimately drift between
  *   the engines (the subagent/cron docs embed engine-specific facts), and
  *   v1 additionally registers the `select_tools` meta tool v2 has no
- *   counterpart for — both are engine design, not resume data. A model-less
- *   agent's roster is not compared at all (v1 initializes builtin tools
- *   only on a profiled agent; v2 exposes them unbound).
+ *   counterpart for, while v2 owns AgentProfileCreate and the durable Team
+ *   control tools — all are engine design, not resume data. A model-less
+ *   agent's roster is not compared at all (v1 initializes builtin tools only
+ *   on a profiled agent; v2 exposes them unbound).
  */
 function projectResumedAgent(agent: ResumedAgentState, home: HomePair): unknown {
   const projected = scrubHomePrefixes(agent, home) as Record<string, unknown>;
@@ -446,6 +460,8 @@ function projectResumedAgent(agent: ResumedAgentState, home: HomePair): unknown 
   delete config['provider'];
   delete config['systemPrompt'];
   delete config['subagentNames'];
+  const modelCapabilities = config['modelCapabilities'] as Record<string, unknown> | undefined;
+  if (modelCapabilities !== undefined) deleteIfUndefined(modelCapabilities, 'max_input_tokens');
   const modelLess = config['modelAlias'] === undefined;
   if (modelLess) {
     delete config['profileName'];
@@ -453,7 +469,13 @@ function projectResumedAgent(agent: ResumedAgentState, home: HomePair): unknown 
   } else {
     const tools = projected['tools'] as readonly Record<string, unknown>[];
     projected['tools'] = tools
-      .filter((tool) => tool['name'] !== 'select_tools')
+      .filter((tool) => ![
+        'select_tools',
+        'AgentProfileCreate',
+        'TeamSend',
+        'TeamStatus',
+        'TeamWait',
+      ].includes(String(tool['name'])))
       .map((tool) => ({ name: tool['name'], active: tool['active'], source: tool['source'] }))
       .toSorted((a, b) => String(a.name).localeCompare(String(b.name)));
   }
@@ -466,6 +488,8 @@ function projectResumedAgent(agent: ResumedAgentState, home: HomePair): unknown 
       const { time: _time, ...rest } = record;
       if (rest['type'] === 'goal_updated') {
         rest['snapshot'] = projectGoalSnapshot(rest['snapshot'] as GoalSnapshot);
+        const change = rest['change'] as Record<string, unknown>;
+        deleteIfUndefined(change, 'reason');
       }
       return rest;
     });

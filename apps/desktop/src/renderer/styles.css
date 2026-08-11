@@ -3759,6 +3759,7 @@ progress {
 
 /* Team collaboration */
 .team-page {
+  position: relative;
   display: grid;
   min-width: 0;
   min-height: 0;
@@ -3818,6 +3819,28 @@ progress {
 
 .team-summary > span.running { color: var(--accent); }
 .team-summary > span.failed { color: var(--red); }
+
+.team-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.team-header-controls button {
+  display: inline-flex;
+  height: 24px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.team-header-controls button:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  color: var(--accent-strong);
+}
 
 .team-layout {
   display: grid;
@@ -4102,6 +4125,27 @@ progress {
   white-space: nowrap;
 }
 
+.team-recipient-control {
+  display: flex;
+  height: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.team-recipient-control select {
+  width: 116px;
+  height: 26px;
+  padding: 0 22px 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text-soft);
+  font-size: 10px;
+}
+
 .team-composer .team-image-support.support-supported {
   color: var(--accent-strong);
 }
@@ -4307,9 +4351,187 @@ progress {
 }
 
 .team-assignment-node .assignment-running { color: var(--accent); }
+.team-assignment-node .assignment-awaiting_validation,
+.team-assignment-node .assignment-integrating { color: var(--blue); }
+.team-assignment-node .assignment-blocked { color: var(--amber); }
 .team-assignment-node .assignment-failed,
 .team-assignment-node .assignment-interrupted { color: var(--red); }
 .team-assignment-node .assignment-completed { color: var(--accent); }
+
+.team-task-actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px 7px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 62%, transparent);
+  background: color-mix(in srgb, var(--panel-2) 78%, transparent);
+}
+
+.team-task-actions > span {
+  min-width: 0;
+  flex: 1 1 100%;
+  overflow: hidden;
+  color: var(--amber);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-task-actions > span.failed { color: var(--red); }
+
+.team-task-actions button {
+  display: inline-flex;
+  height: 22px;
+  align-items: center;
+  gap: 3px;
+  padding: 0 5px;
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.team-control-dialog-backdrop {
+  position: absolute;
+  z-index: 80;
+  display: grid;
+  inset: 0;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(3px);
+}
+
+.team-control-dialog {
+  display: grid;
+  width: min(760px, 94%);
+  max-height: min(720px, 90%);
+  min-height: 0;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+  border-radius: 10px;
+  background: var(--panel-2);
+  box-shadow: 0 18px 60px color-mix(in srgb, #000 45%, transparent);
+  overflow: hidden;
+}
+
+.team-control-dialog > header,
+.team-control-dialog > footer,
+.team-control-dialog > header > div {
+  display: flex;
+  align-items: center;
+}
+
+.team-control-dialog > header {
+  min-height: 42px;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.team-control-dialog > header > div { gap: 7px; }
+
+.team-control-dialog > footer {
+  min-height: 48px;
+  justify-content: flex-end;
+  gap: 7px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.team-control-dialog > footer button {
+  display: inline-flex;
+  height: 30px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+}
+
+.team-control-dialog > footer button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #0c1d18;
+}
+
+.team-artifact-dialog {
+  grid-template-rows: auto auto minmax(120px, 1fr) auto;
+}
+
+.team-artifact-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.team-artifact-dialog pre {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 12px;
+  background: var(--bg);
+  color: var(--text-soft);
+  font: 11px/1.5 var(--font-mono);
+  overflow: auto;
+  white-space: pre;
+}
+
+.team-reassign-dialog,
+.team-policy-dialog {
+  width: min(480px, 94%);
+  padding-bottom: 0;
+}
+
+.team-reassign-dialog > p {
+  margin: 12px 14px 4px;
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.team-reassign-dialog > label {
+  display: grid;
+  gap: 5px;
+  margin: 8px 14px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.team-reassign-dialog input {
+  height: 31px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.team-policy-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px 12px;
+  padding: 14px;
+}
+
+.team-policy-grid label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.team-policy-grid input {
+  width: 100%;
+  height: 31px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
 
 .team-empty {
   display: grid;

@@ -215,6 +215,7 @@ const TEST_MODEL_CAPABILITY: ModelCapability = {
 function stubTeamCollaboration(): ISessionCollaborationService {
   return {
     _serviceBrand: undefined,
+    isActive: () => true,
     snapshot: vi.fn().mockResolvedValue({ members: [], assignments: [] }),
     prepareSwarmBatch: vi.fn().mockImplementation(async (input) => ({
       batchId: 'team-batch',
@@ -233,6 +234,7 @@ function stubTeamCollaboration(): ISessionCollaborationService {
       })),
     })),
     bindAssignment: vi.fn(),
+    scheduleSwarmBatch: vi.fn().mockResolvedValue(undefined),
     settleAssignment: vi.fn(),
     settleBatch: vi.fn(),
   } as unknown as ISessionCollaborationService;
@@ -500,15 +502,15 @@ describe('AgentSwarmTool', () => {
     expect(swarmMode.enter).toHaveBeenCalledWith('tool');
     expect(host.swarmService.run).toHaveBeenCalledTimes(1);
     expect(host.swarmService.run).toHaveBeenCalledWith(expect.objectContaining({ tasks: [
-      {
+      expect.objectContaining({
         kind: 'spawn',
-        data: {
+        data: expect.objectContaining({
           kind: 'spawn',
           index: 1,
           item: 'src/a.ts',
           prompt: 'Review src/a.ts',
           profileName: 'explore',
-        },
+        }),
         profileName: 'explore',
         parentToolCallId: 'call_swarm',
         prompt: 'Review src/a.ts',
@@ -518,16 +520,16 @@ describe('AgentSwarmTool', () => {
         runInBackground: false,
         signal,
         timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
-      },
-      {
+      }),
+      expect.objectContaining({
         kind: 'spawn',
-        data: {
+        data: expect.objectContaining({
           kind: 'spawn',
           index: 2,
           item: 'src/b.ts',
           prompt: 'Review src/b.ts',
           profileName: 'explore',
-        },
+        }),
         profileName: 'explore',
         parentToolCallId: 'call_swarm',
         prompt: 'Review src/b.ts',
@@ -537,7 +539,7 @@ describe('AgentSwarmTool', () => {
         runInBackground: false,
         signal,
         timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
-      },
+      }),
     ] }));
     expect(result.output).toBe(
       [
@@ -567,19 +569,11 @@ describe('AgentSwarmTool', () => {
   });
 
   it('returns a durable launch receipt without waiting when Team Mode is enabled', async () => {
-    let settleCompletion: ((results: readonly SessionSwarmRunResult<unknown>[]) => void) | undefined;
-    const completion = new Promise<readonly SessionSwarmRunResult<unknown>[]>((resolve) => {
-      settleCompletion = resolve;
-    });
     const host = mockSwarmHost();
-    const launch = vi.fn((args: Parameters<ISessionSwarmService['launch']>[0]) => ({
-      batchId: 'scheduler-batch',
-      accepted: args.tasks,
-      completion,
-    }));
-    host.swarmService.launch = launch as ISessionSwarmService['launch'];
+    const scheduleSwarmBatch = vi.fn().mockResolvedValue(undefined);
     const collaboration = {
       _serviceBrand: undefined,
+      isActive: () => true,
       snapshot: vi.fn().mockResolvedValue({ members: [], assignments: [] }),
       prepareSwarmBatch: vi.fn().mockResolvedValue({
         batchId: 'team-batch',
@@ -601,6 +595,7 @@ describe('AgentSwarmTool', () => {
         ],
       }),
       bindAssignment: vi.fn(),
+      scheduleSwarmBatch,
       settleAssignment: vi.fn(),
       settleBatch: vi.fn(),
     } as unknown as ISessionCollaborationService;
@@ -622,12 +617,18 @@ describe('AgentSwarmTool', () => {
       description: 'Review files',
       prompt_template: 'Review {{item}}',
       items: [
-        { item: 'src/a.ts', display_name: 'reviewer-a', subagent_type: 'coder', model: 'main-model' },
-        { item: 'src/b.ts', display_name: 'reviewer-b', subagent_type: 'explore', model: 'main-model' },
+        { item: 'src/a.ts', task_key: 'review-a', display_name: 'reviewer-a', subagent_type: 'coder', model: 'main-model' },
+        { item: 'src/b.ts', task_key: 'review-b', display_name: 'reviewer-b', subagent_type: 'explore', model: 'main-model' },
       ],
     }));
 
-    expect(launch).toHaveBeenCalledOnce();
+    expect(scheduleSwarmBatch).toHaveBeenCalledOnce();
+    expect(scheduleSwarmBatch).toHaveBeenCalledWith(expect.objectContaining({
+      batchId: 'team-batch',
+      tasks: expect.arrayContaining([
+        expect.objectContaining({ runInBackground: true }),
+      ]),
+    }));
     expect(host.swarmService.run).not.toHaveBeenCalled();
     expect(result.output).toContain('<agent_swarm_started>');
     expect(result.output).toContain('<batch_id>team-batch</batch_id>');
@@ -641,8 +642,46 @@ describe('AgentSwarmTool', () => {
         ]),
       }),
     );
-    settleCompletion?.([]);
-    await Promise.resolve();
+  });
+
+  it('allows one durable read item without scheduling an independent validator', async () => {
+    const host = mockSwarmHost();
+    const collaboration = stubTeamCollaboration();
+    const tool = new AgentSwarmTool(
+      host.swarmService,
+      makeAgentScopeContext({ agentId: host.callerAgentId, agentScope: '' }),
+      mockSwarmMode(),
+      stubConfig({ models: { 'main-model': {} } }),
+      stubFlag((id) => id === TEAM_COLLABORATION_FLAG_ID),
+      stubSwarmCatalog(),
+      stubCallerProfile({ modelAlias: 'main-model', thinkingLevel: 'high' }),
+      stubModelCatalog({ 'main-model': TEST_MODEL_CAPABILITY }),
+      collaboration,
+    );
+
+    const result = await executeTool(tool, context({
+      description: 'Inspect one subsystem',
+      prompt_template: 'Inspect {{item}}',
+      items: [{
+        item: 'src/runtime',
+        task_key: 'inspect-runtime',
+        display_name: 'runtime-reader',
+        subagent_type: 'explore',
+        model: 'main-model',
+        workspace_access: 'read',
+        validation: 'required',
+      }],
+    }));
+
+    expect(result.isError).toBeUndefined();
+    expect(collaboration.prepareSwarmBatch).toHaveBeenCalledWith(expect.objectContaining({
+      assignments: [expect.objectContaining({
+        taskKey: 'inspect-runtime',
+        workspaceMode: 'shared_readonly',
+        validationMode: 'none',
+      })],
+    }));
+    expect(collaboration.scheduleSwarmBatch).toHaveBeenCalledOnce();
   });
 
   it('requires a per-item model choice when Team Mode has multiple routable aliases', async () => {
@@ -664,8 +703,8 @@ describe('AgentSwarmTool', () => {
       description: 'Review files',
       prompt_template: 'Review {{item}}',
       items: [
-        { item: 'src/a.ts', display_name: 'quick-reviewer', subagent_type: 'coder' },
-        { item: 'src/b.ts', display_name: 'deep-reviewer', subagent_type: 'explore' },
+        { item: 'src/a.ts', task_key: 'review-a', display_name: 'quick-reviewer', subagent_type: 'coder' },
+        { item: 'src/b.ts', task_key: 'review-b', display_name: 'deep-reviewer', subagent_type: 'explore' },
       ],
       model: 'fast',
     }));
@@ -696,8 +735,8 @@ describe('AgentSwarmTool', () => {
       description: 'Review files',
       prompt_template: 'Review {{item}}',
       items: [
-        { item: 'src/a.ts', display_name: 'quick-reviewer', subagent_type: 'coder', model: 'fast' },
-        { item: 'src/b.ts', display_name: 'deep-reviewer', subagent_type: 'explore', model: 'missing' },
+        { item: 'src/a.ts', task_key: 'review-a', display_name: 'quick-reviewer', subagent_type: 'coder', model: 'fast' },
+        { item: 'src/b.ts', task_key: 'review-b', display_name: 'deep-reviewer', subagent_type: 'explore', model: 'missing' },
       ],
     }));
 
@@ -710,12 +749,6 @@ describe('AgentSwarmTool', () => {
 
   it('routes each Team item to its selected model and persists the aliases', async () => {
     const host = mockSwarmHost();
-    const launch = vi.fn((args: Parameters<ISessionSwarmService['launch']>[0]) => ({
-      batchId: 'scheduler-batch',
-      accepted: args.tasks,
-      completion: Promise.resolve([]),
-    }));
-    host.swarmService.launch = launch as ISessionSwarmService['launch'];
     const collaboration = stubTeamCollaboration();
     const tool = new AgentSwarmTool(
       host.swarmService,
@@ -733,13 +766,13 @@ describe('AgentSwarmTool', () => {
       description: 'Review files',
       prompt_template: 'Review {{item}}',
       items: [
-        { item: 'src/a.ts', display_name: 'quick-reviewer', subagent_type: 'coder', model: 'fast' },
-        { item: 'src/b.ts', display_name: 'deep-reviewer', subagent_type: 'explore', model: 'deep' },
+        { item: 'src/a.ts', task_key: 'review-a', display_name: 'quick-reviewer', subagent_type: 'coder', model: 'fast' },
+        { item: 'src/b.ts', task_key: 'review-b', display_name: 'deep-reviewer', subagent_type: 'explore', model: 'deep' },
       ],
     }));
 
     expect(result.isError).toBeUndefined();
-    expect(launch).toHaveBeenCalledWith(expect.objectContaining({
+    expect(collaboration.scheduleSwarmBatch).toHaveBeenCalledWith(expect.objectContaining({
       tasks: [
         expect.objectContaining({ binding: { model: 'fast', thinking: undefined } }),
         expect.objectContaining({ binding: { model: 'deep', thinking: undefined } }),
@@ -757,11 +790,9 @@ describe('AgentSwarmTool', () => {
 
   it('marks the durable Team batch failed when scheduler admission throws', async () => {
     const host = mockSwarmHost();
-    host.swarmService.launch = vi.fn(() => {
-      throw new Error('scheduler unavailable');
-    }) as ISessionSwarmService['launch'];
     const collaboration = {
       _serviceBrand: undefined,
+      isActive: () => true,
       snapshot: vi.fn().mockResolvedValue({ members: [], assignments: [] }),
       prepareSwarmBatch: vi.fn().mockResolvedValue({
         batchId: 'team-batch',
@@ -783,6 +814,7 @@ describe('AgentSwarmTool', () => {
         ],
       }),
       bindAssignment: vi.fn(),
+      scheduleSwarmBatch: vi.fn().mockRejectedValue(new Error('scheduler unavailable')),
       settleAssignment: vi.fn().mockResolvedValue(undefined),
       settleBatch: vi.fn().mockResolvedValue(undefined),
     } as unknown as ISessionCollaborationService;
@@ -804,8 +836,8 @@ describe('AgentSwarmTool', () => {
       description: 'Review files',
       prompt_template: 'Review {{item}}',
       items: [
-        { item: 'src/a.ts', display_name: 'reviewer-a', subagent_type: 'coder', model: 'main-model' },
-        { item: 'src/b.ts', display_name: 'reviewer-b', subagent_type: 'explore', model: 'main-model' },
+        { item: 'src/a.ts', task_key: 'review-a', display_name: 'reviewer-a', subagent_type: 'coder', model: 'main-model' },
+        { item: 'src/b.ts', task_key: 'review-b', display_name: 'reviewer-b', subagent_type: 'explore', model: 'main-model' },
       ],
     }));
 
@@ -976,15 +1008,15 @@ describe('AgentSwarmTool', () => {
       agentId: 'agent-old-2',
     });
     expect(host.swarmService.run).toHaveBeenCalledWith(expect.objectContaining({ tasks: [
-      {
+      expect.objectContaining({
         kind: 'resume',
-        data: {
+        data: expect.objectContaining({
           kind: 'resume',
           index: 1,
           agentId: 'agent-old-1',
           item: 'src/old-a.ts',
           prompt: 'Continue previous review A',
-        },
+        }),
         profileName: 'subagent',
         parentToolCallId: 'call_swarm',
         prompt: 'Continue previous review A',
@@ -995,16 +1027,16 @@ describe('AgentSwarmTool', () => {
         resumeAgentId: 'agent-old-1',
         signal,
         timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
-      },
-      {
+      }),
+      expect.objectContaining({
         kind: 'resume',
-        data: {
+        data: expect.objectContaining({
           kind: 'resume',
           index: 2,
           agentId: 'agent-old-2',
           item: 'src/old-b.ts',
           prompt: 'Continue previous review B',
-        },
+        }),
         profileName: 'subagent',
         parentToolCallId: 'call_swarm',
         prompt: 'Continue previous review B',
@@ -1015,16 +1047,16 @@ describe('AgentSwarmTool', () => {
         resumeAgentId: 'agent-old-2',
         signal,
         timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
-      },
-      {
+      }),
+      expect.objectContaining({
         kind: 'spawn',
-        data: {
+        data: expect.objectContaining({
           kind: 'spawn',
           index: 3,
           item: 'src/new.ts',
           prompt: 'Review src/new.ts',
           profileName: 'explore',
-        },
+        }),
         profileName: 'explore',
         parentToolCallId: 'call_swarm',
         prompt: 'Review src/new.ts',
@@ -1034,7 +1066,7 @@ describe('AgentSwarmTool', () => {
         runInBackground: false,
         signal,
         timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
-      },
+      }),
     ] }));
     expect(result.output).toBe(
       [
@@ -1081,15 +1113,15 @@ describe('AgentSwarmTool', () => {
       agentId: 'agent-old-1',
     });
     expect(host.swarmService.run).toHaveBeenCalledWith(expect.objectContaining({ tasks: [
-      {
+      expect.objectContaining({
         kind: 'resume',
-        data: {
+        data: expect.objectContaining({
           kind: 'resume',
           index: 1,
           agentId: 'agent-old-1',
           item: 'src/old-a.ts',
           prompt: 'Continue previous review A',
-        },
+        }),
         profileName: 'subagent',
         parentToolCallId: 'call_swarm',
         prompt: 'Continue previous review A',
@@ -1100,7 +1132,7 @@ describe('AgentSwarmTool', () => {
         resumeAgentId: 'agent-old-1',
         signal,
         timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
-      },
+      }),
     ] }));
     expect(result.output).toBe(
       [

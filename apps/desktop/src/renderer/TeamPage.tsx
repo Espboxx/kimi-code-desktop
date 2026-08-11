@@ -10,20 +10,33 @@ import {
   CircleCheck,
   CircleDashed,
   Clock3,
+  Eye,
+  GitMerge,
   ImagePlus,
+  Pause,
+  Play,
+  RotateCcw,
   Send,
+  Settings2,
+  Square,
   UserRound,
   Users,
+  X,
 } from 'lucide-react';
 
 import type {
   TeamAssignment,
   TeamAssignmentStatus,
+  TeamArtifactContent,
   TeamMember,
   TeamMessage,
+  TeamPolicy,
+  TeamPolicyInput,
+  TeamSchedulerState,
   TeamStateSnapshot,
   SessionStatusSnapshot,
 } from '../shared/desktop-api';
+import { isTeamSnapshotV2, teamTaskParentId } from '../shared/team-types';
 import { agentActivityLabel, type AgentActivityForest } from './agent-activity';
 import {
   attachmentProblem,
@@ -63,12 +76,27 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
   const [selectedModel, setSelectedModel] = useState(status?.model);
   const [error, setError] = useState<string>();
   const [assignmentsOpen, setAssignmentsOpen] = useState(true);
+  const [recipientAgentId, setRecipientAgentId] = useState('');
+  const [controlPending, setControlPending] = useState(false);
+  const [artifactDialog, setArtifactDialog] = useState<{
+    readonly title: string;
+    readonly content: TeamArtifactContent;
+    readonly integration: boolean;
+  }>();
+  const [reassigning, setReassigning] = useState<TeamAssignment>();
+  const [reassignProfile, setReassignProfile] = useState('');
+  const [reassignModel, setReassignModel] = useState('');
+  const [policyDraft, setPolicyDraft] = useState<TeamPolicyDraft>();
   const streamRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nearBottomRef = useRef(true);
   const modelChangeRef = useRef<Promise<boolean>>(Promise.resolve(true));
   const snapshot = state.snapshot;
   const team = snapshot.team;
+  const snapshotV2 = isTeamSnapshotV2(snapshot) ? snapshot : undefined;
+  const writable = snapshotV2 !== undefined && snapshotV2.state === 'ready';
+  const schedulerControllable = snapshotV2 !== undefined
+    && ['running', 'paused'].includes(snapshotV2.scheduler.status);
   const activeBatches = snapshot.batches.filter((batch) => batch.status === 'running').length;
   const statusCounts = countAssignments(snapshot.assignments);
   const assignmentForest = useMemo(
@@ -174,6 +202,7 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
         persistedBody,
         id,
         images.map((image) => ({ type: image.type, url: image.url, name: image.label })),
+        recipientAgentId === '' ? undefined : [recipientAgentId],
       );
       setBody('');
       setImages([]);
@@ -185,6 +214,45 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
     } finally {
       setSending(false);
     }
+  };
+
+  const runControl = async (operation: () => Promise<unknown>) => {
+    if (controlPending) return;
+    setControlPending(true);
+    setError(undefined);
+    try {
+      await operation();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setControlPending(false);
+    }
+  };
+
+  const inspectArtifact = async (artifactId: string, title = '任务产物') => {
+    await runControl(async () => {
+      const content = await window.kimiDesktop.team.artifact(sessionId, artifactId);
+      setArtifactDialog({ title, content, integration: false });
+    });
+  };
+
+  const previewIntegration = async () => {
+    await runControl(async () => {
+      const content = await window.kimiDesktop.team.previewIntegration(sessionId);
+      if (content === undefined) throw new Error('当前没有可应用的集成变更');
+      const awaitingApply = snapshotV2?.integration.status === 'awaiting_apply';
+      setArtifactDialog({
+        title: awaitingApply ? '集成差异预览' : '集成差异',
+        content,
+        integration: awaitingApply,
+      });
+    });
+  };
+
+  const beginReassign = (assignment: TeamAssignment) => {
+    setReassigning(assignment);
+    setReassignProfile(assignment.profileName);
+    setReassignModel(assignment.model ?? '');
   };
 
   if (team === undefined) {
@@ -199,10 +267,52 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
           <span title={`组长 ${team.leaderAgentId}`}><Bot size={13} />{leader.displayName}</span>
           <span><Users size={13} />{snapshot.members.length} 成员</span>
           <span className={classNames(activeBatches > 0 && 'running')}><CircleDashed size={13} />{activeBatches} 活动批次</span>
-          <span className={classNames(snapshot.state === 'degraded' && 'failed')} title={snapshot.degradedReason}>
-            {snapshot.state === 'degraded' ? <CircleAlert size={13} /> : <CircleCheck size={13} />}
-            {snapshot.state === 'degraded' ? '只读降级' : '已连接'}
+          {snapshotV2 !== undefined && (
+            <span className={classNames(snapshotV2.scheduler.status === 'running' && 'running')}>
+              {snapshotV2.scheduler.status === 'paused' ? <Pause size={13} /> : <CircleDashed size={13} />}
+              {schedulerStatusLabel(snapshotV2.scheduler.status)} · {snapshotV2.scheduler.activeCount}/{snapshotV2.policy.maxConcurrency}
+            </span>
+          )}
+          {snapshotV2 !== undefined && (
+            <span title="Team 模型调用累计 token">
+              {snapshotV2.budget.totalTokens.toLocaleString()} tokens
+            </span>
+          )}
+          <span className={classNames(!writable && 'failed')} title={snapshot.degradedReason}>
+            {writable ? <CircleCheck size={13} /> : <CircleAlert size={13} />}
+            {snapshot.protocolVersion === 1
+              ? 'v1 只读'
+              : snapshot.state === 'degraded' ? '只读降级' : '已连接'}
           </span>
+          {snapshotV2 !== undefined && (
+            <div className="team-header-controls">
+              <button
+                type="button"
+                disabled={!writable || controlPending || !schedulerControllable}
+                onClick={() => void runControl(() => snapshotV2.scheduler.status === 'paused'
+                  ? window.kimiDesktop.team.resume(sessionId, snapshot.latestSeq)
+                  : window.kimiDesktop.team.pause(sessionId, snapshot.latestSeq, 'Paused from Desktop'))}
+                title={snapshotV2.scheduler.status === 'paused' ? '继续调度' : '暂停调度'}
+              >
+                {snapshotV2.scheduler.status === 'paused' ? <Play size={13} /> : <Pause size={13} />}
+                {snapshotV2.scheduler.status === 'paused' ? '继续' : '暂停'}
+              </button>
+              <button
+                type="button"
+                disabled={!writable || controlPending}
+                onClick={() => { setPolicyDraft(policyToDraft(snapshotV2.policy)); }}
+                title="调整 Team 并发、成员、重试和预算"
+              ><Settings2 size={13} />策略</button>
+              <button
+                type="button"
+                disabled={!writable || controlPending || snapshotV2.integration.diffArtifactId === undefined}
+                onClick={() => void previewIntegration()}
+                title={snapshotV2.integration.status === 'awaiting_apply'
+                  ? '预览汇总差异并确认应用'
+                  : '查看集成差异'}
+              ><GitMerge size={13} />集成预览</button>
+            </div>
+          )}
         </div>
       </header>
 
@@ -241,7 +351,7 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
             className="team-composer"
             frameClassName="team-composer-frame"
             value={body}
-            disabled={snapshot.state === 'degraded'}
+            disabled={!writable}
             placeholder="发送消息到 general…"
             ariaLabel="发送团队消息"
             heightStorageKey={TEAM_COMPOSER_HEIGHT_STORAGE_KEY}
@@ -269,15 +379,34 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
                   className="team-attachment-error"
                   onDismiss={() => { setAttachmentError(undefined); }}
                 />
-                {error !== undefined && <div className="team-send-error"><CircleAlert size={13} /><span>{error}</span><button onClick={() => void send()}>重试原请求</button></div>}
+                {error !== undefined && <div className="team-send-error"><CircleAlert size={13} /><span>{error}</span>{clientMessageId !== undefined && <button onClick={() => void send()}>重试原请求</button>}</div>}
               </>
             )}
             status={(
               <>
+                <label className="team-recipient-control">
+                  <span>收件人</span>
+                  <select
+                    aria-label="团队消息收件人"
+                    value={recipientAgentId}
+                    disabled={!writable || sending}
+                    onChange={(event) => {
+                      setRecipientAgentId(event.currentTarget.value);
+                      setClientMessageId(undefined);
+                    }}
+                  >
+                    <option value="">全员广播</option>
+                    {snapshot.members.map((member) => (
+                      <option value={member.agentId} key={member.agentId}>
+                        {agentPresentation(member.agentId, snapshot.members, snapshot.assignments).displayName}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <ModelSelect
                   value={selectedModel}
                   models={models}
-                  disabled={snapshot.state === 'degraded' || modelPending || models.length === 0}
+                  disabled={!writable || modelPending || models.length === 0}
                   title="主代理模型"
                   onChange={changeModel}
                 />
@@ -310,14 +439,14 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
                   className="icon-button team-image-picker"
                   type="button"
                   onClick={() => { fileInputRef.current?.click(); }}
-                  disabled={snapshot.state === 'degraded' || images.length >= 8}
+                  disabled={!writable || images.length >= 8}
                   title="粘贴或选择图片"
                 ><ImagePlus size={16} /></button>
                 <button
                   className="send-button team-message-send"
                   type="button"
                   onClick={() => void send()}
-                  disabled={sending || modelPending || imageInputBlocked || (body.trim().length === 0 && images.length === 0) || snapshot.state === 'degraded'}
+                  disabled={sending || modelPending || imageInputBlocked || (body.trim().length === 0 && images.length === 0) || !writable}
                   title={imageInputBlocked ? '当前模型不支持图片输入' : '发送团队消息'}
                 >
                   {sending ? <CircleDashed className="spin" size={16} /> : <Send size={16} />}
@@ -357,11 +486,83 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
                 : assignmentGroups.map((group) => (
                     <section className="team-assignment-group" key={group.id}>
                       <h3>{group.label}<span>{group.nodes.length}</span></h3>
-                      {group.nodes.map((node) => <AssignmentNode node={node} depth={0} onSelectAgent={onSelectAgent} key={node.assignment.id} />)}
+                      {group.nodes.map((node) => (
+                        <AssignmentNode
+                          node={node}
+                          depth={0}
+                          writable={writable && !controlPending}
+                          onSelectAgent={onSelectAgent}
+                          onCancel={(taskId) => void runControl(() => window.kimiDesktop.team.cancelTask(
+                            sessionId,
+                            taskId,
+                            snapshot.latestSeq,
+                          ))}
+                          onRetry={(taskId) => void runControl(() => window.kimiDesktop.team.retryTask(
+                            sessionId,
+                            taskId,
+                            snapshot.latestSeq,
+                          ))}
+                          onReassign={beginReassign}
+                          onInspectArtifact={(artifactId) => void inspectArtifact(artifactId)}
+                          key={node.assignment.id}
+                        />
+                      ))}
                     </section>
                   ))}
         </SidePanelFrame>
       </div>
+      {artifactDialog !== undefined && (
+        <TeamArtifactDialog
+          value={artifactDialog}
+          pending={controlPending}
+          onClose={() => { setArtifactDialog(undefined); }}
+          onApply={() => void runControl(async () => {
+            await window.kimiDesktop.team.applyIntegration(sessionId, snapshot.latestSeq);
+            setArtifactDialog(undefined);
+          })}
+          onDiscard={() => void runControl(async () => {
+            await window.kimiDesktop.team.discardIntegration(sessionId, snapshot.latestSeq);
+            setArtifactDialog(undefined);
+          })}
+        />
+      )}
+      {reassigning !== undefined && (
+        <TeamReassignDialog
+          task={reassigning}
+          profileName={reassignProfile}
+          model={reassignModel}
+          pending={controlPending}
+          onProfileName={setReassignProfile}
+          onModel={setReassignModel}
+          onClose={() => { setReassigning(undefined); }}
+          onSubmit={() => void runControl(async () => {
+            await window.kimiDesktop.team.reassignTask(
+              sessionId,
+              reassigning.id,
+              snapshot.latestSeq,
+              reassignProfile.trim() || undefined,
+              reassignModel.trim() || undefined,
+            );
+            setReassigning(undefined);
+          })}
+        />
+      )}
+      {policyDraft !== undefined && snapshotV2 !== undefined && (
+        <TeamPolicyDialog
+          value={policyDraft}
+          pending={controlPending}
+          onChange={setPolicyDraft}
+          onClose={() => { setPolicyDraft(undefined); }}
+          onSubmit={() => void runControl(async () => {
+            await window.kimiDesktop.team.updatePolicy(
+              sessionId,
+              policyFromDraft(policyDraft),
+              snapshot.latestSeq,
+            );
+            setPolicyDraft(undefined);
+          })}
+        />
+      )}
     </section>
   );
 }
@@ -436,15 +637,35 @@ interface AssignmentNodeModel {
   readonly children: readonly AssignmentNodeModel[];
 }
 
-function AssignmentNode({ node, depth, onSelectAgent }: {
+function AssignmentNode({
+  node,
+  depth,
+  writable,
+  onSelectAgent,
+  onCancel,
+  onRetry,
+  onReassign,
+  onInspectArtifact,
+}: {
   readonly node: AssignmentNodeModel;
   readonly depth: number;
+  readonly writable: boolean;
   readonly onSelectAgent: (agentId: string) => void;
+  readonly onCancel: (taskId: string) => void;
+  readonly onRetry: (taskId: string) => void;
+  readonly onReassign: (assignment: TeamAssignment) => void;
+  readonly onInspectArtifact: (artifactId: string) => void;
 }) {
   const assignment = node.assignment;
+  const task = 'taskKey' in assignment ? assignment : undefined;
+  const active = ['blocked', 'ready', 'running', 'awaiting_validation', 'integrating'].includes(
+    assignment.status,
+  );
+  const retryable = ['failed', 'cancelled', 'interrupted'].includes(assignment.status);
   return (
     <div className="team-assignment-node">
       <button
+        className="team-assignment-main"
         style={{ paddingInlineStart: `${10 + depth * 16}px` }}
         disabled={assignment.agentId === undefined}
         onClick={() => { if (assignment.agentId !== undefined) onSelectAgent(assignment.agentId); }}
@@ -456,11 +677,56 @@ function AssignmentNode({ node, depth, onSelectAgent }: {
           <small>
             {assignment.profileName} · {assignment.displayName ?? assignment.agentId ?? '等待 Agent'}
             {assignment.model === undefined ? '' : ` · ${assignment.model}`}
+            {task === undefined ? '' : ` · ${task.workspaceMode === 'isolated_write' ? '隔离写入' : '共享只读'} · ${task.validationMode === 'required' ? '独立验证' : '无需验证'}`}
           </small>
         </span>
         <em className={`assignment-${assignment.status}`}>{assignmentStatusLabel(assignment.status)}</em>
       </button>
-      {node.children.map((child) => <AssignmentNode node={child} depth={depth + 1} onSelectAgent={onSelectAgent} key={child.assignment.id} />)}
+      {task !== undefined && (
+        <div className="team-task-actions" style={{ paddingInlineStart: `${10 + depth * 16}px` }}>
+          {task.blocker !== undefined && <span title={task.blocker}>{task.blocker}</span>}
+          {task.error !== undefined && <span className="failed" title={task.error}>{task.error}</span>}
+          {task.artifactIds.map((artifactId) => (
+            <button
+              type="button"
+              onClick={() => { onInspectArtifact(artifactId); }}
+              title={`查看产物 ${artifactId}`}
+              key={artifactId}
+            ><Eye size={11} />产物</button>
+          ))}
+          <button
+            type="button"
+            disabled={!writable || !active}
+            onClick={() => { onCancel(task.id); }}
+            title="取消任务"
+          ><Square size={11} />取消</button>
+          <button
+            type="button"
+            disabled={!writable || !retryable}
+            onClick={() => { onRetry(task.id); }}
+            title="重试任务"
+          ><RotateCcw size={11} />重试</button>
+          <button
+            type="button"
+            disabled={!writable || ['running', 'awaiting_validation', 'integrating', 'completed'].includes(task.status)}
+            onClick={() => { onReassign(task); }}
+            title="重分配 profile 或模型"
+          ><Settings2 size={11} />重分配</button>
+        </div>
+      )}
+      {node.children.map((child) => (
+        <AssignmentNode
+          node={child}
+          depth={depth + 1}
+          writable={writable}
+          onSelectAgent={onSelectAgent}
+          onCancel={onCancel}
+          onRetry={onRetry}
+          onReassign={onReassign}
+          onInspectArtifact={onInspectArtifact}
+          key={child.assignment.id}
+        />
+      ))}
     </div>
   );
 }
@@ -468,7 +734,7 @@ function AssignmentNode({ node, depth, onSelectAgent }: {
 function AssignmentStatusIcon({ status }: { readonly status: TeamAssignmentStatus }) {
   if (status === 'completed') return <CircleCheck size={13} />;
   if (status === 'failed' || status === 'cancelled' || status === 'interrupted') return <CircleAlert size={13} />;
-  if (status === 'queued') return <Clock3 size={13} />;
+  if (status === 'queued' || status === 'blocked' || status === 'ready') return <Clock3 size={13} />;
   return <CircleDashed className="spin" size={13} />;
 }
 
@@ -477,7 +743,8 @@ function buildAssignmentForest(assignments: readonly TeamAssignment[]): readonly
   const roots: AssignmentNodeModel[] = [];
   for (const assignment of assignments) {
     const node = nodes.get(assignment.id)!;
-    const parent = assignment.parentAssignmentId === undefined ? undefined : nodes.get(assignment.parentAssignmentId);
+    const parentId = teamTaskParentId(assignment);
+    const parent = parentId === undefined ? undefined : nodes.get(parentId);
     if (parent === undefined || parent === node || createsCycle(node, parent, nodes)) roots.push(node);
     else parent.children.push(node);
   }
@@ -492,7 +759,9 @@ function groupAssignmentForest(nodes: readonly AssignmentNodeModel[]) {
   ];
   for (const node of nodes) {
     const statuses = flattenAssignmentStatuses(node);
-    const id = statuses.has('running') ? 'running' : statuses.has('queued') ? 'queued' : 'terminal';
+    const id = [...statuses].some((status) => isActiveAssignmentStatus(status))
+      ? 'running'
+      : [...statuses].some((status) => isWaitingAssignmentStatus(status)) ? 'queued' : 'terminal';
     groups.find((group) => group.id === id)!.nodes.push(node);
   }
   return groups.filter((group) => group.nodes.length > 0);
@@ -517,17 +786,16 @@ function createsCycle(
     if (current.assignment.id === node.assignment.id) return true;
     if (visited.has(current.assignment.id)) return true;
     visited.add(current.assignment.id);
-    current = current.assignment.parentAssignmentId === undefined
-      ? undefined
-      : nodes.get(current.assignment.parentAssignmentId);
+    const parentId = teamTaskParentId(current.assignment);
+    current = parentId === undefined ? undefined : nodes.get(parentId);
   }
   return false;
 }
 
 function countAssignments(assignments: readonly TeamAssignment[]) {
   return assignments.reduce((counts, assignment) => {
-    if (assignment.status === 'running') counts.running += 1;
-    else if (assignment.status === 'queued') counts.queued += 1;
+    if (isActiveAssignmentStatus(assignment.status)) counts.running += 1;
+    else if (isWaitingAssignmentStatus(assignment.status)) counts.queued += 1;
     else counts.terminal += 1;
     return counts;
   }, { running: 0, queued: 0, terminal: 0 });
@@ -535,9 +803,249 @@ function countAssignments(assignments: readonly TeamAssignment[]) {
 
 function assignmentStatusLabel(status: TeamAssignmentStatus): string {
   const labels: Record<TeamAssignmentStatus, string> = {
-    queued: '等待', running: '运行中', completed: '完成', failed: '失败', cancelled: '已取消', interrupted: '已中断',
+    queued: '等待',
+    blocked: '依赖阻塞',
+    ready: '就绪',
+    running: '运行中',
+    awaiting_validation: '等待验证',
+    integrating: '集成中',
+    completed: '完成',
+    failed: '失败',
+    cancelled: '已取消',
+    interrupted: '已中断',
   };
   return labels[status];
+}
+
+function isActiveAssignmentStatus(status: TeamAssignmentStatus): boolean {
+  return status === 'running' || status === 'awaiting_validation' || status === 'integrating';
+}
+
+function isWaitingAssignmentStatus(status: TeamAssignmentStatus): boolean {
+  return status === 'queued' || status === 'blocked' || status === 'ready';
+}
+
+function schedulerStatusLabel(status: TeamSchedulerState['status']): string {
+  const labels: Record<TeamSchedulerState['status'], string> = {
+    running: '调度中',
+    paused: '已暂停',
+    awaiting_apply: '等待应用',
+    completed: '已完成',
+    failed: '失败',
+    cancelled: '已取消',
+  };
+  return labels[status];
+}
+
+function TeamArtifactDialog({ value, pending, onClose, onApply, onDiscard }: {
+  readonly value: {
+    readonly title: string;
+    readonly content: TeamArtifactContent;
+    readonly integration: boolean;
+  };
+  readonly pending: boolean;
+  readonly onClose: () => void;
+  readonly onApply: () => void;
+  readonly onDiscard: () => void;
+}) {
+  return (
+    <div className="team-control-dialog-backdrop" role="presentation">
+      <section
+        className="team-control-dialog team-artifact-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={value.title}
+      >
+        <header>
+          <div><GitMerge size={15} /><strong>{value.title}</strong></div>
+          <button className="icon-button" type="button" onClick={onClose} title="关闭"><X size={15} /></button>
+        </header>
+        <div className="team-artifact-meta">
+          <code>{value.content.artifact.kind}</code>
+          <span>{value.content.artifact.mediaType}</span>
+          <span>{value.content.artifact.byteLength.toLocaleString()} bytes</span>
+        </div>
+        <pre>{decodeArtifactText(value.content)}</pre>
+        <footer>
+          <button type="button" onClick={onClose} disabled={pending}>关闭</button>
+          {value.integration && (
+            <>
+              <button type="button" onClick={onDiscard} disabled={pending}>放弃汇总</button>
+              <button className="primary" type="button" onClick={onApply} disabled={pending}>
+                {pending ? <CircleDashed className="spin" size={13} /> : <GitMerge size={13} />}
+                确认应用到工作区
+              </button>
+            </>
+          )}
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function TeamReassignDialog({
+  task,
+  profileName,
+  model,
+  pending,
+  onProfileName,
+  onModel,
+  onClose,
+  onSubmit,
+}: {
+  readonly task: TeamAssignment;
+  readonly profileName: string;
+  readonly model: string;
+  readonly pending: boolean;
+  readonly onProfileName: (value: string) => void;
+  readonly onModel: (value: string) => void;
+  readonly onClose: () => void;
+  readonly onSubmit: () => void;
+}) {
+  return (
+    <div className="team-control-dialog-backdrop" role="presentation">
+      <section
+        className="team-control-dialog team-reassign-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="重分配团队任务"
+      >
+        <header>
+          <div><Settings2 size={15} /><strong>重分配任务</strong></div>
+          <button className="icon-button" type="button" onClick={onClose} title="关闭"><X size={15} /></button>
+        </header>
+        <p>{task.description}</p>
+        <label>
+          <span>Agent profile</span>
+          <input value={profileName} onChange={(event) => { onProfileName(event.currentTarget.value); }} />
+        </label>
+        <label>
+          <span>模型（留空保留当前值）</span>
+          <input value={model} onChange={(event) => { onModel(event.currentTarget.value); }} />
+        </label>
+        <footer>
+          <button type="button" onClick={onClose} disabled={pending}>取消</button>
+          <button
+            className="primary"
+            type="button"
+            onClick={onSubmit}
+            disabled={pending || profileName.trim().length === 0}
+          >
+            {pending ? <CircleDashed className="spin" size={13} /> : <Settings2 size={13} />}
+            保存分配
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+interface TeamPolicyDraft {
+  readonly maxConcurrency: string;
+  readonly maxMembers: string;
+  readonly maxDelegationDepth: string;
+  readonly executionRetries: string;
+  readonly validationRetries: string;
+  readonly maxTokens: string;
+  readonly maxDurationMs: string;
+}
+
+function TeamPolicyDialog({ value, pending, onChange, onClose, onSubmit }: {
+  readonly value: TeamPolicyDraft;
+  readonly pending: boolean;
+  readonly onChange: (value: TeamPolicyDraft) => void;
+  readonly onClose: () => void;
+  readonly onSubmit: () => void;
+}) {
+  const field = (key: keyof TeamPolicyDraft, label: string, min: number, max?: number) => (
+    <label>
+      <span>{label}</span>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        value={value[key]}
+        onChange={(event) => { onChange({ ...value, [key]: event.currentTarget.value }); }}
+      />
+    </label>
+  );
+  return (
+    <div className="team-control-dialog-backdrop" role="presentation">
+      <section
+        className="team-control-dialog team-policy-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Team 调度策略"
+      >
+        <header>
+          <div><Settings2 size={15} /><strong>Team 调度策略</strong></div>
+          <button className="icon-button" type="button" onClick={onClose} title="关闭"><X size={15} /></button>
+        </header>
+        <div className="team-policy-grid">
+          {field('maxConcurrency', '最大并发（1–16）', 1, 16)}
+          {field('maxMembers', '最大成员（2–64）', 2, 64)}
+          {field('maxDelegationDepth', '最大委派深度（1–8）', 1, 8)}
+          {field('executionRetries', '执行自动重试（0–5）', 0, 5)}
+          {field('validationRetries', '验证自动重试（0–5）', 0, 5)}
+          {field('maxTokens', 'Token 上限（留空取消）', 1)}
+          {field('maxDurationMs', '时长上限 ms（留空取消）', 1)}
+        </div>
+        <footer>
+          <button type="button" onClick={onClose} disabled={pending}>取消</button>
+          <button className="primary" type="button" onClick={onSubmit} disabled={pending}>
+            {pending ? <CircleDashed className="spin" size={13} /> : <Settings2 size={13} />}
+            保存策略
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function policyToDraft(policy: TeamPolicy): TeamPolicyDraft {
+  return {
+    maxConcurrency: String(policy.maxConcurrency),
+    maxMembers: String(policy.maxMembers),
+    maxDelegationDepth: String(policy.maxDelegationDepth),
+    executionRetries: String(policy.executionRetries),
+    validationRetries: String(policy.validationRetries),
+    maxTokens: policy.maxTokens === undefined ? '' : String(policy.maxTokens),
+    maxDurationMs: policy.maxDurationMs === undefined ? '' : String(policy.maxDurationMs),
+  };
+}
+
+function policyFromDraft(value: TeamPolicyDraft): TeamPolicyInput {
+  return {
+    maxConcurrency: parsePolicyInteger(value.maxConcurrency, '最大并发', 1, 16),
+    maxMembers: parsePolicyInteger(value.maxMembers, '最大成员', 2, 64),
+    maxDelegationDepth: parsePolicyInteger(value.maxDelegationDepth, '最大委派深度', 1, 8),
+    executionRetries: parsePolicyInteger(value.executionRetries, '执行自动重试', 0, 5),
+    validationRetries: parsePolicyInteger(value.validationRetries, '验证自动重试', 0, 5),
+    maxTokens: parseOptionalPolicyInteger(value.maxTokens, 'Token 上限'),
+    maxDurationMs: parseOptionalPolicyInteger(value.maxDurationMs, '时长上限'),
+  };
+}
+
+function parseOptionalPolicyInteger(value: string, label: string): number | undefined {
+  return value.trim().length === 0 ? undefined : parsePolicyInteger(value, label, 1);
+}
+
+function parsePolicyInteger(value: string, label: string, min: number, max?: number): number {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < min || (max !== undefined && parsed > max)) {
+    throw new Error(`${label}必须是 ${String(min)}${max === undefined ? ' 以上' : `–${String(max)}`} 的整数`);
+  }
+  return parsed;
+}
+
+function decodeArtifactText(content: TeamArtifactContent): string {
+  try {
+    const binary = atob(content.dataBase64);
+    const bytes = Uint8Array.from(binary, (character) => character.codePointAt(0) ?? 0);
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return `无法以内联文本显示该产物（${content.artifact.mediaType}，${String(content.artifact.byteLength)} bytes）`;
+  }
 }
 
 function shortId(id: string): string {
@@ -552,15 +1060,18 @@ function TeamMessageBubble({ message, members, assignments, mentionAliases, onSe
   readonly onSelectAgent: (agentId: string) => void;
 }) {
   const isUser = message.sender.actorKind === 'user';
+  const isAgent = message.sender.actorKind === 'agent';
   const presentation = isUser
     ? { displayName: '你', profileName: undefined, agentId: message.sender.actorId }
-    : agentPresentation(message.sender.actorId, members, assignments);
+    : isAgent
+      ? agentPresentation(message.sender.actorId, members, assignments)
+      : { displayName: '团队协调器', profileName: '系统', agentId: message.sender.actorId };
   return (
-    <article className={classNames('team-message', isUser ? 'user' : 'agent', message.sender.role === 'leader' && 'leader')}>
+    <article className={classNames('team-message', isUser ? 'user' : isAgent ? 'agent' : 'system', message.sender.role === 'leader' && 'leader')}>
       <button
         className="team-message-avatar"
-        disabled={isUser}
-        onClick={() => { if (!isUser) onSelectAgent(message.sender.actorId); }}
+        disabled={!isAgent}
+        onClick={() => { if (isAgent) onSelectAgent(message.sender.actorId); }}
         title={isUser ? '你' : `${presentation.displayName} · ${message.sender.actorId}`}
       >
         {isUser ? <UserRound size={14} /> : <Bot size={14} />}
@@ -569,7 +1080,14 @@ function TeamMessageBubble({ message, members, assignments, mentionAliases, onSe
         <header className="team-message-meta">
           <strong>{presentation.displayName}</strong>
           <span>{message.sender.role === 'leader' ? '组长' : presentation.profileName ?? '用户'}</span>
-          {message.assignmentId !== undefined && <code>{shortId(message.assignmentId)}</code>}
+          {message.taskId !== undefined && <code>{shortId(message.taskId)}</code>}
+          {message.recipientAgentIds !== undefined && (
+            <code>私信 {message.recipientAgentIds.map((agentId) => agentPresentation(
+              agentId,
+              members,
+              assignments,
+            ).displayName).join('、')}</code>
+          )}
           <time>{formatTime(message.createdAt)}</time>
         </header>
         <div className="team-message-bubble markdown-body">

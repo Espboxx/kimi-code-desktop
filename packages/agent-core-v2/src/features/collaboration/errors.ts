@@ -14,6 +14,13 @@ export const CollaborationErrors = {
     COLLABORATION_IDEMPOTENCY_CONFLICT: 'collaboration.idempotency_conflict',
     COLLABORATION_PERSISTENCE_FAILED: 'collaboration.persistence_failed',
     COLLABORATION_DEGRADED_READ_ONLY: 'collaboration.degraded_read_only',
+    COLLABORATION_LEGACY_READ_ONLY: 'collaboration.legacy_read_only',
+    COLLABORATION_STALE_STATE: 'collaboration.stale_state',
+    COLLABORATION_TASK_NOT_FOUND: 'collaboration.task_not_found',
+    COLLABORATION_INVALID_GRAPH: 'collaboration.invalid_graph',
+    COLLABORATION_BUDGET_EXHAUSTED: 'collaboration.budget_exhausted',
+    COLLABORATION_WORKSPACE_UNAVAILABLE: 'collaboration.workspace_unavailable',
+    COLLABORATION_INTEGRATION_CONFLICT: 'collaboration.integration_conflict',
   },
   retryable: [
     'collaboration.rate_limited',

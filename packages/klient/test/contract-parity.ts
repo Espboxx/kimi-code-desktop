@@ -73,6 +73,31 @@ import type {
   SessionMetaPatch,
 } from '@moonshot-ai/agent-core-v2/session/sessionMetadata/sessionMetadata';
 import type {
+  LegacyTeamOperation,
+  LegacyTeamSnapshot,
+  Team,
+  TeamArtifact,
+  TeamArtifactContent,
+  TeamAttempt,
+  TeamBatch,
+  TeamBudgetReport,
+  TeamIntegrationState,
+  TeamMember,
+  TeamMessage,
+  TeamMessageAttachment,
+  TeamMessageSender,
+  TeamOperation,
+  TeamOperationV2,
+  TeamPolicy,
+  TeamPolicyInput,
+  TeamReview,
+  TeamRole,
+  TeamSchedulerState,
+  TeamSnapshot,
+  TeamSnapshotV2,
+  TeamTask,
+} from '@moonshot-ai/agent-core-v2/features/collaboration/types';
+import type {
   AuthStatus,
   IOAuthService,
 } from '@moonshot-ai/agent-core-v2/app/auth/auth';
@@ -232,6 +257,31 @@ import {
   questionResultSchema,
 } from '../src/contract/session/question.js';
 import { skillSummarySchema } from '../src/contract/session/skills.js';
+import {
+  legacyTeamOperationSchema,
+  legacyTeamSnapshotSchema,
+  teamArtifactContentSchema,
+  teamArtifactSchema,
+  teamAttemptSchema,
+  teamBatchSchema,
+  teamBudgetReportSchema,
+  teamIntegrationStateSchema,
+  teamMemberSchema,
+  teamMessageAttachmentSchema,
+  teamMessageSchema,
+  teamMessageSenderSchema,
+  teamOperationSchema,
+  teamOperationV2Schema,
+  teamPolicyInputSchema,
+  teamPolicySchema,
+  teamReviewSchema,
+  teamRoleSchema,
+  teamSchedulerStateSchema,
+  teamSchema,
+  teamSnapshotSchema,
+  teamSnapshotV2Schema,
+  teamTaskSchema,
+} from '../src/contract/session/collaboration.js';
 
 import {
   authStatusSchema,
@@ -500,6 +550,46 @@ const _questionResult: AssertWire<typeof questionResultSchema, QuestionResult> =
 
 // session/skills.ts
 const _skillSummary: AssertWire<typeof skillSummarySchema, SkillSummary> = true;
+
+// session/collaboration.ts
+const _teamRole: AssertWire<typeof teamRoleSchema, TeamRole> = true;
+const _team: AssertWire<typeof teamSchema, Team> = true;
+const _teamMember: AssertWire<typeof teamMemberSchema, TeamMember> = true;
+const _teamBatch: AssertWire<typeof teamBatchSchema, TeamBatch> = true;
+const _teamTask: AssertWire<typeof teamTaskSchema, TeamTask> = true;
+const _teamAttempt: AssertWire<typeof teamAttemptSchema, TeamAttempt> = true;
+const _teamArtifact: AssertWire<typeof teamArtifactSchema, TeamArtifact> = true;
+const _teamArtifactContent: AssertWire<
+  typeof teamArtifactContentSchema,
+  TeamArtifactContent
+> = true;
+const _teamReview: AssertWire<typeof teamReviewSchema, TeamReview> = true;
+const _teamBudgetReport: AssertWire<typeof teamBudgetReportSchema, TeamBudgetReport> = true;
+const _teamSchedulerState: AssertWire<typeof teamSchedulerStateSchema, TeamSchedulerState> = true;
+const _teamIntegrationState: AssertWire<
+  typeof teamIntegrationStateSchema,
+  TeamIntegrationState
+> = true;
+const _teamMessageSender: AssertWire<typeof teamMessageSenderSchema, TeamMessageSender> = true;
+const _teamMessageAttachment: AssertWire<
+  typeof teamMessageAttachmentSchema,
+  TeamMessageAttachment
+> = true;
+const _teamMessage: AssertWire<typeof teamMessageSchema, TeamMessage> = true;
+const _teamPolicy: AssertWire<typeof teamPolicySchema, TeamPolicy> = true;
+const _teamPolicyInput: AssertWire<typeof teamPolicyInputSchema, TeamPolicyInput> = true;
+const _legacyTeamOperation: AssertWire<
+  typeof legacyTeamOperationSchema,
+  LegacyTeamOperation
+> = true;
+const _teamOperationV2: AssertWire<typeof teamOperationV2Schema, TeamOperationV2> = true;
+const _teamOperation: AssertWire<typeof teamOperationSchema, TeamOperation> = true;
+const _legacyTeamSnapshot: AssertWire<
+  typeof legacyTeamSnapshotSchema,
+  LegacyTeamSnapshot
+> = true;
+const _teamSnapshotV2: AssertWire<typeof teamSnapshotV2Schema, TeamSnapshotV2> = true;
+const _teamSnapshot: AssertWire<typeof teamSnapshotSchema, TeamSnapshot> = true;
 
 // agent/activity.ts
 const _turnPhase: AssertWire<typeof turnPhaseSchema, TurnPhase> = true;

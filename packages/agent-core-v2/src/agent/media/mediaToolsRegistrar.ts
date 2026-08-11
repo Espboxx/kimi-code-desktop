@@ -39,7 +39,7 @@ import { type ModelRequester } from '#/kosong/model/modelRequester';
 import { IHostEnvironment } from '#/os/interface/hostEnvironment';
 import { IHostFileSystem } from '#/os/interface/hostFileSystem';
 import { ISessionSkillCatalog } from '#/session/sessionSkillCatalog/skillCatalog';
-import { ISessionWorkspaceContext } from '#/session/workspaceContext/workspaceContext';
+import { IAgentExecutionWorkspace } from '#/agent/executionWorkspace/executionWorkspace';
 import { IAgentProfileService } from '#/agent/profile/profile';
 import { IAgentToolRegistryService } from '#/agent/toolRegistry/toolRegistry';
 import { extendWorkspaceWithSkillRoots } from '#/tool/path-access';
@@ -64,7 +64,7 @@ export class AgentMediaToolsRegistrar extends Service implements IAgentMediaTool
     @IEventBus eventBus: IEventBus,
     @IHostFileSystem private readonly fs: IHostFileSystem,
     @IHostEnvironment private readonly env: IHostEnvironment,
-    @ISessionWorkspaceContext private readonly workspaceCtx: ISessionWorkspaceContext,
+    @IAgentExecutionWorkspace private readonly workspaceCtx: IAgentExecutionWorkspace,
     @ITelemetryService private readonly telemetry: ITelemetryService,
     @IAgentStateService private readonly states: IAgentStateService,
     @ISessionSkillCatalog private readonly skillCatalog?: ISessionSkillCatalog,

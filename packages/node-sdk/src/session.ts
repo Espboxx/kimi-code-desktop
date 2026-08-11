@@ -38,9 +38,11 @@ import type {
   PluginCommandDef,
   ThinkingEffort,
   TodoItem,
+  TeamArtifactContent,
   TeamMessage,
   TeamMessageAttachment,
   TeamOperation,
+  TeamPolicyInput,
   TeamSnapshot,
   Unsubscribe,
 } from '#/types';
@@ -105,7 +107,10 @@ function todoRpc(rpc: SDKRpcClientBase): TodoRpcSurface {
 }
 
 interface TeamRpcSurface {
-  ensureTeam(input: { readonly sessionId: string }): Promise<TeamSnapshot>;
+  ensureTeam(input: {
+    readonly sessionId: string;
+    readonly policy?: TeamPolicyInput;
+  }): Promise<TeamSnapshot>;
   getTeamSnapshot(input: { readonly sessionId: string }): Promise<TeamSnapshot>;
   getTeamOperations(input: {
     readonly sessionId: string;
@@ -122,7 +127,54 @@ interface TeamRpcSurface {
     readonly body: string;
     readonly clientMessageId: string;
     readonly attachments?: readonly TeamMessageAttachment[];
+    readonly recipientAgentIds?: readonly string[];
   }): Promise<TeamMessage>;
+  updateTeamPolicy(input: {
+    readonly sessionId: string;
+    readonly policy: TeamPolicyInput;
+    readonly expectedSeq: number;
+  }): Promise<TeamSnapshot>;
+  pauseTeam(input: {
+    readonly sessionId: string;
+    readonly expectedSeq: number;
+    readonly reason?: string;
+  }): Promise<TeamSnapshot>;
+  resumeTeam(input: {
+    readonly sessionId: string;
+    readonly expectedSeq: number;
+  }): Promise<TeamSnapshot>;
+  cancelTeamTask(input: {
+    readonly sessionId: string;
+    readonly taskId: string;
+    readonly expectedSeq: number;
+  }): Promise<TeamSnapshot>;
+  retryTeamTask(input: {
+    readonly sessionId: string;
+    readonly taskId: string;
+    readonly expectedSeq: number;
+  }): Promise<TeamSnapshot>;
+  reassignTeamTask(input: {
+    readonly sessionId: string;
+    readonly taskId: string;
+    readonly expectedSeq: number;
+    readonly profileName?: string;
+    readonly model?: string;
+  }): Promise<TeamSnapshot>;
+  getTeamArtifact(input: {
+    readonly sessionId: string;
+    readonly artifactId: string;
+  }): Promise<TeamArtifactContent>;
+  previewTeamIntegration(input: {
+    readonly sessionId: string;
+  }): Promise<TeamArtifactContent | undefined>;
+  applyTeamIntegration(input: {
+    readonly sessionId: string;
+    readonly expectedSeq: number;
+  }): Promise<TeamSnapshot>;
+  discardTeamIntegration(input: {
+    readonly sessionId: string;
+    readonly expectedSeq: number;
+  }): Promise<TeamSnapshot>;
   onTeamOperation(
     input: { readonly sessionId: string },
     listener: (operation: TeamOperation) => void,
@@ -137,6 +189,16 @@ function teamRpc(rpc: SDKRpcClientBase): TeamRpcSurface {
     typeof candidate.getTeamOperations !== 'function' ||
     typeof candidate.getTeamHistory !== 'function' ||
     typeof candidate.sendTeamMessage !== 'function' ||
+    typeof candidate.updateTeamPolicy !== 'function' ||
+    typeof candidate.pauseTeam !== 'function' ||
+    typeof candidate.resumeTeam !== 'function' ||
+    typeof candidate.cancelTeamTask !== 'function' ||
+    typeof candidate.retryTeamTask !== 'function' ||
+    typeof candidate.reassignTeamTask !== 'function' ||
+    typeof candidate.getTeamArtifact !== 'function' ||
+    typeof candidate.previewTeamIntegration !== 'function' ||
+    typeof candidate.applyTeamIntegration !== 'function' ||
+    typeof candidate.discardTeamIntegration !== 'function' ||
     typeof candidate.onTeamOperation !== 'function'
   ) {
     throw new TypeError('The Team Mode surface is unavailable on this engine (requires v2).');
@@ -203,9 +265,9 @@ export class Session {
     return todoRpc(this.rpc).onTodosChanged({ sessionId: this.id }, listener);
   }
 
-  async ensureTeam(): Promise<TeamSnapshot> {
+  async ensureTeam(policy?: TeamPolicyInput): Promise<TeamSnapshot> {
     this.ensureOpen();
-    return teamRpc(this.rpc).ensureTeam({ sessionId: this.id });
+    return teamRpc(this.rpc).ensureTeam({ sessionId: this.id, policy });
   }
 
   async getTeamSnapshot(): Promise<TeamSnapshot> {
@@ -233,9 +295,77 @@ export class Session {
     readonly body: string;
     readonly clientMessageId: string;
     readonly attachments?: readonly TeamMessageAttachment[];
+    readonly recipientAgentIds?: readonly string[];
   }): Promise<TeamMessage> {
     this.ensureOpen();
     return teamRpc(this.rpc).sendTeamMessage({ sessionId: this.id, ...input });
+  }
+
+  async updateTeamPolicy(input: {
+    readonly policy: TeamPolicyInput;
+    readonly expectedSeq: number;
+  }): Promise<TeamSnapshot> {
+    this.ensureOpen();
+    return teamRpc(this.rpc).updateTeamPolicy({ sessionId: this.id, ...input });
+  }
+
+  async pauseTeam(input: {
+    readonly expectedSeq: number;
+    readonly reason?: string;
+  }): Promise<TeamSnapshot> {
+    this.ensureOpen();
+    return teamRpc(this.rpc).pauseTeam({ sessionId: this.id, ...input });
+  }
+
+  async resumeTeam(input: { readonly expectedSeq: number }): Promise<TeamSnapshot> {
+    this.ensureOpen();
+    return teamRpc(this.rpc).resumeTeam({ sessionId: this.id, ...input });
+  }
+
+  async cancelTeamTask(input: {
+    readonly taskId: string;
+    readonly expectedSeq: number;
+  }): Promise<TeamSnapshot> {
+    this.ensureOpen();
+    return teamRpc(this.rpc).cancelTeamTask({ sessionId: this.id, ...input });
+  }
+
+  async retryTeamTask(input: {
+    readonly taskId: string;
+    readonly expectedSeq: number;
+  }): Promise<TeamSnapshot> {
+    this.ensureOpen();
+    return teamRpc(this.rpc).retryTeamTask({ sessionId: this.id, ...input });
+  }
+
+  async reassignTeamTask(input: {
+    readonly taskId: string;
+    readonly expectedSeq: number;
+    readonly profileName?: string;
+    readonly model?: string;
+  }): Promise<TeamSnapshot> {
+    this.ensureOpen();
+    return teamRpc(this.rpc).reassignTeamTask({ sessionId: this.id, ...input });
+  }
+
+  async getTeamArtifact(artifactId: string): Promise<TeamArtifactContent> {
+    this.ensureOpen();
+    return teamRpc(this.rpc).getTeamArtifact({ sessionId: this.id, artifactId });
+  }
+
+  async previewTeamIntegration(): Promise<TeamArtifactContent | undefined> {
+    this.ensureOpen();
+    return teamRpc(this.rpc).previewTeamIntegration({ sessionId: this.id });
+  }
+
+  async applyTeamIntegration(input: { readonly expectedSeq: number }): Promise<TeamSnapshot> {
+    this.ensureOpen();
+    return teamRpc(this.rpc).applyTeamIntegration({ sessionId: this.id, ...input });
+  }
+
+  async discardTeamIntegration(input: { readonly expectedSeq: number }): Promise<TeamSnapshot> {
+    this.ensureOpen();
+    return teamRpc(this.rpc).discardTeamIntegration({ sessionId: this.id, ...input });
   }
 
   onTeamOperation(listener: (operation: TeamOperation) => void): Unsubscribe {

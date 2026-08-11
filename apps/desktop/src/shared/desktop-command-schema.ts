@@ -19,6 +19,17 @@ const teamImageInput = z.object({
   url: nonEmptyString,
   name: z.string().trim().min(1).max(255),
 }).strict();
+const teamPolicyInput = z.object({
+  maxConcurrency: z.number().int().min(1).max(16).optional(),
+  maxMembers: z.number().int().min(2).max(64).optional(),
+  maxDelegationDepth: z.number().int().min(1).max(8).optional(),
+  executionRetries: z.number().int().min(0).max(5).optional(),
+  validationRetries: z.number().int().min(0).max(5).optional(),
+  maxTokens: z.number().int().positive().optional(),
+  maxDurationMs: z.number().int().positive().optional(),
+}).strict();
+const teamRecipients = z.array(nonEmptyString).min(1).max(16).optional();
+const expectedTeamSeq = z.number().int().nonnegative();
 const profileName = z
   .string()
   .trim()
@@ -149,7 +160,7 @@ export const desktopCommandSchemas = {
     todos: todoItems,
   }).strict(),
 
-  'team.ensure': z.object({ sessionId: nonEmptyString }).strict(),
+  'team.ensure': z.object({ sessionId: nonEmptyString, policy: teamPolicyInput.optional() }).strict(),
   'team.snapshot': z.object({ sessionId: nonEmptyString }).strict(),
   'team.operations': z.object({
     sessionId: nonEmptyString,
@@ -165,12 +176,52 @@ export const desktopCommandSchemas = {
     sessionId: nonEmptyString,
     body: z.string().min(1).max(8_192),
     clientMessageId: nonEmptyString,
+    recipientAgentIds: teamRecipients,
   }).strict(),
   'team.submit': z.object({
     sessionId: nonEmptyString,
     body: z.string().min(1).max(8_192),
     clientMessageId: nonEmptyString,
     media: z.array(teamImageInput).max(8).default([]),
+    recipientAgentIds: teamRecipients,
+  }).strict(),
+  'team.updatePolicy': z.object({
+    sessionId: nonEmptyString,
+    policy: teamPolicyInput,
+    expectedSeq: expectedTeamSeq,
+  }).strict(),
+  'team.pause': z.object({
+    sessionId: nonEmptyString,
+    expectedSeq: expectedTeamSeq,
+    reason: z.string().optional(),
+  }).strict(),
+  'team.resume': z.object({ sessionId: nonEmptyString, expectedSeq: expectedTeamSeq }).strict(),
+  'team.cancelTask': z.object({
+    sessionId: nonEmptyString,
+    taskId: nonEmptyString,
+    expectedSeq: expectedTeamSeq,
+  }).strict(),
+  'team.retryTask': z.object({
+    sessionId: nonEmptyString,
+    taskId: nonEmptyString,
+    expectedSeq: expectedTeamSeq,
+  }).strict(),
+  'team.reassignTask': z.object({
+    sessionId: nonEmptyString,
+    taskId: nonEmptyString,
+    expectedSeq: expectedTeamSeq,
+    profileName: nonEmptyString.optional(),
+    model: nonEmptyString.optional(),
+  }).strict(),
+  'team.artifact': z.object({ sessionId: nonEmptyString, artifactId: nonEmptyString }).strict(),
+  'team.previewIntegration': z.object({ sessionId: nonEmptyString }).strict(),
+  'team.applyIntegration': z.object({
+    sessionId: nonEmptyString,
+    expectedSeq: expectedTeamSeq,
+  }).strict(),
+  'team.discardIntegration': z.object({
+    sessionId: nonEmptyString,
+    expectedSeq: expectedTeamSeq,
   }).strict(),
 
   'goal.get': optionalSessionId,

@@ -94,8 +94,11 @@ describe('desktop IPC schema', () => {
     expect(parseDesktopCommand({
       domain: 'team',
       action: 'ensure',
-      payload: { sessionId: 's1' },
-    })).toMatchObject({ name: 'team.ensure' });
+      payload: { sessionId: 's1', policy: { maxConcurrency: 6, validationRetries: 1 } },
+    })).toMatchObject({
+      name: 'team.ensure',
+      payload: { policy: { maxConcurrency: 6, validationRetries: 1 } },
+    });
     expect(parseDesktopCommand({
       domain: 'team',
       action: 'operations',
@@ -105,6 +108,11 @@ describe('desktop IPC schema', () => {
       domain: 'team',
       action: 'send',
       payload: { sessionId: 's1', body: 'x'.repeat(8_193), clientMessageId: 'retry-1' },
+    })).toThrow();
+    expect(() => parseDesktopCommand({
+      domain: 'team',
+      action: 'pause',
+      payload: { sessionId: 's1', expectedSeq: -1 },
     })).toThrow();
     expect(() => parseDesktopCommand({
       domain: 'team',
@@ -131,14 +139,33 @@ describe('desktop IPC schema', () => {
     const api = createKimiDesktopApi(invoke, () => () => undefined);
     await api.team.ensure('s1');
     expect(calls).toHaveBeenCalledWith('team', 'ensure', { sessionId: 's1' });
-    await api.team.send('s1', 'Coordinate', 'retry-1');
+    await api.team.send('s1', 'Coordinate', 'retry-1', ['agent-2']);
     expect(calls).toHaveBeenCalledWith('team', 'send', {
-      sessionId: 's1', body: 'Coordinate', clientMessageId: 'retry-1',
+      sessionId: 's1',
+      body: 'Coordinate',
+      clientMessageId: 'retry-1',
+      recipientAgentIds: ['agent-2'],
     });
     const media = [{ type: 'image_url' as const, url: 'data:image/png;base64,aQ==', name: 'image.png' }];
     await api.team.submit('s1', 'Coordinate', 'retry-2', media);
     expect(calls).toHaveBeenCalledWith('team', 'submit', {
       sessionId: 's1', body: 'Coordinate', clientMessageId: 'retry-2', media,
+    });
+    await api.team.pause('s1', 7, 'inspect');
+    expect(calls).toHaveBeenCalledWith('team', 'pause', {
+      sessionId: 's1', expectedSeq: 7, reason: 'inspect',
+    });
+    await api.team.reassignTask('s1', 'task-1', 8, 'coder', 'example/model');
+    expect(calls).toHaveBeenCalledWith('team', 'reassignTask', {
+      sessionId: 's1',
+      taskId: 'task-1',
+      expectedSeq: 8,
+      profileName: 'coder',
+      model: 'example/model',
+    });
+    await api.team.applyIntegration('s1', 9);
+    expect(calls).toHaveBeenCalledWith('team', 'applyIntegration', {
+      sessionId: 's1', expectedSeq: 9,
     });
   });
 

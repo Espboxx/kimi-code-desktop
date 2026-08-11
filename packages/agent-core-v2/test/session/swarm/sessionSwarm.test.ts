@@ -10,6 +10,7 @@ import { Event } from '#/_base/event';
 import { userCancellationReason } from '#/_base/utils/abort';
 import { IAgentPermissionModeService } from '#/agent/permissionMode/permissionMode';
 import { IAgentProfileService, type ProfileData } from '#/agent/profile/profile';
+import { IAgentExecutionWorkspace, type AgentExecutionWorkspaceInput } from '#/agent/executionWorkspace/executionWorkspace';
 import { IAgentLoopService } from '#/agent/loop/loop';
 import { IAgentUserToolService } from '#/agent/userTool/userTool';
 import { IEventBus, type DomainEvent } from '#/app/event/eventBus';
@@ -55,7 +56,12 @@ import {
   type AgentSpawnAttemptOptions,
   type QueuedAgentRunTask,
 } from '#/session/swarm/agentRunBatch';
-import { ISessionSwarmService, type SessionSwarmSpawnTask, type SessionSwarmTask } from '#/session/swarm/sessionSwarm';
+import {
+  ISessionSwarmService,
+  type SessionSwarmResumeTask,
+  type SessionSwarmSpawnTask,
+  type SessionSwarmTask,
+} from '#/session/swarm/sessionSwarm';
 import { Error2 } from '#/_base/errors/errors';
 import { ConfigErrors } from '#/app/config/errors';
 import { SessionSwarmService } from '#/session/swarm/sessionSwarmService';
@@ -1159,6 +1165,39 @@ describe('SessionSwarmService metadata compatibility', () => {
     );
   });
 
+  it('applies an explicit workspace and profile rebind before resuming a child', async () => {
+    agents['agent-existing'] = {
+      labels: { parentAgentId: 'main' },
+    };
+    const child = agentHandle('agent-existing', lifecycle, eventBus, {
+      profileName: 'explore',
+      modelAlias: 'provider/old',
+    });
+    handles.set('agent-existing', child);
+    const task: SessionSwarmTask = {
+      ...resumeSessionTask('agent-existing'),
+      kind: 'resume',
+      executionWorkspace: {
+        workDir: '/team/task-new',
+        access: 'write',
+        confined: true,
+        additionalDirs: [],
+      },
+      rebind: { profileName: 'coder', model: 'provider/new' },
+    };
+
+    await expect(ix.get(ISessionSwarmService).run({
+      callerAgentId: 'main',
+      tasks: [task],
+    })).resolves.toMatchObject([{ status: 'completed', agentId: 'agent-existing' }]);
+
+    expect(child.accessor.get(IAgentExecutionWorkspace).configure).toHaveBeenCalledWith(task.executionWorkspace);
+    expect(child.accessor.get(IAgentProfileService).data()).toMatchObject({
+      profileName: 'coder',
+      modelAlias: 'provider/new',
+    });
+  });
+
   it('prefers the spawn task binding over the caller model', async () => {
     const service = ix.get(ISessionSwarmService);
     const spawnTask: SessionSwarmSpawnTask = {
@@ -1382,7 +1421,7 @@ function spawnSessionTask(swarmItem?: string): SessionSwarmSpawnTask {
   };
 }
 
-function resumeSessionTask(agentId: string): SessionSwarmTask {
+function resumeSessionTask(agentId: string): SessionSwarmResumeTask {
   return {
     kind: 'resume',
     data: {},
@@ -1464,6 +1503,7 @@ function agentHandle(
     setMode: () => {},
     onDidChangeMode: Event.None,
   } as IAgentPermissionModeService;
+  const executionWorkspace = executionWorkspaceService();
   return {
     id,
     kind: LifecycleScope.Agent,
@@ -1472,6 +1512,7 @@ function agentHandle(
         const service = services.get(serviceId);
         if (service !== undefined) return service;
         if (serviceId === IAgentProfileService) return profile;
+        if (serviceId === IAgentExecutionWorkspace) return executionWorkspace;
         if (serviceId === IAgentPermissionModeService) return permissionMode;
         if (serviceId === IAgentLoopService) {
           return {
@@ -1498,9 +1539,32 @@ function profileService(data: ProfileData): IAgentProfileService {
     update: (changed) => {
       current = { ...current, ...changed };
     },
+    bind: async (input) => {
+      current = {
+        ...current,
+        profileName: input.profile,
+        modelAlias: input.model ?? current.modelAlias,
+        thinkingLevel: input.thinking ?? current.thinkingLevel,
+      };
+    },
+    refreshSystemPrompt: async () => {},
     republishStatus: () => {},
     getEffectiveThinkingLevel: () => current.thinkingLevel,
   } as IAgentProfileService;
+}
+
+function executionWorkspaceService(): IAgentExecutionWorkspace {
+  return {
+    _serviceBrand: undefined,
+    workDir: '/repo',
+    access: 'write',
+    confined: false,
+    additionalDirs: [],
+    resolve: (path) => path,
+    isWithin: () => true,
+    assertAllowed: (path) => path,
+    configure: vi.fn((_input: AgentExecutionWorkspaceInput) => true),
+  };
 }
 
 function userToolServiceStub(): IAgentUserToolService {

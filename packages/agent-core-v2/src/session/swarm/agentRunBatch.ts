@@ -28,6 +28,8 @@ export interface AgentRunAttemptOptions {
   readonly onReady?: () => void;
   readonly suppressRateLimitFailureEvent?: boolean;
   readonly onAgentBound?: (agentId: string) => Promise<void>;
+  readonly executionWorkspace?: import('#/agent/executionWorkspace/executionWorkspace').AgentExecutionWorkspaceInput;
+  readonly rebind?: { readonly profileName: string; readonly model?: string };
 }
 
 export interface AgentSpawnAttemptOptions extends AgentRunAttemptOptions {
@@ -293,6 +295,8 @@ export class AgentRunBatch<T> {
       },
       suppressRateLimitFailureEvent: true,
       onAgentBound: task.onAgentBound,
+      executionWorkspace: task.executionWorkspace,
+      rebind: task.kind === 'resume' ? task.rebind : undefined,
     };
 
     let handle: AgentRunAttemptHandle;

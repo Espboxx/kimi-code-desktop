@@ -81,7 +81,7 @@ import { IAgentLifecycleService } from '#/session/agentLifecycle/agentLifecycle'
 import { isSubagentMeta, subagentLabels, subagentParentAgentId } from '#/session/agentLifecycle/subagentMetadata';
 import { ISessionProcessRunner } from '#/session/process/processRunner';
 import { ISessionMetadata } from '#/session/sessionMetadata/sessionMetadata';
-import { ISessionWorkspaceContext } from '#/session/workspaceContext/workspaceContext';
+import { IAgentExecutionWorkspace } from '#/agent/executionWorkspace/executionWorkspace';
 
 import { emitAgentRunSpawned, mirrorAgentRun } from '#/session/subagent/mirrorAgentRun';
 import { ISessionSubagentService } from '#/session/subagent/subagent';
@@ -139,7 +139,7 @@ export class SubagentTool implements ISubagentTool {
     @IAgentProfileService private readonly profile: IAgentProfileService,
     @IAgentToolPolicyService private readonly toolPolicy: IAgentToolPolicyService,
     @IAgentToolRegistryService private readonly toolRegistry: IAgentToolRegistryService,
-    @ISessionWorkspaceContext private readonly workspace: ISessionWorkspaceContext,
+    @IAgentExecutionWorkspace private readonly workspace: IAgentExecutionWorkspace,
     @ISessionProcessRunner private readonly processRunner: ISessionProcessRunner,
     @ISessionMetadata private readonly sessionMetadata: ISessionMetadata,
     @ILogService private readonly log: ILogService,
@@ -329,6 +329,12 @@ export class SubagentTool implements ISubagentTool {
             thinking: binding.thinking,
           },
           labels: subagentLabels(this.callerAgentId),
+          executionWorkspace: {
+            workDir: this.workspace.workDir,
+            access: this.workspace.access,
+            confined: this.workspace.confined,
+            additionalDirs: this.workspace.additionalDirs,
+          },
         });
       } catch (error) {
         throw wrapSubagentModelError(error, binding.model, own.modelAlias, this.config);

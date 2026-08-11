@@ -119,7 +119,7 @@ import { IHostClock } from '#/os/interface/hostClock';
 import { IHostFileSystem } from '#/os/interface/hostFileSystem';
 import { ISessionContext } from '#/session/sessionContext/sessionContext';
 import type { ToolSource } from '#/tool/toolContract';
-import { ISessionWorkspaceContext } from '#/session/workspaceContext/workspaceContext';
+import { IAgentExecutionWorkspace } from '#/agent/executionWorkspace/executionWorkspace';
 import { subagentDisplayModel } from '#/session/subagent/configSection';
 import { ISessionInstructionsProvider } from '#/session/sessionInstructions/instructionsProvider';
 import { ISessionSkillCatalog } from '#/session/sessionSkillCatalog/skillCatalog';
@@ -254,7 +254,7 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
     @IHostFileSystem private readonly fs: IHostFileSystem,
     @ISessionContext private readonly sessionContext: ISessionContext,
     @IBootstrapService private readonly bootstrap: IBootstrapService,
-    @ISessionWorkspaceContext private readonly workspace: ISessionWorkspaceContext,
+    @IAgentExecutionWorkspace private readonly workspace: IAgentExecutionWorkspace,
     @ISessionAgentProfileCatalog private readonly catalog: ISessionAgentProfileCatalog,
     @ISessionSkillCatalog private readonly skillCatalog: ISessionSkillCatalog,
     @ISessionInstructionsProvider private readonly instructions: ISessionInstructionsProvider,
@@ -384,7 +384,7 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
       agentsMdPaths,
       disallowedTools: snapshot.disallowedTools ?? [],
     });
-    this.agentsMdReminder.seedInjected(agentsMdPaths, this.sessionContext.cwd);
+    this.agentsMdReminder.seedInjected(agentsMdPaths, this.workspace.workDir);
   }
 
   async bind(input: BindAgentInput): Promise<void> {
@@ -556,7 +556,7 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
   private seedAgentsMdReminder(context: SystemPromptContext): void {
     this.agentsMdReminder.seedInjected(
       context.agentsMdPaths ?? [],
-      context.cwd ?? this.sessionContext.cwd,
+      context.cwd ?? this.workspace.workDir,
     );
   }
 
@@ -943,7 +943,7 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
     const preloadedAgentsMd = await this.workspaceInstructionsSnapshot();
     const base = await prepareSystemPromptContext(
       { fs: this.fs, homeDir: this.env.homeDir },
-      this.sessionContext.cwd,
+      this.workspace.workDir,
       this.bootstrap.homeDir,
       {
         additionalDirs: options?.additionalDirs ?? this.workspace.additionalDirs,
@@ -956,7 +956,7 @@ export class AgentProfileService extends Disposable implements IAgentProfileServ
     const timeZone = this.clock.timeZone();
     return {
       ...base,
-      cwd: this.sessionContext.cwd,
+      cwd: this.workspace.workDir,
       osKind: this.env.osKind,
       shellName: this.env.shellName,
       shellPath: this.env.shellPath,

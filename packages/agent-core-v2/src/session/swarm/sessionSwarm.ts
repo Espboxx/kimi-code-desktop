@@ -7,6 +7,7 @@
  */
 
 import type { TokenUsage } from '#/kosong/contract/usage';
+import type { AgentExecutionWorkspaceInput } from '#/agent/executionWorkspace/executionWorkspace';
 
 import { createDecorator, type ServiceIdentifier } from '#/_base/di/instantiation';
 
@@ -23,6 +24,7 @@ type SessionSwarmTaskBase<T> = {
   readonly timeout?: number;
   readonly signal?: AbortSignal;
   readonly onAgentBound?: (agentId: string) => Promise<void>;
+  readonly executionWorkspace?: AgentExecutionWorkspaceInput;
 };
 
 export type SessionSwarmSpawnTask<T = unknown> = SessionSwarmTaskBase<T> & {
@@ -34,6 +36,10 @@ export type SessionSwarmSpawnTask<T = unknown> = SessionSwarmTaskBase<T> & {
 export type SessionSwarmResumeTask<T = unknown> = SessionSwarmTaskBase<T> & {
   readonly kind: 'resume';
   readonly resumeAgentId: string;
+  readonly rebind?: {
+    readonly profileName: string;
+    readonly model?: string;
+  };
 };
 
 export type SessionSwarmTask<T = unknown> = SessionSwarmSpawnTask<T> | SessionSwarmResumeTask<T>;
@@ -70,6 +76,7 @@ export interface ISessionSwarmService {
   launch<T>(args: SessionSwarmRunArgs<T>): SessionSwarmLaunchReceipt<T>;
   run<T>(args: SessionSwarmRunArgs<T>): Promise<readonly SessionSwarmRunResult<T>[]>;
   cancel(args: { readonly callerAgentId: string }): void;
+  cancelBatch?(args: { readonly batchId: string }): void;
   settle(): Promise<void>;
 }
 

@@ -25,6 +25,10 @@ import {
   type PermissionRule,
 } from '#/agent/permissionRules/permissionRules';
 import { IAgentScopeContext, makeAgentScopeContext } from '#/agent/scopeContext/scopeContext';
+import {
+  IAgentExecutionWorkspace,
+  type IAgentExecutionWorkspace as AgentExecutionWorkspace,
+} from '#/agent/executionWorkspace/executionWorkspace';
 import { IGitService } from '#/app/git/git';
 import { findGitWorkTree } from '#/app/git/workTree';
 import { ITelemetryService } from '#/app/telemetry/telemetry';
@@ -65,6 +69,7 @@ describe('AgentPermissionPolicyService chain', () => {
           sessionApprovalRulePatterns: () => sessionApprovalRulePatterns,
         }));
         reg.defineInstance(ISessionWorkspaceContext, workspace.stub);
+        reg.defineInstance(IAgentExecutionWorkspace, workspace.stub);
         reg.defineInstance(IHostEnvironment, kaosStub());
         reg.defineInstance(ITelemetryService, recordingTelemetry([]));
         reg.definePartialInstance(IGitService, { findWorkTree: async () => null });
@@ -203,6 +208,7 @@ describe('AgentPermissionPolicyService git cwd write approval', () => {
         );
         reg.definePartialInstance(IAgentPermissionRulesService, permissionRulesStub());
         reg.defineInstance(ISessionWorkspaceContext, workspace.stub);
+        reg.defineInstance(IAgentExecutionWorkspace, workspace.stub);
         reg.defineInstance(IHostEnvironment, kaosStub());
         reg.defineInstance(ITelemetryService, recordingTelemetry([]));
         reg.definePartialInstance(IGitService, {
@@ -485,20 +491,23 @@ function stringArg(
 }
 
 function workspaceStub(initialWorkDir: string): {
-  readonly stub: ISessionWorkspaceContext;
+  readonly stub: AgentExecutionWorkspace;
   addAdditionalDir(dir: string): void;
 } {
   let additionalDirs: string[] = [];
-  const stub: ISessionWorkspaceContext = {
+  const stub: AgentExecutionWorkspace = {
     _serviceBrand: undefined,
     workDir: initialWorkDir,
+    access: 'write',
+    confined: false,
     get additionalDirs() {
       return additionalDirs;
     },
     resolve: (path) => path,
-    isWithin: () => true,
-    assertAllowed: (path) => path,
-  };
+        isWithin: () => true,
+        assertAllowed: (path) => path,
+        configure: () => false,
+      };
   return {
     stub,
     addAdditionalDir: (dir) => {

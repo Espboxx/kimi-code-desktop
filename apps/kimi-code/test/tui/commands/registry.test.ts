@@ -6,6 +6,7 @@ import {
   addDirArgumentCompletions,
   sortSlashCommands,
   swarmArgumentCompletions,
+  teamArgumentCompletions,
   type KimiSlashCommand,
 } from '#/tui/commands/index';
 import { describe, expect, it } from 'vitest';
@@ -73,6 +74,14 @@ describe('built-in slash command registry', () => {
     expect(values('on')).toBeNull();
     expect(values('off')).toBeNull();
     expect(values('Ship feature X')).toBeNull();
+  });
+
+  it('offers Team control argument completions', () => {
+    const items = teamArgumentCompletions('re');
+
+    expect(items?.map((item) => item.value)).toEqual(['resume', 'retry', 'reassign']);
+    expect(teamArgumentCompletions('apply')).toBeNull();
+    expect(teamArgumentCompletions('unknown')).toBeNull();
   });
 
   it('offers add-dir list and directory argument completions', () => {
@@ -172,6 +181,7 @@ describe('built-in slash command registry', () => {
         'settings',
         'status',
         'theme',
+        'team',
         'title',
         'undo',
         'usage',

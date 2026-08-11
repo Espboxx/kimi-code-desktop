@@ -9,7 +9,23 @@ import { toInputJsonSchema } from '#/tool/input-schema';
 import { ToolAccesses, type AgentTool, type ToolExecution } from '#/tool/toolContract';
 
 import { ISessionCollaborationService } from '../collaboration';
-import type { TeamAssignment, TeamMember } from '../types';
+import type { TeamMember } from '../types';
+
+interface StatusAssignment {
+  readonly id: string;
+  readonly batchId: string;
+  readonly taskKey?: string;
+  readonly parentTaskId?: string;
+  readonly parentAssignmentId?: string;
+  readonly dependsOn?: readonly string[];
+  readonly agentId?: string;
+  readonly displayName?: string;
+  readonly profileName: string;
+  readonly description: string;
+  readonly item?: string;
+  readonly status: string;
+  readonly error?: string;
+}
 
 export const TeamStatusInputSchema = z.object({}).strict();
 export type TeamStatusInput = z.infer<typeof TeamStatusInputSchema>;
@@ -33,21 +49,33 @@ export class TeamStatusTool implements ITeamStatusTool {
       approvalRule: this.name,
       execute: async () => {
         const snapshot = await this.collaboration.snapshot();
-        const assignments = snapshot.assignments.map(summarizeAssignment);
+        const source = snapshot.assignments as readonly StatusAssignment[];
+        const assignments = source.map(summarizeAssignment);
         const memberAvailability = snapshot.members.map((member) =>
-          summarizeMember(member, snapshot.assignments),
+          summarizeMember(member, source),
         );
+        const runtime = snapshot.protocolVersion === 2
+          ? {
+              scheduler: snapshot.scheduler,
+              budget: snapshot.budget,
+              integration: snapshot.integration,
+            }
+          : {};
         return {
           output: JSON.stringify({
             state: snapshot.state,
+            protocolVersion: snapshot.protocolVersion,
             team: snapshot.team,
             latestSeq: snapshot.latestSeq,
             members: memberAvailability,
             reusableMembers: memberAvailability.filter(
               (member) => member.availability === 'reusable',
             ),
-            batches: snapshot.batches.filter((batch) => batch.status === 'running'),
+            batches: snapshot.batches.filter((batch) =>
+              ['running', 'paused', 'interrupted'].includes(batch.status),
+            ),
             assignments,
+            ...runtime,
           }, null, 2),
         };
       },
@@ -55,10 +83,10 @@ export class TeamStatusTool implements ITeamStatusTool {
   }
 }
 
-function summarizeMember(member: TeamMember, assignments: readonly TeamAssignment[]) {
+function summarizeMember(member: TeamMember, assignments: readonly StatusAssignment[]) {
   const memberAssignments = assignments.filter((assignment) => assignment.agentId === member.agentId);
   const activeAssignment = memberAssignments.findLast((assignment) =>
-    assignment.status === 'queued' || assignment.status === 'running',
+    ['queued', 'ready', 'running', 'awaiting_validation', 'integrating'].includes(assignment.status),
   );
   const latestAssignment = memberAssignments.at(-1);
   const availability = member.role === 'leader'
@@ -79,7 +107,10 @@ function summarizeMember(member: TeamMember, assignments: readonly TeamAssignmen
 function summarizeAssignment({
   id,
   batchId,
+  taskKey,
+  parentTaskId,
   parentAssignmentId,
+  dependsOn,
   agentId,
   displayName,
   profileName,
@@ -87,11 +118,13 @@ function summarizeAssignment({
   item,
   status,
   error,
-}: TeamAssignment) {
+}: StatusAssignment) {
   return {
     id,
+    taskKey,
     batchId,
-    parentAssignmentId,
+    parentTaskId: parentTaskId ?? parentAssignmentId,
+    dependsOn,
     agentId,
     displayName,
     profileName,

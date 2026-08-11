@@ -6,7 +6,7 @@ Use `resume_agent_ids` when new work clearly continues an existing subagent's ea
 
 In Team Mode, always use AgentSwarm for new teammates, including a few differently shaped tasks. Every new `items` entry must be an object containing `item`, a short unique `display_name`, the most suitable existing `subagent_type`, and an exact configured `model` alias when multiple models are advertised. Read each profession's `Introduction` and `Best for` guidance before choosing; do not route by profile name alone. Choose the profession and model independently for each task from its requirements; the batch-level model is not a substitute. If no existing profile fits, call `AgentProfileCreate` first and then reference its saved profile name. Outside Team Mode, string items and the batch-level `subagent_type` remain supported.
 
-Each of these is enforced — a violation is rejected before any subagent starts: provide at least 2 `items` unless you pass `resume_agent_ids`; whenever `items` are present, `prompt_template` is required and must contain `{{item}}`; and the filled-in prompts must be distinct (two items that expand to the same prompt are rejected).
+Each of these is enforced — a violation is rejected before any subagent starts: outside Team Mode, provide at least 2 `items` unless you pass `resume_agent_ids`; Team Mode may launch one durable teammate; whenever `items` are present, `prompt_template` is required and must contain `{{item}}`; and the filled-in prompts must be distinct (two items that expand to the same prompt are rejected).
 
 Use enough subagents to keep the work focused and parallel. AgentSwarm supports up to 128 subagents, and launches are queued automatically, so it is safe to split large tasks into many clear, independent items.
 

@@ -273,6 +273,41 @@ describe('AgentLLMRequesterService measured anchors', () => {
   });
 });
 
+describe('AgentLLMRequesterService request boundary hooks', () => {
+  it('runs the budget boundary before every provider attempt and records a successful completion', async () => {
+    const calls = { value: 0 };
+    const { service } = createService(createRequester(calls), {
+      project: (messages: readonly ContextMessage[]) => messages,
+      projectStrict: (messages: readonly ContextMessage[]) => messages,
+    });
+    const events: string[] = [];
+    service.hooks.onWillRequest.register('test', async (_context, next) => {
+      events.push('will');
+      await next();
+    });
+    service.hooks.onDidRequest.register('test', async (_context, next) => {
+      events.push('did');
+      await next();
+    });
+
+    await service.request();
+
+    expect(calls.value).toBe(2);
+    expect(events).toEqual(['will', 'will', 'did']);
+  });
+
+  it('does not start the provider request when a boundary guard rejects it', async () => {
+    const calls = { value: 0 };
+    const { service } = createService(createRequester(calls, null), undefined);
+    service.hooks.onWillRequest.register('test', () => {
+      throw new Error('budget exhausted');
+    });
+
+    await expect(service.request()).rejects.toThrow('budget exhausted');
+    expect(calls.value).toBe(0);
+  });
+});
+
 describe('AgentLLMRequesterService Anthropic effort diagnostics', () => {
   it('warns and sends when the effort is not listed by the model', async () => {
     const calls = { value: 0 };

@@ -99,6 +99,7 @@ import {
 import { isAbortError } from '#/_base/utils/abort';
 import { ErrorCodes, Error2, unwrapErrorCause } from '#/errors';
 import { retryErrorFields } from '#/_base/utils/retry';
+import { createHooks } from '#/hooks';
 
 const EMPTY_TOOL_PARAMETERS: Record<string, unknown> = {
   type: 'object',
@@ -164,6 +165,15 @@ export const llmRequesterEmittedThinkingEffortWarningsKey = defineState<Set<stri
 
 export class AgentLLMRequesterService implements IAgentLLMRequesterService {
   declare readonly _serviceBrand: undefined;
+
+  readonly hooks = createHooks<{
+    onWillRequest: { readonly source?: AgentLLMRequestSource; readonly signal?: AbortSignal };
+    onDidRequest: {
+      readonly source?: AgentLLMRequestSource;
+      readonly signal?: AbortSignal;
+      readonly finish: AgentLLMRequestFinish;
+    };
+  }, 'onWillRequest' | 'onDidRequest'>(['onWillRequest', 'onDidRequest']);
 
   constructor(
     @IAgentContextMemoryService private readonly context: IAgentContextMemoryService,
@@ -352,6 +362,7 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
     };
 
     const run = async (projection: RequestProjection): Promise<AgentLLMRequestFinish> => {
+      await this.hooks.onWillRequest.run({ source: request.source, signal });
       onRequestTrace(undefined);
       const projected = requestInput(projection);
       const input = {
@@ -432,7 +443,7 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
       }
       this.logResponse(request.logFields, usage ?? emptyUsage(), timing);
 
-      return {
+      const completed: AgentLLMRequestFinish = {
         message,
         usage: usage ?? emptyUsage(),
         model: request.modelAlias,
@@ -442,6 +453,8 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
         timing,
         traceId: finish.traceId,
       };
+      await this.hooks.onDidRequest.run({ source: request.source, signal, finish: completed });
+      return completed;
     };
 
     const initialProjection: RequestProjection = mediaStripSnapshot !== undefined

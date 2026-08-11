@@ -21,6 +21,7 @@ import { DisposableStore } from '#/_base/di/lifecycle';
 import { createServices } from '#/_base/di/test';
 import { type EditInput, EditInputSchema } from '#/agent/tools/edit/edit';
 import { EditTool } from '#/agent/tools/edit/editTool';
+import type { IAgentExecutionWorkspace } from '#/agent/executionWorkspace/executionWorkspace';
 import { IFileEditService } from '#/app/edit/fileEdit';
 import { FileEditService } from '#/app/edit/fileEditService';
 import { IHostEnvironment } from '#/os/interface/hostEnvironment';
@@ -65,7 +66,7 @@ function createSpiedEditFs(
 function buildTool(
   fs: IHostFileSystem,
   env: IHostEnvironment,
-  workspace: ISessionWorkspaceContext,
+  workspace: IAgentExecutionWorkspace,
 ): EditTool {
   const ix = createServices(disposables, {
     additionalServices: (reg) => {

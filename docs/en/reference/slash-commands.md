@@ -53,13 +53,34 @@ Some commands are only available in the idle state. Executing these commands whi
 | `/plan clear` | — | Clear the current plan | No |
 | `/swarm on\|off` | — | Turn swarm mode on or off without sending a prompt. | Yes |
 | `/swarm <task>` | — | Turn swarm mode on, then send `<task>` as a normal prompt. If the turn completes normally, swarm mode turns off automatically. In `manual` permission mode, Kimi Code asks whether to switch to `auto` or `yolo` before starting. | No |
+| `/team [...]` | — | Activate, inspect, message, and control the current session's durable Team | Yes |
 | `/goal [...]` | — | Start or manage an autonomous goal | See below |
 
 ::: warning
 `/yolo` skips approval for regular tool calls. Please make sure you understand the potential risks before enabling it. Plan mode exit approval is not bypassed by `/yolo`; `Bash` inside Plan mode is still subject to the regular `/yolo` allow rules.
 :::
 
-## Autonomous Goal
+## Team mode
+
+Team mode coordinates a durable task graph of specialized subagents. Run `/team start` once in a session before asking the main agent to delegate Team work. For workspace isolation, validation, budgets, and restart behavior, see [Agents and sub-agents — Team mode](../customization/agents.md#team-mode).
+
+| Command | Action | Availability |
+| --- | --- | --- |
+| `/team` or `/team status` | Display the Team protocol, scheduler, policy, budget, integration, and task state | Always available |
+| `/team start [<key=value> ...]` | Activate Team v2 for this session. Policy keys are `concurrency`, `members`, `depth`, `executionRetries`, `validationRetries`, `tokens`, and `duration` | Always available |
+| `/team policy <key=value> [...]` | Update one or more policy values. `duration` accepts milliseconds or an `ms`, `s`, `m`, or `h` suffix | Always available |
+| `/team pause [<reason>]` | Pause new Team scheduling without deleting state | Always available |
+| `/team resume` | Resume scheduling, including interrupted tasks restored after a restart | Always available |
+| `/team cancel <task-id\|task-key>` | Cancel a Team task | Always available |
+| `/team retry <task-id\|task-key>` | Retry a failed, cancelled, or interrupted task | Always available |
+| `/team reassign <task-id\|task-key> [profile=<name>] [model=<alias>]` | Change the agent profile, model, or both before execution or after an unfinished task stops; provide at least one option | Always available |
+| `/team message <agent-id\|display-name\|all> <message>` | Send a direct message to one member or broadcast to the Team | Always available |
+| `/team artifact <artifact-id>` | Display a Team report, patch, validation result, or other artifact | Always available |
+| `/team preview` | Display the aggregate integration Diff without changing the main worktree | Always available |
+| `/team apply` | Preview the aggregate Diff, then open an explicit confirmation before applying it once | Always available |
+| `/team discard` | Discard the pending aggregate integration | Always available |
+
+## Autonomous goal
 
 `/goal` starts or manages goal mode: a persistent objective that Kimi Code works toward across automatically continuing turns. For usage guidance and examples, see [Goals](../guides/goals.md).
 

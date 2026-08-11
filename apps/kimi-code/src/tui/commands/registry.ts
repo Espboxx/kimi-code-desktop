@@ -26,6 +26,22 @@ const SWARM_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
   { value: 'off', description: 'Turn swarm mode off' },
 ];
 
+const TEAM_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
+  { value: 'status', description: 'Inspect the Team scheduler, tasks, budget, and integration' },
+  { value: 'start', description: 'Activate Team v2 for this session' },
+  { value: 'policy', description: 'Update Team concurrency, retries, or budget' },
+  { value: 'pause', description: 'Pause Team scheduling' },
+  { value: 'resume', description: 'Resume Team scheduling' },
+  { value: 'cancel', description: 'Cancel a Team task by id or key' },
+  { value: 'retry', description: 'Retry a failed, cancelled, or interrupted task' },
+  { value: 'reassign', description: 'Change a task profile or model' },
+  { value: 'message', description: 'Send a broadcast or direct Team message' },
+  { value: 'artifact', description: 'Inspect a Team artifact' },
+  { value: 'preview', description: 'Preview the aggregate integration diff' },
+  { value: 'apply', description: 'Preview and confirm one aggregate apply' },
+  { value: 'discard', description: 'Discard the pending aggregate integration' },
+];
+
 const ADD_DIR_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
   { value: 'list', description: 'Show configured additional workspace directories' },
 ];
@@ -47,6 +63,11 @@ export function goalArgumentCompletions(argumentPrefix: string): AutocompleteIte
 /** Argument autocompletion for the `/swarm` command (subcommands). */
 export function swarmArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
   return completeLeadingArg(SWARM_ARG_COMPLETIONS, argumentPrefix);
+}
+
+/** Argument autocompletion for the `/team` command (subcommands). */
+export function teamArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
+  return completeLeadingArg(TEAM_ARG_COMPLETIONS, argumentPrefix);
 }
 
 /** Argument autocompletion for the `/add-dir` command. */
@@ -176,6 +197,15 @@ export const BUILTIN_SLASH_COMMANDS = [
     argumentHint: '[on|off] | <task>',
     completeArgs: swarmArgumentCompletions,
     availability: 'idle-only',
+  },
+  {
+    name: 'team',
+    aliases: [],
+    description: 'Inspect and control the session Team',
+    priority: 100,
+    argumentHint: '[status|start|pause|resume|cancel|retry|reassign|message|preview|apply]',
+    completeArgs: teamArgumentCompletions,
+    availability: 'always',
   },
   {
     name: 'model',

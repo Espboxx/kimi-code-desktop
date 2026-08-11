@@ -9,7 +9,7 @@
  * Collaborators injected via constructor:
  *   - `runner`     — `ISessionProcessRunner`, spawns the shell process
  *   - `env`        — `IHostEnvironment`, host OS / shell probe (osKind / shellName / shellPath)
- *   - `ctx`        — `ISessionContext`, session cwd used to render the shell prompt
+ *   - `workspace`  — `IAgentExecutionWorkspace`, per-agent cwd and access boundary
  *   - `tasks`      — `IAgentTaskService`, owns foreground/detached task
  *                    lifecycle (timeouts, detach, user interrupt)
  *   - `toolPolicy` — `IAgentToolPolicyService`, gates background execution on
@@ -44,7 +44,7 @@ import { IAgentTaskService } from '#/agent/task/task';
 import { resolveAgentTaskConfig } from '#/agent/task/configSection';
 import { IConfigService } from '#/app/config/config';
 import { IHostEnvironment } from '#/os/interface/hostEnvironment';
-import { ISessionContext } from '#/session/sessionContext/sessionContext';
+import { IAgentExecutionWorkspace } from '#/agent/executionWorkspace/executionWorkspace';
 import { ISessionProcessRunner, type IProcess } from '#/session/process/processRunner';
 import { IAgentToolPolicyService } from '#/agent/toolPolicy/toolPolicy';
 import type { ExecutableToolResult, ToolExecution, ToolUpdate } from '#/tool/toolContract';
@@ -134,7 +134,7 @@ export class BashTool implements IBashTool {
   constructor(
     @ISessionProcessRunner private readonly runner: ISessionProcessRunner,
     @IHostEnvironment private readonly env: IHostEnvironment,
-    @ISessionContext private readonly ctx: ISessionContext,
+    @IAgentExecutionWorkspace private readonly workspace: IAgentExecutionWorkspace,
     @IAgentTaskService private readonly tasks: IAgentTaskService,
     @IAgentToolPolicyService private readonly toolPolicy: IAgentToolPolicyService,
     @IConfigService private readonly config: IConfigService,
@@ -178,7 +178,7 @@ export class BashTool implements IBashTool {
       display: {
         kind: 'command',
         command: args.command,
-        cwd: args.cwd ?? this.ctx.cwd,
+        cwd: args.cwd ?? this.workspace.workDir,
         description: args.description,
         language: 'bash',
       },
@@ -201,6 +201,7 @@ export class BashTool implements IBashTool {
       NO_COLOR: '1',
       TERM: 'dumb',
       GIT_TERMINAL_PROMPT: process.env['GIT_TERMINAL_PROMPT'] ?? '0',
+      GIT_OPTIONAL_LOCKS: this.workspace.access === 'read' ? '0' : process.env['GIT_OPTIONAL_LOCKS'] ?? '1',
       SHELL: this.env.shellPath,
     };
 
@@ -219,7 +220,13 @@ export class BashTool implements IBashTool {
     const startsInBackground = args.run_in_background === true;
     const foregroundTimeoutMs = normalizeTimeoutMs(args.timeout, false);
     const command = this.isWindowsBash ? rewriteWindowsNullRedirect(args.command) : args.command;
-    const effectiveCwd = args.cwd ?? this.ctx.cwd;
+    const effectiveCwd = this.workspace.assertAllowed(args.cwd ?? this.workspace.workDir, 'execute');
+    if (this.workspace.access === 'read' && !isReadOnlyBashCommand(command)) {
+      return {
+        isError: true,
+        output: 'This Team task has a read-only workspace. Delegate mutating commands to a write-capable task.',
+      };
+    }
     const description = startsInBackground ? args.description!.trim() : foregroundDescription(args);
     const timeoutMs = startsInBackground
       ? args.disable_timeout
@@ -503,4 +510,31 @@ const WINDOWS_NUL_REDIRECT = /(\d?&?>+\s*)[Nn][Uu][Ll](?=\s|$|[|&;)\n])/g;
 
 function rewriteWindowsNullRedirect(command: string): string {
   return command.replace(WINDOWS_NUL_REDIRECT, '$1/dev/null');
+}
+
+function isReadOnlyBashCommand(command: string): boolean {
+  if (
+    /[`$]|[<>]\(|(^|[^<])>{1,2}|\b(rm|mv|cp|mkdir|rmdir|touch|chmod|chown|tee|dd|truncate|install|patch)\b/u.test(command)
+  ) {
+    return false;
+  }
+  const segments = command.split(/(?:&&|\|\||[;|\n])/u).map((segment) => segment.trim()).filter(Boolean);
+  const readCommands = new Set([
+    'cat', 'cut', 'diff', 'du', 'echo', 'fd', 'git', 'grep',
+    'head', 'ls', 'printf', 'pwd', 'rg', 'sort', 'stat', 'tail', 'test',
+    'tree', 'type', 'uniq', 'wc', 'which',
+  ]);
+  return segments.every((segment) => {
+    const words = segment.replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=[^\s]+\s+)*/u, '').split(/\s+/u);
+    const executable = words[0]?.replace(/^.*\//u, '');
+    if (executable === undefined || !readCommands.has(executable)) return false;
+    if (executable !== 'git') return true;
+    if (words.slice(1).some((word) => /^-(?:C|c)(?:$|[^-])|^--(?:git-dir|work-tree|namespace|exec-path|config-env)(?:=|$)/u.test(word))) {
+      return false;
+    }
+    const subcommand = words.find((word, index) => index > 0 && !word.startsWith('-'));
+    return subcommand !== undefined && new Set([
+      'diff', 'grep', 'log', 'ls-files', 'rev-parse', 'show', 'status',
+    ]).has(subcommand);
+  });
 }

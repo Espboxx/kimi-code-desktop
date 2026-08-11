@@ -40,7 +40,7 @@ import { EventBusService } from '#/app/event/eventBusService';
 import type { IAgentProfileService } from '#/agent/profile/profile';
 import type { IModelCatalog } from '#/kosong/model/catalog';
 import type { ModelRequester } from '#/kosong/model/modelRequester';
-import type { ISessionWorkspaceContext } from '#/session/workspaceContext/workspaceContext';
+import type { IAgentExecutionWorkspace } from '#/agent/executionWorkspace/executionWorkspace';
 import type { WorkspaceConfig } from '#/tool/path-access';
 import { sniffImageDimensions } from '#/agent/media/file-type';
 
@@ -842,8 +842,10 @@ describe('AgentMediaToolsRegistrar', () => {
     } as unknown as IModelCatalog;
     const workspaceCtx = {
       workDir: '/workspace',
+      access: 'write',
+      confined: false,
       additionalDirs: [],
-    } as unknown as ISessionWorkspaceContext;
+    } as unknown as IAgentExecutionWorkspace;
     const registrar = new AgentMediaToolsRegistrar(
       registry,
       profile,

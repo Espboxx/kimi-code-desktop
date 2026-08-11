@@ -305,6 +305,49 @@ export interface GoalStatusChangedEvent extends GoalBudgetProperties {
   wall_clock_ms: number;
 }
 
+export interface TeamStartedEvent {
+  max_concurrency: number;
+  max_members: number;
+  max_delegation_depth: number;
+  execution_retries: number;
+  validation_retries: number;
+  has_token_budget: boolean;
+  has_wall_clock_budget: boolean;
+}
+
+export interface TeamBatchCreatedEvent {
+  task_count: number;
+  write_task_count: number;
+  validation_task_count: number;
+  dependency_edge_count: number;
+}
+
+export interface TeamTaskSettledEvent {
+  status: 'completed' | 'failed' | 'cancelled' | 'interrupted';
+  workspace_mode: 'shared_readonly' | 'isolated_write';
+  validation_mode: 'none' | 'required';
+  execution_attempt_count: number;
+  validation_attempt_count: number;
+}
+
+export interface TeamBudgetExhaustedEvent {
+  reason: 'tokens' | 'duration';
+  tokens_used: number;
+  wall_clock_ms: number;
+}
+
+export interface TeamControlEvent {
+  action:
+    | 'policy_updated'
+    | 'paused'
+    | 'resumed'
+    | 'task_cancelled'
+    | 'task_retried'
+    | 'task_reassigned'
+    | 'integration_applied'
+    | 'integration_discarded';
+}
+
 export interface ToolCallDedupDetectedEvent {
   turn_id?: number;
   step_no: number;
@@ -767,6 +810,56 @@ export const telemetryEventDefinitions = {
       has_token_budget: 'Whether a token budget was set',
       has_turn_budget: 'Whether a turn budget was set',
       has_wall_clock_budget: 'Whether a wall-clock budget was set',
+    },
+  }),
+  team_started: defineTelemetryEvent<TeamStartedEvent>({
+    owner: 'kimi-code',
+    comment: 'A durable Team is activated for a session.',
+    properties: {
+      max_concurrency: 'Maximum number of Team tasks allowed to run concurrently',
+      max_members: 'Maximum number of Team members allowed in the session',
+      max_delegation_depth: 'Maximum nested Team delegation depth',
+      execution_retries: 'Configured number of execution retries per task',
+      validation_retries: 'Configured number of validation retries per task',
+      has_token_budget: 'Whether the Team has a token budget',
+      has_wall_clock_budget: 'Whether the Team has a wall-clock budget',
+    },
+  }),
+  team_batch_created: defineTelemetryEvent<TeamBatchCreatedEvent>({
+    owner: 'kimi-code',
+    comment: 'A durable Team task batch is accepted.',
+    properties: {
+      task_count: 'Number of tasks in the batch',
+      write_task_count: 'Number of tasks using isolated write workspaces',
+      validation_task_count: 'Number of tasks requiring independent validation',
+      dependency_edge_count: 'Number of task dependency edges in the batch',
+    },
+  }),
+  team_task_settled: defineTelemetryEvent<TeamTaskSettledEvent>({
+    owner: 'kimi-code',
+    comment: 'A Team task reaches a terminal state.',
+    properties: {
+      status: 'Terminal task status',
+      workspace_mode: 'Workspace isolation mode used by the task',
+      validation_mode: 'Independent validation mode used by the task',
+      execution_attempt_count: 'Number of execution attempts recorded for the task',
+      validation_attempt_count: 'Number of validation attempts recorded for the task',
+    },
+  }),
+  team_budget_exhausted: defineTelemetryEvent<TeamBudgetExhaustedEvent>({
+    owner: 'kimi-code',
+    comment: 'A Team pauses after exhausting a configured budget.',
+    properties: {
+      reason: 'Budget boundary that stopped scheduling',
+      tokens_used: 'Total tokens consumed by the Team',
+      wall_clock_ms: 'Wall-clock time consumed by the Team in milliseconds',
+    },
+  }),
+  team_control: defineTelemetryEvent<TeamControlEvent>({
+    owner: 'kimi-code',
+    comment: 'A Team control operation completes.',
+    properties: {
+      action: 'Control operation that completed',
     },
   }),
   tool_call_dedup_detected: defineAgentTelemetryEvent<ToolCallDedupDetectedEvent>({

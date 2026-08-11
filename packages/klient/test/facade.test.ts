@@ -278,17 +278,44 @@ describe('session todos routing', () => {
 });
 
 describe('session collaboration routing', () => {
+  const snapshot = {
+    protocolVersion: 2 as const,
+    state: 'ready' as const,
+    members: [],
+    batches: [],
+    tasks: [],
+    assignments: [],
+    attempts: [],
+    artifacts: [],
+    reviews: [],
+    policy: {
+      maxConcurrency: 4,
+      maxMembers: 16,
+      maxDelegationDepth: 2,
+      executionRetries: 1,
+      validationRetries: 2,
+    },
+    scheduler: { status: 'running' as const, activeCount: 0, queuedCount: 0, updatedAt: 1 },
+    budget: {
+      startedAt: 1,
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      elapsedMs: 0,
+    },
+    integration: { status: 'idle' as const, updatedAt: 1 },
+    latestSeq: 0,
+    latestChannelSeq: 0,
+  };
+
   it('routes initialization, snapshot, history, send, and live operations through the session service', async () => {
     const channel = new FakeChannel();
     const klient = createKlientFromChannel(channel);
     const session = klient.session('s1');
-    const snapshot = {
-      state: 'ready' as const, members: [], batches: [], assignments: [], latestSeq: 0, latestChannelSeq: 0,
-    };
     channel.result = snapshot;
     await expect(session.collaboration.ensureTeam()).resolves.toEqual(snapshot);
     expect(channel.calls[0]).toEqual({
-      scope: { sessionId: 's1' }, service: 'sessionCollaborationService', method: 'ensureTeam', args: [],
+      scope: { sessionId: 's1' }, service: 'sessionCollaborationService', method: 'ensureTeam', args: [{}],
     });
     await expect(session.collaboration.snapshot()).resolves.toEqual(snapshot);
     expect(channel.calls[1]).toEqual({
@@ -307,11 +334,17 @@ describe('session collaboration routing', () => {
       body: 'Coordinate',
       clientMessageId: 'retry-1',
       attachments: message.attachments,
+      recipientAgentIds: ['agent-2'],
     }))
       .resolves.toEqual(message);
     expect(channel.calls[2]).toEqual({
       scope: { sessionId: 's1' }, service: 'sessionCollaborationService', method: 'sendUserMessage',
-      args: [{ body: 'Coordinate', clientMessageId: 'retry-1', attachments: message.attachments }],
+      args: [{
+        body: 'Coordinate',
+        clientMessageId: 'retry-1',
+        attachments: message.attachments,
+        recipientAgentIds: ['agent-2'],
+      }],
     });
 
     const operation = { version: 1 as const, type: 'message.sent' as const, seq: 2, at: 2, message };
@@ -323,6 +356,64 @@ describe('session collaboration routing', () => {
     channel.emit(0, operation);
     await tick();
     expect(seen).toEqual([operation]);
+  });
+
+  it('routes scheduler, task, artifact, and integration controls', async () => {
+    const channel = new FakeChannel();
+    const collaboration = createKlientFromChannel(channel).session('s1').collaboration;
+    channel.result = snapshot;
+
+    await collaboration.ensureTeam({ maxConcurrency: 6 });
+    await collaboration.updatePolicy({ policy: { maxMembers: 20 }, expectedSeq: 1 });
+    await collaboration.pause({ expectedSeq: 2, reason: 'inspect' });
+    await collaboration.resume({ expectedSeq: 3 });
+    await collaboration.cancelTask({ taskId: 'task-1', expectedSeq: 4 });
+    await collaboration.retryTask({ taskId: 'task-1', expectedSeq: 5 });
+    await collaboration.reassignTask({
+      taskId: 'task-1',
+      expectedSeq: 6,
+      profileName: 'coder',
+      model: 'example/model',
+    });
+    await collaboration.applyIntegration({ expectedSeq: 7 });
+    await collaboration.discardIntegration({ expectedSeq: 8 });
+
+    const artifact = {
+      artifact: {
+        id: 'artifact-1',
+        kind: 'integration_diff' as const,
+        contentRef: 'blob-1',
+        mediaType: 'text/x-diff',
+        byteLength: 4,
+        createdAt: 1,
+      },
+      dataBase64: 'ZGlmZg==',
+    };
+    channel.result = artifact;
+    await expect(collaboration.artifact({ artifactId: 'artifact-1' })).resolves.toEqual(artifact);
+    await expect(collaboration.previewIntegration()).resolves.toEqual(artifact);
+
+    expect(channel.calls.map(({ method, args }) => ({ method, args }))).toEqual([
+      { method: 'ensureTeam', args: [{ maxConcurrency: 6 }] },
+      { method: 'updatePolicy', args: [{ policy: { maxMembers: 20 }, expectedSeq: 1 }] },
+      { method: 'pause', args: [{ expectedSeq: 2, reason: 'inspect' }] },
+      { method: 'resume', args: [{ expectedSeq: 3 }] },
+      { method: 'cancelTask', args: [{ taskId: 'task-1', expectedSeq: 4 }] },
+      { method: 'retryTask', args: [{ taskId: 'task-1', expectedSeq: 5 }] },
+      {
+        method: 'reassignTask',
+        args: [{
+          taskId: 'task-1',
+          expectedSeq: 6,
+          profileName: 'coder',
+          model: 'example/model',
+        }],
+      },
+      { method: 'applyIntegration', args: [{ expectedSeq: 7 }] },
+      { method: 'discardIntegration', args: [{ expectedSeq: 8 }] },
+      { method: 'artifact', args: [{ artifactId: 'artifact-1' }] },
+      { method: 'previewIntegration', args: [] },
+    ]);
   });
 });
 
