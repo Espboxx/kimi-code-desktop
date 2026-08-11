@@ -12,7 +12,7 @@ import type {
 import { describe, expect, it, vi } from 'vitest';
 
 import type { KimiDesktopNotification } from '../shared/desktop-api';
-import { SessionRuntime, teamWakePrompt } from './session-runtime';
+import { SessionRuntime } from './session-runtime';
 
 describe('SessionRuntime interactions', () => {
   it('keeps an approval pending after invalid input and resolves it once', async () => {
@@ -311,7 +311,7 @@ describe('SessionRuntime interactions', () => {
     await runtime.close();
   });
 
-  it('posts a Team message once and wakes an idle leader through swarm', async () => {
+  it('posts a Team message once and relies on automatic delivery while the leader is idle', async () => {
     const fixture = createSessionFixture();
     const runtime = createRuntime(fixture);
     await runtime.initialize();
@@ -325,8 +325,8 @@ describe('SessionRuntime interactions', () => {
     const first = runtime.submitTeamMessage('Coordinate the implementation', 'client-1', media);
     const retry = runtime.submitTeamMessage('Coordinate the implementation', 'client-1', media);
 
-    await expect(first).resolves.toMatchObject({ wake: 'swarm', message: { channelSeq: 1 } });
-    await expect(retry).resolves.toMatchObject({ wake: 'swarm', message: { channelSeq: 1 } });
+    await expect(first).resolves.toMatchObject({ wake: 'automatic', message: { channelSeq: 1 } });
+    await expect(retry).resolves.toMatchObject({ wake: 'automatic', message: { channelSeq: 1 } });
     expect(fixture.sendTeamMessage).toHaveBeenCalledOnce();
     expect(fixture.sendTeamMessage).toHaveBeenCalledWith({
       body: 'Coordinate the implementation',
@@ -336,11 +336,12 @@ describe('SessionRuntime interactions', () => {
         url: media[0]!.displayUrl,
         name: 'diagram.png',
       }],
+      modelAttachments: [{
+        type: 'image_url',
+        url: media[0]!.url,
+      }],
     });
-    expect(fixture.swarm).toHaveBeenCalledWith([
-      { type: 'text', text: teamWakePrompt(1, 'Coordinate the implementation') },
-      { type: 'image_url', imageUrl: { url: media[0]!.url } },
-    ]);
+    expect(fixture.swarm).not.toHaveBeenCalled();
     expect(fixture.steer).not.toHaveBeenCalled();
     expect(() => runtime.submitTeamMessage('A different message', 'client-1')).toThrow(
       /reused with different content/,
@@ -354,21 +355,19 @@ describe('SessionRuntime interactions', () => {
     await runtime.close();
   });
 
-  it('posts a Team message and steers a busy leader', async () => {
+  it('relies on automatic delivery while the leader is busy', async () => {
     const fixture = createSessionFixture();
     const runtime = createRuntime(fixture);
     await runtime.initialize();
     fixture.emitEvent({ type: 'turn.started', sessionId: 's1', agentId: 'main', turnId: 1 } as Event);
 
     await expect(runtime.submitTeamMessage('New priority', 'client-2', [], ['agent-2'])).resolves.toMatchObject({
-      wake: 'steer',
+      wake: 'automatic',
     });
     expect(fixture.sendTeamMessage).toHaveBeenCalledWith(expect.objectContaining({
       recipientAgentIds: ['agent-2'],
     }));
-    expect(fixture.steer).toHaveBeenCalledWith([
-      { type: 'text', text: teamWakePrompt(1, 'New priority', ['agent-2']) },
-    ]);
+    expect(fixture.steer).not.toHaveBeenCalled();
     expect(fixture.swarm).not.toHaveBeenCalled();
     await runtime.close();
   });
@@ -450,6 +449,10 @@ function createSessionFixture(options: SessionFixtureOptions = {}): {
       readonly type: 'image_url';
       readonly url: string;
       readonly name?: string;
+    }[];
+    readonly modelAttachments?: readonly {
+      readonly type: 'image_url';
+      readonly url: string;
     }[];
     readonly recipientAgentIds?: readonly string[];
   }) => ({

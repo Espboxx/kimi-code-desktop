@@ -329,11 +329,13 @@ describe('session collaboration routing', () => {
       attachments: [{ type: 'image_url' as const, url: 'file:///cache/desktop-media/image.png', name: 'image.png' }],
       clientMessageId: 'retry-1', createdAt: 2,
     };
+    const modelAttachments = [{ type: 'image_url' as const, url: 'data:image/png;base64,aQ==' }];
     channel.result = message;
     await expect(session.collaboration.sendUserMessage({
       body: 'Coordinate',
       clientMessageId: 'retry-1',
       attachments: message.attachments,
+      modelAttachments,
       recipientAgentIds: ['agent-2'],
     }))
       .resolves.toEqual(message);
@@ -343,6 +345,7 @@ describe('session collaboration routing', () => {
         body: 'Coordinate',
         clientMessageId: 'retry-1',
         attachments: message.attachments,
+        modelAttachments,
         recipientAgentIds: ['agent-2'],
       }],
     });

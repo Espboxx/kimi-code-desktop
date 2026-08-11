@@ -524,6 +524,7 @@ try {
   );
   await createTeamDialog.getByLabel('主代理模型').selectOption('desktop-test-alt');
   assert.equal(await createTeamDialog.getByLabel('主代理模型').inputValue(), 'desktop-test-alt');
+  const teamWaitRequestCountBefore = provider.requests.filter((request) => request.toolName === 'TeamWait').length;
   await createTeamDialog.getByRole('button', { name: '创建并开始', exact: true }).click();
   await createTeamDialog.waitFor({ state: 'hidden', timeout: 30_000 });
   teamSessionId = await page.evaluate(async () => (
@@ -631,7 +632,7 @@ try {
   await teamPage.locator('.team-member-list button:has(span[title="main"])').click();
   await page.locator('.team-agent-surface').waitFor({ state: 'visible' });
   try {
-    await waitForAssistant(page, 'Team coordination resumed after a live message.', 45_000);
+    await waitForAssistant(page, 'Team coordination resumed after an automatic child completion.', 45_000);
   } catch (error) {
     const diagnostic = await page.evaluate(() => window.kimiDesktop.host.snapshot());
     assert.fail(`Team coordination did not resume: ${JSON.stringify({
@@ -645,22 +646,11 @@ try {
   }
   await returnToTeamChannel(page, teamPage);
   await page.waitForFunction(() => document.querySelectorAll('.team-activity-strip').length === 0);
-  const teamWaitOutput = await page.evaluate(async () => {
-    const items = (await window.kimiDesktop.host.snapshot()).transcript?.transcripts.main?.items ?? [];
-    let latest;
-    for (const item of items) {
-      if (item.kind !== 'turn') continue;
-      for (const step of item.steps) {
-        for (const frame of step.frames) {
-          if (frame.kind !== 'tool' || frame.name !== 'TeamWait') continue;
-          latest = frame.output;
-          if (frame.output?.includes('"type":"message.sent"')) return frame.output;
-        }
-      }
-    }
-    return latest;
-  });
-  assert.match(teamWaitOutput ?? '', /"type":"message\.sent"/, `TeamWait was not woken by a team message: ${teamWaitOutput ?? 'missing'}`);
+  assert.equal(
+    provider.requests.filter((request) => request.toolName === 'TeamWait').length,
+    teamWaitRequestCountBefore,
+    'Team leader polled TeamWait instead of resuming through the assignment callback',
+  );
   await page.waitForFunction(async (id) =>
     ((await window.kimiDesktop.host.snapshot()).teams[id]?.snapshot.latestChannelSeq ?? 0) >= 3,
   teamSessionId, { timeout: 30_000 });
@@ -1759,16 +1749,12 @@ async function startProvider() {
         hasImage: JSON.stringify(messages).includes('image_url'),
       });
 
-      if (historyText.includes('Launch a Team Mode batch and wait for live updates.')) {
-        if (hasToolCall(messages, 'AgentSwarm')) {
-          const waitResults = messages.filter((message) => message.role === 'tool'
-            && findToolName(messages, message.tool_call_id) === 'TeamWait');
-          if (waitResults.some((message) => messageText(message).includes('"type":"message.sent"'))) {
-            return sendText(response, 'Team coordination resumed after a live message.', ++responseId);
-          }
-          const waitNumber = waitResults.length + 1;
-          return sendTool(response, 'TeamWait', { timeout_seconds: 10 }, `team-wait-call-${String(waitNumber)}`, ++responseId);
-        }
+      if (
+        historyText.includes('Launch a Team Mode batch and wait for live updates.')
+        && historyText.includes('<notification')
+        && historyText.includes('task.completed')
+      ) {
+        return sendText(response, 'Team coordination resumed after an automatic child completion.', ++responseId);
       }
       if (historyText.includes('team-alpha') && !hasToolCall(messages, 'TeamSend')) {
         await teamWorkersGate;
@@ -1800,9 +1786,6 @@ async function startProvider() {
           return sendText(response, historyText.includes('Review beta') ? 'Beta question resolved.' : 'Question answered with the selected target.', ++responseId);
         }
         if (toolName === 'AgentSwarm') {
-          if (historyText.includes('Launch a Team Mode batch and wait for live updates.')) {
-            return sendTool(response, 'TeamWait', { timeout_seconds: 10 }, 'team-wait-call-1', ++responseId);
-          }
           return sendText(response, 'Swarm complete with two agent results.', ++responseId);
         }
         if (toolName === 'TeamSend') {
@@ -1878,8 +1861,22 @@ async function startProvider() {
           description: 'Coordinate Team Mode fixtures',
           prompt_template: 'Inspect {{item}}, send one update with TeamSend, then finish.',
           items: [
-            { item: 'team-alpha', display_name: '界面侦察', subagent_type: 'explore', model: 'desktop-test' },
-            { item: 'team-beta', display_name: '构建专家', subagent_type: 'fixture-researcher', model: 'desktop-test-alt' },
+            {
+              item: 'team-alpha',
+              task_key: 'team-alpha',
+              display_name: '界面侦察',
+              subagent_type: 'explore',
+              model: 'desktop-test',
+              workspace_access: 'read',
+            },
+            {
+              item: 'team-beta',
+              task_key: 'team-beta',
+              display_name: '构建专家',
+              subagent_type: 'fixture-researcher',
+              model: 'desktop-test-alt',
+              workspace_access: 'read',
+            },
           ],
         }, 'team-swarm-call-1', ++responseId);
       }

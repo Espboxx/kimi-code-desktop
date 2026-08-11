@@ -230,7 +230,7 @@ export interface DesktopSessionCreateOptions {
 
 export interface TeamSubmitResult {
   readonly message: TeamMessage;
-  readonly wake: 'swarm' | 'steer';
+  readonly wake: 'automatic';
 }
 
 export interface TeamImageInput {

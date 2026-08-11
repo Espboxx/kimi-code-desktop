@@ -47,6 +47,7 @@ import {
   legacyTeamOperationSchema,
   teamDisplayNameSchema,
   teamMessageAttachmentSchema,
+  teamMessageModelAttachmentSchema,
   teamMessagePayloadSchema,
   teamOperationV2Schema,
   teamPolicyInputSchema,
@@ -67,6 +68,8 @@ import {
   type TeamMember,
   type TeamMessage,
   type TeamMessageAttachment,
+  type TeamMessageModelAttachment,
+  type TeamMessageSentEvent,
   type TeamMessagePayload,
   type TeamMessageSender,
   type TeamOperation,
@@ -110,6 +113,8 @@ export class SessionCollaborationService extends Service implements ISessionColl
 
   private readonly operationEmitter = this._register(new Emitter<TeamOperation>());
   readonly onDidOperate = this.operationEmitter.event;
+  private readonly messageEmitter = this._register(new Emitter<TeamMessageSentEvent>());
+  readonly onDidSendMessage = this.messageEmitter.event;
 
   private readonly scope: string;
   private readonly operationsState: TeamOperation[] = [];
@@ -267,6 +272,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
     readonly body: string;
     readonly clientMessageId: string;
     readonly attachments?: readonly TeamMessageAttachment[];
+    readonly modelAttachments?: readonly TeamMessageModelAttachment[];
     readonly recipientAgentIds?: readonly string[];
   }): Promise<TeamMessage> {
     return this.submitUserMessage(input);
@@ -276,6 +282,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
     readonly body: string;
     readonly clientMessageId: string;
     readonly attachments?: readonly TeamMessageAttachment[];
+    readonly modelAttachments?: readonly TeamMessageModelAttachment[];
     readonly recipientAgentIds?: readonly string[];
   }): Promise<TeamMessage> {
     return this.sendMessage({
@@ -284,6 +291,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
       body: input.body,
       clientMessageId: input.clientMessageId,
       attachments: input.attachments,
+      modelAttachments: input.modelAttachments,
       recipientAgentIds: input.recipientAgentIds,
     });
   }
@@ -1016,6 +1024,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
     readonly body: string;
     readonly clientMessageId: string;
     readonly attachments?: readonly TeamMessageAttachment[];
+    readonly modelAttachments?: readonly TeamMessageModelAttachment[];
     readonly recipientAgentIds?: readonly string[];
     readonly payload?: TeamMessagePayload;
   }): Promise<TeamMessage> {
@@ -1046,7 +1055,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
           { details: { clientMessageId: input.clientMessageId } },
         );
       }
-      this.validateMessage(input.body, input.attachments, input.payload);
+      this.validateMessage(input.body, input.attachments, input.modelAttachments, input.payload);
       this.consumeRateToken(`${sender.actorKind}:${sender.actorId}`);
       return this.appendMessage({
         team,
@@ -1054,6 +1063,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
         body: input.body,
         clientMessageId: input.clientMessageId,
         attachments: input.attachments,
+        modelAttachments: input.modelAttachments,
         recipientAgentIds: recipients,
         payload: input.payload,
         taskId: input.actorKind === 'agent' ? this.activeTaskForAgent(input.actorId)?.id : undefined,
@@ -1067,6 +1077,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
     readonly body: string;
     readonly clientMessageId: string;
     readonly attachments?: readonly TeamMessageAttachment[];
+    readonly modelAttachments?: readonly TeamMessageModelAttachment[];
     readonly recipientAgentIds?: readonly string[];
     readonly payload?: TeamMessagePayload;
     readonly taskId?: string;
@@ -1098,7 +1109,9 @@ export class SessionCollaborationService extends Service implements ISessionColl
         message,
       };
     });
-    return committed!;
+    const message = committed!;
+    this.messageEmitter.fire({ message, modelAttachments: input.modelAttachments });
+    return message;
   }
 
   private kickScheduler(): void {
@@ -2067,6 +2080,7 @@ export class SessionCollaborationService extends Service implements ISessionColl
   private validateMessage(
     body: string,
     attachments: readonly TeamMessageAttachment[] | undefined,
+    modelAttachments: readonly TeamMessageModelAttachment[] | undefined,
     payload: TeamMessagePayload | undefined,
   ): void {
     const bytes = Buffer.byteLength(body, 'utf8')
@@ -2078,6 +2092,12 @@ export class SessionCollaborationService extends Service implements ISessionColl
     }
     const parsed = teamMessageAttachmentSchema.array().max(TEAM_MESSAGE_MAX_ATTACHMENTS).safeParse(attachments ?? []);
     if (!parsed.success) throw new Error2(ErrorCodes.REQUEST_INVALID, 'Team message attachments are invalid', { details: { issues: parsed.error.issues } });
+    const parsedModel = teamMessageModelAttachmentSchema.array().max(TEAM_MESSAGE_MAX_ATTACHMENTS).safeParse(modelAttachments ?? []);
+    if (!parsedModel.success || (modelAttachments?.length ?? 0) > (attachments?.length ?? 0)) {
+      throw new Error2(ErrorCodes.REQUEST_INVALID, 'Team message model attachments are invalid', {
+        details: { issues: parsedModel.success ? undefined : parsedModel.error.issues },
+      });
+    }
     const parsedPayload = teamMessagePayloadSchema.optional().safeParse(payload);
     if (!parsedPayload.success) throw new Error2(ErrorCodes.REQUEST_INVALID, 'Team message payload is invalid', { details: { issues: parsedPayload.error.issues } });
   }

@@ -59,7 +59,7 @@ import {
 import { stubFlag } from '../../app/flag/stubs';
 import { registerTestAgentWire } from '../../wire/stubs';
 import { stubContextMemory } from '../../agent/contextMemory/stubs';
-import { stubLoopWithHooks, stubWire } from '../../agent/loop/stubs';
+import { runWillBeginStepHooks, stubLoopWithHooks, stubWire } from '../../agent/loop/stubs';
 
 const SESSION_SCOPE = 'workspaces/w1/sessions/s1';
 const active = new Set<DisposableStore>();
@@ -931,6 +931,91 @@ describe('SessionCollaborationService', () => {
       'Coordinate now',
       'Working',
     ]);
+  });
+
+  it('wakes the leader automatically when a user message targets another member', async () => {
+    const { service } = buildService();
+    await service.ensureTeam();
+    await service.prepareSwarmBatch({
+      callerAgentId: 'main',
+      assignments: [{
+        assignmentId: 'directed-task',
+        displayName: 'directed-member',
+        profileName: 'coder',
+        description: 'Handle the directed work',
+      }],
+    });
+    await service.bindAssignment({
+      assignmentId: 'directed-task',
+      agentId: 'agent-directed',
+      parentAgentId: 'main',
+    });
+    const leaderLoop = stubLoopWithHooks();
+    const delivery = new AgentCollaborationDeliveryService(
+      { agentId: 'main' } as IAgentScopeContext,
+      service,
+      stubContextMemory(),
+      stubWire(),
+      leaderLoop,
+    );
+
+    try {
+      await service.sendUserMessage({
+        body: 'New priority for the directed member',
+        clientMessageId: 'directed-user-message',
+        recipientAgentIds: ['agent-directed'],
+      });
+
+      await vi.waitFor(() => {
+        expect(leaderLoop.launches).toHaveLength(1);
+      });
+    } finally {
+      delivery.dispose();
+    }
+  });
+
+  it('delivers transient user images with the persisted Team message', async () => {
+    const { service } = buildService();
+    await service.ensureTeam();
+    const leaderLoop = stubLoopWithHooks();
+    const context = stubContextMemory();
+    const delivery = new AgentCollaborationDeliveryService(
+      { agentId: 'main' } as IAgentScopeContext,
+      service,
+      context,
+      stubWire(),
+      leaderLoop,
+    );
+    const modelUrl = 'data:image/png;base64,iVBORw0KGgo=';
+
+    try {
+      await service.sendUserMessage({
+        body: 'Inspect the attached diagram',
+        clientMessageId: 'user-image-message',
+        attachments: [{
+          type: 'image_url',
+          url: 'file:///workspace/.media-cache/diagram.png',
+          name: 'diagram.png',
+        }],
+        modelAttachments: [{ type: 'image_url', url: modelUrl }],
+      });
+      await vi.waitFor(() => {
+        expect(leaderLoop.launches).toHaveLength(1);
+      });
+
+      await runWillBeginStepHooks(leaderLoop);
+
+      expect(context.messages.at(-1)?.content).toEqual([
+        expect.objectContaining({
+          type: 'text',
+          text: expect.stringContaining('Inspect the attached diagram'),
+        }),
+        { type: 'image_url', imageUrl: { url: modelUrl } },
+      ]);
+      expect((await service.history()).at(-1)).not.toHaveProperty('modelAttachments');
+    } finally {
+      delivery.dispose();
+    }
   });
 
   it('routes a structured member question to the leader and returns the leader answer', async () => {

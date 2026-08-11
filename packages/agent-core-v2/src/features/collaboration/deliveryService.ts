@@ -13,12 +13,19 @@ import { IAgentContextMemoryService } from '#/agent/contextMemory/contextMemory'
 import { IAgentLoopService } from '#/agent/loop/loop';
 import { MessageStepRequest } from '#/agent/loop/stepRequest';
 import { IAgentScopeContext } from '#/agent/scopeContext/scopeContext';
+import type { ContentPart } from '#/kosong/contract/message';
 import { IWireService } from '#/wire/wire';
 
 import { ISessionCollaborationService } from './collaboration';
 import { IAgentCollaborationDeliveryService } from './delivery';
 import { CollaborationDeliveryModel, teamDeliveryAdvance } from './deliveryOps';
-import { TEAM_CHANNEL_ID, type TeamDelivery, type TeamMessage } from './types';
+import {
+  TEAM_CHANNEL_ID,
+  type TeamDelivery,
+  type TeamMessage,
+  type TeamMessageModelAttachment,
+  type TeamMessageSentEvent,
+} from './types';
 
 export class AgentCollaborationDeliveryService extends Service implements IAgentCollaborationDeliveryService {
   declare readonly _serviceBrand: undefined;
@@ -26,6 +33,7 @@ export class AgentCollaborationDeliveryService extends Service implements IAgent
   private readonly agentId: string;
   private pendingWake: TeamActivityStepRequest | undefined;
   private wakeQueue: Promise<void> = Promise.resolve();
+  private readonly modelAttachments = new Map<string, readonly TeamMessageModelAttachment[]>();
 
   constructor(
     @IAgentScopeContext scopeContext: IAgentScopeContext,
@@ -43,27 +51,46 @@ export class AgentCollaborationDeliveryService extends Service implements IAgent
       }),
     );
     this._register(
-      this.collaboration.onDidOperate((operation) => {
-        if (operation.type !== 'message.sent') return;
-        const message = operation.message as TeamMessage;
+      this.collaboration.onDidSendMessage((event) => {
+        if (event.modelAttachments !== undefined && event.modelAttachments.length > 0) {
+          this.modelAttachments.set(event.message.id, event.modelAttachments);
+        }
         this.wakeQueue = this.wakeQueue
-          .then(() => this.enqueueWakeFor(message))
-          .catch(() => {});
+          .then(() => this.enqueueWakeFor(event))
+          .catch(() => {
+            this.modelAttachments.delete(event.message.id);
+          });
       }),
     );
   }
 
-  private async enqueueWakeFor(message: TeamMessage): Promise<void> {
-    if (!this.collaboration.isEnabled() || !this.collaboration.isActive()) return;
-    if (message.sender.actorKind === 'agent' && message.sender.actorId === this.agentId) return;
-    if (message.payload?.type === 'question_answer') return;
+  private async enqueueWakeFor(event: TeamMessageSentEvent): Promise<void> {
+    const { message } = event;
+    if (!this.collaboration.isEnabled() || !this.collaboration.isActive()) {
+      this.modelAttachments.delete(message.id);
+      return;
+    }
+    if (message.sender.actorKind === 'agent' && message.sender.actorId === this.agentId) {
+      this.modelAttachments.delete(message.id);
+      return;
+    }
+    if (message.payload?.type === 'question_answer') {
+      this.modelAttachments.delete(message.id);
+      return;
+    }
     const snapshot = await this.collaboration.snapshot();
-    if (!snapshot.members.some((member) => member.agentId === this.agentId)) return;
+    if (!snapshot.members.some((member) => member.agentId === this.agentId)) {
+      this.modelAttachments.delete(message.id);
+      return;
+    }
     if (
       message.recipientAgentIds !== undefined
       && !(message.sender.actorKind === 'user' && this.agentId === 'main')
       && !message.recipientAgentIds.includes(this.agentId)
-    ) return;
+    ) {
+      this.modelAttachments.delete(message.id);
+      return;
+    }
     if (this.pendingWake?.state === 'pending') return;
 
     const wake = new TeamActivityStepRequest(() => {
@@ -88,14 +115,14 @@ export class AgentCollaborationDeliveryService extends Service implements IAgent
     const delivery = await this.collaboration.delivery({ agentId: this.agentId, afterSeq });
     if (delivery === undefined || delivery.toSeq <= afterSeq) return;
     signal.throwIfAborted();
-    const text = renderDelivery(delivery);
-    if (text === undefined) {
+    const content = renderDeliveryContent(delivery, this.modelAttachments);
+    if (content.length === 0) {
       this.wire.dispatch(teamDeliveryAdvance({ teamId, toSeq: delivery.toSeq }));
       return;
     }
     this.context.append({
       role: 'user',
-      content: [{ type: 'text', text }],
+      content,
       toolCalls: [],
       origin: {
         kind: 'team_message',
@@ -106,7 +133,25 @@ export class AgentCollaborationDeliveryService extends Service implements IAgent
         messageIds: delivery.messages.map((message) => message.id),
       },
     });
+    for (const message of delivery.messages) this.modelAttachments.delete(message.id);
   }
+}
+
+function renderDeliveryContent(
+  delivery: TeamDelivery,
+  modelAttachments: ReadonlyMap<string, readonly TeamMessageModelAttachment[]>,
+): ContentPart[] {
+  const text = renderDelivery(delivery);
+  const images = delivery.messages.flatMap((message) =>
+    (modelAttachments.get(message.id) ?? []).map((attachment): ContentPart => ({
+      type: 'image_url',
+      imageUrl: { url: attachment.url },
+    })),
+  );
+  return [
+    ...(text === undefined ? [] : [{ type: 'text' as const, text }]),
+    ...images,
+  ];
 }
 
 function renderDelivery(delivery: TeamDelivery): string | undefined {

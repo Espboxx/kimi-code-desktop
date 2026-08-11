@@ -11,6 +11,7 @@ import {
   type TeamArtifactContent,
   type TeamMessage,
   type TeamMessageAttachment,
+  type TeamMessageModelAttachment,
   type TeamOperation,
   type TeamPolicyInput,
   type TeamSnapshot,
@@ -323,12 +324,14 @@ export class SessionRuntime {
     clientMessageId: string,
     attachments?: readonly TeamMessageAttachment[],
     recipientAgentIds?: readonly string[],
+    modelAttachments?: readonly TeamMessageModelAttachment[],
   ): Promise<TeamMessage> {
     this.ensureOpen();
     return this.session.sendTeamMessage({
       body,
       clientMessageId,
       attachments,
+      modelAttachments,
       recipientAgentIds,
     });
   }
@@ -719,19 +722,18 @@ export class SessionRuntime {
       url: item.displayUrl,
       name: item.name,
     }));
+    const modelAttachments = media.map((item): TeamMessageModelAttachment => ({
+      type: 'image_url',
+      url: item.url,
+    }));
     const message = await this.sendTeamMessage(
       body,
       clientMessageId,
       attachments.length === 0 ? undefined : attachments,
       recipientAgentIds,
+      modelAttachments.length === 0 ? undefined : modelAttachments,
     );
-    const wake = this.busy ? 'steer' : 'swarm';
-    await this.submit({
-      mode: wake,
-      text: teamWakePrompt(message.channelSeq, message.body, message.recipientAgentIds),
-      media,
-    });
-    return { message, wake };
+    return { message, wake: 'automatic' };
   }
 
   private enqueueTeamOperation(operation: TeamOperation): void {
@@ -831,23 +833,6 @@ export class SessionRuntime {
   private ensureOpen(): void {
     if (this.disposed) throw new Error(`Session runtime is closed: ${this.id}`);
   }
-}
-
-export function teamWakePrompt(
-  channelSeq: number,
-  body: string,
-  recipientAgentIds?: readonly string[],
-): string {
-  return [
-    `A user message was posted to the Team general channel at #${String(channelSeq)}.`,
-    recipientAgentIds === undefined
-      ? 'The message was broadcast to the whole Team.'
-      : `The message was addressed to these Team members: ${recipientAgentIds.join(', ')}.`,
-    '<team_user_message>',
-    body,
-    '</team_user_message>',
-    'Read that channel message, coordinate the team with TeamStatus, TeamSend, and TeamWait, and respond through the appropriate Team workflow.',
-  ].join('\n');
 }
 
 function teamSubmissionConflict(clientMessageId: string): Error {

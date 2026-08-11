@@ -197,6 +197,12 @@ export const teamMessageAttachmentSchema = z.object({
 }).strict();
 export type TeamMessageAttachment = z.infer<typeof teamMessageAttachmentSchema>;
 
+export const teamMessageModelAttachmentSchema = z.object({
+  type: z.literal('image_url'),
+  url: z.string().min(1).max(36 * 1024 * 1024),
+}).strict();
+export type TeamMessageModelAttachment = z.infer<typeof teamMessageModelAttachmentSchema>;
+
 export const teamQuestionOptionSchema = z.object({
   label: z.string().min(1),
   description: z.string().optional(),
@@ -394,6 +400,7 @@ export const sessionCollaborationContract = {
       body: z.string().min(1),
       clientMessageId: z.string().min(1),
       attachments: z.array(teamMessageAttachmentSchema).max(8).optional(),
+      modelAttachments: z.array(teamMessageModelAttachmentSchema).max(8).optional(),
       recipientAgentIds: z.array(z.string().min(1)).min(1).max(16).optional(),
     }).strict()]),
     output: teamMessageSchema,

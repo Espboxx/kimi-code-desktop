@@ -430,10 +430,12 @@ describe('SDKRpcClientV2 (agent-core-v2 wiring MVP)', () => {
         url: 'file:///cache/desktop-media/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.png',
         name: 'image.png',
       }];
+      const modelAttachments = [{ type: 'image_url' as const, url: 'data:image/png;base64,aQ==' }];
       await expect(session.sendTeamMessage({
         body: 'hello',
         clientMessageId: 'client-1',
         attachments,
+        modelAttachments,
         recipientAgentIds: ['main'],
       })).resolves.toMatchObject({
         body: 'hello',
@@ -441,6 +443,9 @@ describe('SDKRpcClientV2 (agent-core-v2 wiring MVP)', () => {
         attachments,
         recipientAgentIds: ['main'],
       });
+      await expect(session.getTeamHistory()).resolves.toEqual([
+        expect.not.objectContaining({ modelAttachments: expect.anything() }),
+      ]);
     } finally {
       await harness.close();
     }

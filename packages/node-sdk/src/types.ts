@@ -43,6 +43,7 @@ export type {
   TeamMember,
   TeamMessage,
   TeamMessageAttachment,
+  TeamMessageModelAttachment,
   TeamMessagePayload,
   TeamQuestionAnswers,
   TeamQuestionItem,

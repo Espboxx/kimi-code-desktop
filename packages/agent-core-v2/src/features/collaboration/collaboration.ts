@@ -20,6 +20,8 @@ import type {
   TeamDelivery,
   TeamMessage,
   TeamMessageAttachment,
+  TeamMessageModelAttachment,
+  TeamMessageSentEvent,
   TeamQuestionAnswers,
   TeamQuestionItem,
   TeamOperation,
@@ -32,6 +34,7 @@ export interface ISessionCollaborationService {
   readonly _serviceBrand: undefined;
   readonly ready: Promise<void>;
   readonly onDidOperate: Event<TeamOperation>;
+  readonly onDidSendMessage: Event<TeamMessageSentEvent>;
 
   isEnabled(): boolean;
   isActive(): boolean;
@@ -45,12 +48,14 @@ export interface ISessionCollaborationService {
     readonly body: string;
     readonly clientMessageId: string;
     readonly attachments?: readonly TeamMessageAttachment[];
+    readonly modelAttachments?: readonly TeamMessageModelAttachment[];
     readonly recipientAgentIds?: readonly string[];
   }): Promise<TeamMessage>;
   submitUserMessage(input: {
     readonly body: string;
     readonly clientMessageId: string;
     readonly attachments?: readonly TeamMessageAttachment[];
+    readonly modelAttachments?: readonly TeamMessageModelAttachment[];
     readonly recipientAgentIds?: readonly string[];
   }): Promise<TeamMessage>;
   sendAgentMessage(input: {

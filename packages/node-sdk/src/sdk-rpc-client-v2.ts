@@ -312,6 +312,7 @@ import type {
   TeamArtifactContent,
   TeamMessage,
   TeamMessageAttachment,
+  TeamMessageModelAttachment,
   TeamOperation,
   TeamPolicyInput,
   TeamSnapshot,
@@ -1567,6 +1568,7 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
       readonly body: string;
       readonly clientMessageId: string;
       readonly attachments?: readonly TeamMessageAttachment[];
+      readonly modelAttachments?: readonly TeamMessageModelAttachment[];
       readonly recipientAgentIds?: readonly string[];
     },
   ): Promise<TeamMessage> {
@@ -1575,6 +1577,7 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
       body: input.body,
       clientMessageId: input.clientMessageId,
       attachments: input.attachments,
+      modelAttachments: input.modelAttachments,
       recipientAgentIds: input.recipientAgentIds,
     });
   }

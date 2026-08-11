@@ -41,6 +41,7 @@ import type {
   TeamArtifactContent,
   TeamMessage,
   TeamMessageAttachment,
+  TeamMessageModelAttachment,
   TeamOperation,
   TeamPolicyInput,
   TeamSnapshot,
@@ -127,6 +128,7 @@ interface TeamRpcSurface {
     readonly body: string;
     readonly clientMessageId: string;
     readonly attachments?: readonly TeamMessageAttachment[];
+    readonly modelAttachments?: readonly TeamMessageModelAttachment[];
     readonly recipientAgentIds?: readonly string[];
   }): Promise<TeamMessage>;
   updateTeamPolicy(input: {
@@ -295,6 +297,7 @@ export class Session {
     readonly body: string;
     readonly clientMessageId: string;
     readonly attachments?: readonly TeamMessageAttachment[];
+    readonly modelAttachments?: readonly TeamMessageModelAttachment[];
     readonly recipientAgentIds?: readonly string[];
   }): Promise<TeamMessage> {
     this.ensureOpen();

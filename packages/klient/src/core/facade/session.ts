@@ -31,6 +31,7 @@ import type {
   TeamArtifactContent,
   TeamMessage,
   TeamMessageAttachment,
+  TeamMessageModelAttachment,
   TeamOperation,
   TeamPolicyInput,
   TeamSnapshot,
@@ -100,6 +101,7 @@ export interface SessionCollaborationFacade {
     readonly body: string;
     readonly clientMessageId: string;
     readonly attachments?: readonly TeamMessageAttachment[];
+    readonly modelAttachments?: readonly TeamMessageModelAttachment[];
     readonly recipientAgentIds?: readonly string[];
   }): Promise<TeamMessage>;
   updatePolicy(input: {

@@ -15,6 +15,7 @@ export const TEAM_MESSAGE_MAX_BYTES = 8 * 1024;
 export const TEAM_MESSAGE_MAX_ATTACHMENTS = 8;
 export const TEAM_MESSAGE_ATTACHMENT_URL_MAX_LENGTH = 4_096;
 export const TEAM_MESSAGE_ATTACHMENT_NAME_MAX_LENGTH = 255;
+export const TEAM_MESSAGE_MODEL_URL_MAX_LENGTH = 36 * 1024 * 1024;
 export const TEAM_HISTORY_DEFAULT_LIMIT = 100;
 export const TEAM_HISTORY_MAX_LIMIT = 200;
 export const TEAM_OPERATION_MAX_LIMIT = 1_000;
@@ -270,6 +271,12 @@ export const teamMessageAttachmentSchema = z.object({
 }).strict();
 export type TeamMessageAttachment = z.infer<typeof teamMessageAttachmentSchema>;
 
+export const teamMessageModelAttachmentSchema = z.object({
+  type: z.literal('image_url'),
+  url: z.string().min(1).max(TEAM_MESSAGE_MODEL_URL_MAX_LENGTH),
+}).strict();
+export type TeamMessageModelAttachment = z.infer<typeof teamMessageModelAttachmentSchema>;
+
 export const teamQuestionOptionSchema = z.object({
   label: z.string().min(1),
   description: z.string().optional(),
@@ -320,6 +327,11 @@ export const teamMessageSchema = z.object({
   createdAt: z.number().nonnegative(),
 }).strict();
 export type TeamMessage = z.infer<typeof teamMessageSchema>;
+
+export interface TeamMessageSentEvent {
+  readonly message: TeamMessage;
+  readonly modelAttachments?: readonly TeamMessageModelAttachment[];
+}
 
 const legacyTeamBatchSchema = z.object({
   id: z.string().min(1),
