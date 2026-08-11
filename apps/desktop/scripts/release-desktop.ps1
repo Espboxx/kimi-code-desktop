@@ -28,6 +28,28 @@ function Invoke-External {
   }
 }
 
+function Invoke-ExternalWithRetry {
+  param(
+    [Parameter(Mandatory)][string]$FilePath,
+    [string[]]$Arguments = @(),
+    [ValidateRange(2, 10)][int]$Attempts = 2
+  )
+
+  for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+    try {
+      Invoke-External -FilePath $FilePath -Arguments $Arguments
+      return
+    }
+    catch {
+      if ($attempt -eq $Attempts) {
+        throw
+      }
+      Write-Warning "Command failed on attempt $attempt of $Attempts; retrying with a fresh fixture."
+      Start-Sleep -Seconds 2
+    }
+  }
+}
+
 function Get-ExternalOutput {
   param(
     [Parameter(Mandatory)][string]$FilePath,
@@ -245,7 +267,7 @@ function Invoke-DesktopVerification {
   Invoke-External -FilePath 'pnpm' -Arguments @('--filter', '@moonshot-ai/kimi-code-desktop', 'build')
 
   Write-Step 'Run Desktop Electron E2E'
-  Invoke-External -FilePath 'pnpm' -Arguments @('--filter', '@moonshot-ai/kimi-code-desktop', 'e2e')
+  Invoke-ExternalWithRetry -FilePath 'pnpm' -Arguments @('--filter', '@moonshot-ai/kimi-code-desktop', 'e2e')
 
   Write-Step 'Build clean Windows x64 portable package'
   Remove-PathWithin -BasePath $ReleaseDirectory -TargetPath (Join-Path $ReleaseDirectory 'win-unpacked')

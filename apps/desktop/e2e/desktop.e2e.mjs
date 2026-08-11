@@ -34,6 +34,8 @@ const oversizedImagePath = join(workspace, 'oversized.png');
 const swarmOutputPath = join(workspace, 'swarm-alpha.txt');
 const teamProfilePath = join(workspace, '.kimi-code', 'agents', 'fixture-researcher.md');
 const providerToken = 'sk-desktop-e2e-boundary-secret';
+const primaryModifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+const documentEndShortcut = process.platform === 'darwin' ? 'Meta+ArrowDown' : 'Control+End';
 const processLogs = [];
 const pageErrors = [];
 let firstApp;
@@ -172,9 +174,10 @@ try {
 
   const todoPanel = page.locator('.todo-fixed-panel');
   await todoPanel.waitFor({ state: 'visible' });
-  assert.match(await page.locator('.inspector-tabs').innerText(), /后台任务/);
+  const inspectorTabs = page.locator('.inspector-tabs');
+  await inspectorTabs.getByRole('tab', { name: '后台任务', exact: true }).waitFor({ state: 'visible' });
   assert.equal(
-    await page.locator('.inspector-tabs button').filter({ hasText: '上下文' }).count(),
+    await inspectorTabs.getByRole('tab', { name: '上下文', exact: true }).count(),
     0,
   );
   await submitPrompt(page, 'Create a TodoList with one running and one pending desktop task.');
@@ -948,7 +951,7 @@ try {
   await replaceMonacoText(page, 'desktop editor save\n');
   await page.locator('.workbench-tab.active').waitFor({ state: 'visible' });
   assert.equal(await page.locator('.workbench-tab.active').getAttribute('class').then((value) => value?.includes('dirty')), true);
-  await page.keyboard.press('Control+S');
+  await page.keyboard.press(`${primaryModifier}+S`);
   await waitForFileText(samplePath, 'desktop editor save\n');
   await page.waitForFunction(() => !document.querySelector('.workbench-tab.active')?.classList.contains('dirty'));
 
@@ -1540,7 +1543,7 @@ async function submitPrompt(page, prompt) {
 async function replaceMonacoText(page, value) {
   const editor = page.locator('.editor-view .monaco-editor').last();
   await editor.click();
-  await page.keyboard.press('Control+A');
+  await page.keyboard.press(`${primaryModifier}+A`);
   await page.keyboard.insertText(value);
   await page.waitForFunction(() => document.querySelector('.workbench-tab.active')?.classList.contains('dirty') === true);
 }
@@ -1548,7 +1551,7 @@ async function replaceMonacoText(page, value) {
 async function appendMonacoText(page, value) {
   const editor = page.locator('.editor-view .monaco-editor').last();
   await editor.click();
-  await page.keyboard.press('Control+End');
+  await page.keyboard.press(documentEndShortcut);
   await page.keyboard.insertText(value);
   await page.waitForFunction(() => document.querySelector('.workbench-tab.active')?.classList.contains('dirty') === true);
 }

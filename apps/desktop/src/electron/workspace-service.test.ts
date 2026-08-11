@@ -19,7 +19,7 @@ import {
 
 describe('workspace-service helpers', () => {
   it('rejects paths that escape the workspace root', () => {
-    expect(() => resolveSafePath('D:\\project', '..\\outside')).toThrow(/escapes workspace/);
+    expect(() => resolveSafePath(join(tmpdir(), 'project'), join('..', 'outside'))).toThrow(/escapes workspace/);
   });
 
   it('parses porcelain v2 index, worktree, rename, untracked, and conflict records', () => {

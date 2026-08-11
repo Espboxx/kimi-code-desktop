@@ -1,6 +1,6 @@
 {
   "name": "@moonshot-ai/kimi-code-desktop",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "description": "Unofficial cross-platform desktop client derived from Kimi Code",
   "author": {

@@ -38,17 +38,17 @@ Kimi Code Desktop 是一个面向 Windows、macOS 和 Linux 的 Electron 桌面�
 
 `desktop-v*` 标签会触发 GitHub Actions，在目标系统原生构建以下安装包。前往本仓库的 [GitHub Releases](../../releases) 下载：
 
-- `Kimi-Code-Desktop-0.4.0-x64-portable.exe`
-- `Kimi-Code-Desktop-0.4.0-arm64.dmg`
-- `Kimi-Code-Desktop-0.4.0-x64.AppImage`
-- `Kimi-Code-Desktop-0.4.0-x64.deb`
+- `Kimi-Code-Desktop-0.4.1-x64-portable.exe`
+- `Kimi-Code-Desktop-0.4.1-arm64.dmg`
+- `Kimi-Code-Desktop-0.4.1-x64.AppImage`
+- `Kimi-Code-Desktop-0.4.1-x64.deb`
 
-每个安装包都带有同名 `.sha256` 文件，例如 Windows x64 便携版对应 `Kimi-Code-Desktop-0.4.0-x64-portable.exe.sha256`。
+每个安装包都带有同名 `.sha256` 文件，例如 Windows x64 便携版对应 `Kimi-Code-Desktop-0.4.1-x64-portable.exe.sha256`。
 
 下载后可在 PowerShell 校验 SHA256：
 
 ```powershell
-$exe = ".\Kimi-Code-Desktop-0.4.0-x64-portable.exe"
+$exe = ".\Kimi-Code-Desktop-0.4.1-x64-portable.exe"
 $expected = (Get-Content "$exe.sha256").Split()[0]
 $actual = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
 $actual -eq $expected
@@ -57,9 +57,9 @@ $actual -eq $expected
 返回 `True` 后直接运行 EXE，无需预装 Node.js 或 pnpm。macOS 和 Linux 可用系统自带工具校验：
 
 ```bash
-shasum -a 256 -c Kimi-Code-Desktop-0.4.0-arm64.dmg.sha256
-sha256sum -c Kimi-Code-Desktop-0.4.0-x64.AppImage.sha256
-sha256sum -c Kimi-Code-Desktop-0.4.0-x64.deb.sha256
+shasum -a 256 -c Kimi-Code-Desktop-0.4.1-arm64.dmg.sha256
+sha256sum -c Kimi-Code-Desktop-0.4.1-x64.AppImage.sha256
+sha256sum -c Kimi-Code-Desktop-0.4.1-x64.deb.sha256
 ```
 
 macOS arm64 用户挂载 DMG 后将应用拖入“应用程序”。该构建未签名，首次打开时可在 Finder 中右键应用并选择“打开”；如系统仍保留下载隔离标记，可执行：
@@ -72,10 +72,10 @@ open "/Applications/Kimi Code Desktop.app"
 Linux x64 用户可任选一种方式：
 
 ```bash
-chmod +x Kimi-Code-Desktop-0.4.0-x64.AppImage
-./Kimi-Code-Desktop-0.4.0-x64.AppImage
+chmod +x Kimi-Code-Desktop-0.4.1-x64.AppImage
+./Kimi-Code-Desktop-0.4.1-x64.AppImage
 
-sudo apt install ./Kimi-Code-Desktop-0.4.0-x64.deb
+sudo apt install ./Kimi-Code-Desktop-0.4.1-x64.deb
 ```
 
 当前 Windows 与 macOS 自动构建默认**不做代码签名**，系统可能在首次运行时显示确认提示。请先核对下载来源和 SHA256；后续取得代码签名证书后会单独接入发布流程。

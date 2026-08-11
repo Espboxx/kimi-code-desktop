@@ -38,17 +38,17 @@ These screenshots are generated from an isolated local E2E fixture and contain n
 
 The `desktop-v*` GitHub Actions workflow builds each package on its target operating system. Open this repository's [GitHub Releases](../../releases) page and download:
 
-- `Kimi-Code-Desktop-0.4.0-x64-portable.exe`
-- `Kimi-Code-Desktop-0.4.0-arm64.dmg`
-- `Kimi-Code-Desktop-0.4.0-x64.AppImage`
-- `Kimi-Code-Desktop-0.4.0-x64.deb`
+- `Kimi-Code-Desktop-0.4.1-x64-portable.exe`
+- `Kimi-Code-Desktop-0.4.1-arm64.dmg`
+- `Kimi-Code-Desktop-0.4.1-x64.AppImage`
+- `Kimi-Code-Desktop-0.4.1-x64.deb`
 
 Every package has a matching `.sha256` file.
 
 Verify the SHA256 checksum in PowerShell:
 
 ```powershell
-$exe = ".\Kimi-Code-Desktop-0.4.0-x64-portable.exe"
+$exe = ".\Kimi-Code-Desktop-0.4.1-x64-portable.exe"
 $expected = (Get-Content "$exe.sha256").Split()[0]
 $actual = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
 $actual -eq $expected
@@ -57,9 +57,9 @@ $actual -eq $expected
 After the command returns `True`, run the EXE directly. The target machine does not need Node.js or pnpm. Verify macOS and Linux packages with built-in tools:
 
 ```bash
-shasum -a 256 -c Kimi-Code-Desktop-0.4.0-arm64.dmg.sha256
-sha256sum -c Kimi-Code-Desktop-0.4.0-x64.AppImage.sha256
-sha256sum -c Kimi-Code-Desktop-0.4.0-x64.deb.sha256
+shasum -a 256 -c Kimi-Code-Desktop-0.4.1-arm64.dmg.sha256
+sha256sum -c Kimi-Code-Desktop-0.4.1-x64.AppImage.sha256
+sha256sum -c Kimi-Code-Desktop-0.4.1-x64.deb.sha256
 ```
 
 On Apple Silicon, mount the DMG and drag the app to Applications. This build is unsigned, so first open it by right-clicking the app in Finder and selecting **Open**. If macOS keeps the download quarantine attribute, run:
@@ -72,10 +72,10 @@ open "/Applications/Kimi Code Desktop.app"
 On Linux x64, use either package:
 
 ```bash
-chmod +x Kimi-Code-Desktop-0.4.0-x64.AppImage
-./Kimi-Code-Desktop-0.4.0-x64.AppImage
+chmod +x Kimi-Code-Desktop-0.4.1-x64.AppImage
+./Kimi-Code-Desktop-0.4.1-x64.AppImage
 
-sudo apt install ./Kimi-Code-Desktop-0.4.0-x64.deb
+sudo apt install ./Kimi-Code-Desktop-0.4.1-x64.deb
 ```
 
 Automated Windows and macOS builds are **unsigned by default**, so the operating system may show a confirmation prompt on first launch. Verify the release source and SHA256 before running it. Code signing can be added separately when a certificate is available.

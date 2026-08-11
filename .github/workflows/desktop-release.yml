@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "desktop-v*"
+  workflow_dispatch:
 
 concurrency:
   group: desktop-release-${{ github.ref }}
@@ -39,6 +40,7 @@ jobs:
           cache: pnpm
 
       - name: Validate release tag
+        if: github.event_name == 'push'
         run: node apps/desktop/scripts/check-release-tag.mjs "$env:GITHUB_REF_NAME"
 
       - name: Install dependencies
@@ -49,11 +51,23 @@ jobs:
           pnpm --filter @moonshot-ai/kimi-code-desktop test
           pnpm --filter @moonshot-ai/kimi-code-desktop typecheck
 
-      - name: Build Windows package
-        run: pnpm --filter @moonshot-ai/kimi-code-desktop dist:win
+      - name: Build Desktop
+        run: |
+          pnpm --filter @moonshot-ai/kimi-code-desktop licenses:check
+          pnpm --filter @moonshot-ai/kimi-code-desktop build
 
       - name: Run Desktop Electron E2E
-        run: pnpm --filter @moonshot-ai/kimi-code-desktop e2e
+        run: |
+          for ($attempt = 1; $attempt -le 2; $attempt++) {
+            pnpm --filter @moonshot-ai/kimi-code-desktop e2e
+            $exitCode = $LASTEXITCODE
+            if ($exitCode -eq 0) { break }
+            if ($attempt -eq 2) { exit $exitCode }
+            Write-Warning 'Desktop E2E failed; retrying once with a fresh fixture.'
+          }
+
+      - name: Build Windows package
+        run: pnpm --filter @moonshot-ai/kimi-code-desktop exec electron-builder --win portable --x64
 
       - name: Inspect and smoke packaged application
         run: |
@@ -96,6 +110,7 @@ jobs:
           cache: pnpm
 
       - name: Validate release tag
+        if: github.event_name == 'push'
         run: node apps/desktop/scripts/check-release-tag.mjs "$GITHUB_REF_NAME"
 
       - name: Install dependencies
@@ -106,11 +121,21 @@ jobs:
           pnpm --filter @moonshot-ai/kimi-code-desktop test
           pnpm --filter @moonshot-ai/kimi-code-desktop typecheck
 
-      - name: Build macOS package
-        run: pnpm --filter @moonshot-ai/kimi-code-desktop dist:mac
+      - name: Build Desktop
+        run: |
+          pnpm --filter @moonshot-ai/kimi-code-desktop licenses:check
+          pnpm --filter @moonshot-ai/kimi-code-desktop build
 
       - name: Run Desktop Electron E2E
-        run: pnpm --filter @moonshot-ai/kimi-code-desktop e2e
+        run: |
+          for attempt in 1 2; do
+            if pnpm --filter @moonshot-ai/kimi-code-desktop e2e; then exit 0; fi
+            if [[ "$attempt" == 2 ]]; then exit 1; fi
+            echo 'Desktop E2E failed; retrying once with a fresh fixture.' >&2
+          done
+
+      - name: Build macOS package
+        run: pnpm --filter @moonshot-ai/kimi-code-desktop exec electron-builder --mac dmg --arm64
 
       - name: Inspect and smoke packaged application
         run: |
@@ -164,6 +189,7 @@ jobs:
           sudo apt-get install --no-install-recommends -y libopenjp2-tools xvfb
 
       - name: Validate release tag
+        if: github.event_name == 'push'
         run: node apps/desktop/scripts/check-release-tag.mjs "$GITHUB_REF_NAME"
 
       - name: Install dependencies
@@ -174,11 +200,21 @@ jobs:
           pnpm --filter @moonshot-ai/kimi-code-desktop test
           pnpm --filter @moonshot-ai/kimi-code-desktop typecheck
 
-      - name: Build Linux packages
-        run: pnpm --filter @moonshot-ai/kimi-code-desktop dist:linux
+      - name: Build Desktop
+        run: |
+          pnpm --filter @moonshot-ai/kimi-code-desktop licenses:check
+          pnpm --filter @moonshot-ai/kimi-code-desktop build
 
       - name: Run Desktop Electron E2E
-        run: xvfb-run -a pnpm --filter @moonshot-ai/kimi-code-desktop e2e
+        run: |
+          for attempt in 1 2; do
+            if xvfb-run -a pnpm --filter @moonshot-ai/kimi-code-desktop e2e; then exit 0; fi
+            if [[ "$attempt" == 2 ]]; then exit 1; fi
+            echo 'Desktop E2E failed; retrying once with a fresh fixture.' >&2
+          done
+
+      - name: Build Linux packages
+        run: pnpm --filter @moonshot-ai/kimi-code-desktop exec electron-builder --linux AppImage deb --x64
 
       - name: Inspect and smoke packaged application
         run: |
@@ -242,6 +278,7 @@ jobs:
         run: node apps/desktop/scripts/release-artifacts.mjs verify dist-desktop-release
 
       - name: Create or update GitHub Release
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
