@@ -58,16 +58,6 @@ jobs:
           pnpm --filter @moonshot-ai/kimi-code-desktop licenses:check
           pnpm --filter @moonshot-ai/kimi-code-desktop build
 
-      - name: Run Windows Desktop Electron E2E
-        run: |
-          for ($attempt = 1; $attempt -le 2; $attempt++) {
-            pnpm --filter @moonshot-ai/kimi-code-desktop e2e
-            $exitCode = $LASTEXITCODE
-            if ($exitCode -eq 0) { break }
-            if ($attempt -eq 2) { exit $exitCode }
-            Write-Warning 'Desktop E2E failed; retrying once with a fresh fixture.'
-          }
-
       - name: Build Windows package
         run: pnpm --filter @moonshot-ai/kimi-code-desktop exec electron-builder --win portable --x64 --publish never
 
@@ -117,6 +107,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Install Electron runtime
+        run: pnpm --filter @moonshot-ai/kimi-code-desktop exec install-electron
 
       - name: Test and typecheck Desktop
         run: |
