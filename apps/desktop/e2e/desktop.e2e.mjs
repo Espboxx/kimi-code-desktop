@@ -566,7 +566,15 @@ try {
     await window.kimiDesktop.host.snapshot()
   ).session.status?.model === 'desktop-test-alt', teamSessionId);
   assert.equal(await teamPage.getByLabel('主代理模型').inputValue(), 'desktop-test-alt');
-  await teamPage.locator('.team-member-list button:has(span[title="main"])').click();
+  const leaderActivityCard = teamPage.locator('.team-leader-activity');
+  await leaderActivityCard.waitFor({ state: 'visible', timeout: 30_000 });
+  assert.match(await assignmentToggle.innerText(), /0 进行中 · 0 等待 · 0 已结束/);
+  assert.match(await leaderActivityCard.innerText(), /组长当前工作/);
+  assert.ok(
+    (await leaderActivityCard.locator('.team-leader-activity-action').innerText()).trim().length > 0,
+    'Team leader activity card has no live action',
+  );
+  await leaderActivityCard.getByRole('button').click();
   await page.locator('.team-agent-surface').waitFor({ state: 'visible' });
   await approveProfileIfNeeded(page, teamProfilePath);
   assert.ok(
@@ -646,6 +654,7 @@ try {
   }
   await returnToTeamChannel(page, teamPage);
   await page.waitForFunction(() => document.querySelectorAll('.team-activity-strip').length === 0);
+  assert.equal(await teamPage.locator('.team-leader-activity').count(), 0, 'idle Team leader card must disappear');
   assert.equal(
     provider.requests.filter((request) => request.toolName === 'TeamWait').length,
     teamWaitRequestCountBefore,

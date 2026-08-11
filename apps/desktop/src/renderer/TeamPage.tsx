@@ -112,10 +112,12 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
     () => collectTeamAgentActivities(activity, snapshot.members),
     [activity, snapshot.members],
   );
+  const leaderAgentId = team?.leaderAgentId ?? 'main';
+  const leaderActivity = activeAgents.find((item) => item.agentId === leaderAgentId);
   const activityKey = activeAgents
     .map((item) => `${item.agentId}:${item.status}:${item.action}`)
     .join('|');
-  const leader = agentPresentation(team?.leaderAgentId ?? 'main', snapshot.members, snapshot.assignments);
+  const leader = agentPresentation(leaderAgentId, snapshot.members, snapshot.assignments);
   const selectedModelOption = models.find((model) => model.id === selectedModel);
   const imageInputSupport = selectedModelOption?.imageInput ?? 'unknown';
   const imageInputBlocked = images.length > 0 && imageInputSupport === 'unsupported';
@@ -481,6 +483,13 @@ export function TeamPage({ sessionId, state, activity, status, models, onSeen, o
                 leaderAgentId={team.leaderAgentId}
                 onSelectAgent={onSelectAgent}
               />
+              {leaderActivity !== undefined && (
+                <LeaderActivityCard
+                  activity={leaderActivity}
+                  displayName={leader.displayName}
+                  onSelectAgent={onSelectAgent}
+                />
+              )}
               {assignmentForest.length === 0
                 ? <div className="team-assignment-empty">暂无任务分配</div>
                 : assignmentGroups.map((group) => (
@@ -590,9 +599,7 @@ function TeamActivityStrip({ activities, members, assignments, onSelectAgent }: 
             key={activity.agentId}
           >
             <span className="team-activity-icon">
-              {activity.status === 'waiting'
-                ? <Clock3 size={12} />
-                : <CircleDashed className="spin" size={12} />}
+              <TeamActivityStatusIcon status={activity.status} size={12} />
             </span>
             <strong>{presentation.displayName}</strong>
             <em>{profession}</em>
@@ -602,6 +609,47 @@ function TeamActivityStrip({ activities, members, assignments, onSelectAgent }: 
       })}
     </div>
   );
+}
+
+function LeaderActivityCard({ activity, displayName, onSelectAgent }: {
+  readonly activity: TeamAgentActivity;
+  readonly displayName: string;
+  readonly onSelectAgent: (agentId: string) => void;
+}) {
+  const status = agentActivityLabel(activity.status);
+  return (
+    <section
+      className={classNames('team-leader-activity', `status-${activity.status}`)}
+      aria-label="组长当前工作"
+      aria-live="polite"
+    >
+      <h3>组长当前工作</h3>
+      <button
+        type="button"
+        onClick={() => { onSelectAgent(activity.agentId); }}
+        title={`${displayName} · ${status} · ${activity.action}`}
+        aria-label={`${displayName}，${status}：${activity.action}`}
+      >
+        <span className="team-leader-activity-icon">
+          <TeamActivityStatusIcon status={activity.status} size={13} />
+        </span>
+        <span className="team-leader-activity-copy">
+          <strong>{displayName}</strong>
+          <small className="team-leader-activity-action">{activity.action}</small>
+        </span>
+        <em>{status}</em>
+      </button>
+    </section>
+  );
+}
+
+function TeamActivityStatusIcon({ status, size }: {
+  readonly status: TeamAgentActivity['status'];
+  readonly size: number;
+}) {
+  return status === 'waiting'
+    ? <Clock3 size={size} />
+    : <CircleDashed className="spin" size={size} />;
 }
 
 function MemberList({ members, assignments, leaderAgentId, onSelectAgent }: {
