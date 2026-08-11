@@ -14,6 +14,10 @@ import { _electron as electron } from 'playwright';
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = resolve(appDir, '..', '..');
+const desktopVersion = JSON.parse(await readFile(join(appDir, 'package.json'), 'utf8')).version;
+const desktopVersionMatch = /^(\d+)[.](\d+)[.](\d+)$/u.exec(desktopVersion);
+if (desktopVersionMatch === null) throw new Error(`Invalid Desktop fixture version: ${String(desktopVersion)}`);
+const updateFixtureVersion = `${desktopVersionMatch[1]}.${desktopVersionMatch[2]}.${Number(desktopVersionMatch[3]) + 1}`;
 const artifactDir = join(appDir, 'output', 'playwright');
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'kimi-desktop-e2e-'));
 const kimiHome = join(fixtureRoot, 'home');
@@ -1457,6 +1461,7 @@ async function launchDesktopWith({ profile, workspaceOverride }) {
     ...process.env,
     KIMI_CODE_HOME: kimiHome,
     KIMI_DESKTOP_E2E: '1',
+    KIMI_DESKTOP_E2E_UPDATE_VERSION: updateFixtureVersion,
   };
   delete env.KIMI_DESKTOP_WORKSPACE;
   if (workspaceOverride !== undefined) env.KIMI_DESKTOP_WORKSPACE = workspaceOverride;
@@ -1645,9 +1650,18 @@ async function openSettingsAndVerify(page) {
   ).profiles.some((profile) => profile.id === 'workspace:desktop-reviewer')), false);
   await dialog.locator('.settings-nav').getByRole('button', { name: '诊断', exact: true }).click();
   assert.equal(await dialog.getByLabel(/团队协作/).count(), 0, 'Desktop-owned Team capability must not appear as an experimental toggle');
+  await dialog.locator('.settings-nav').getByRole('button', { name: '关于与更新', exact: true }).click();
+  await dialog.getByText(`当前版本 ${desktopVersion} · 支持应用内更新`, { exact: true }).waitFor();
+  await dialog.getByRole('button', { name: '检查更新', exact: true }).click();
+  await dialog.getByText(`发现 ${updateFixtureVersion}`, { exact: true }).waitFor();
+  await page.locator('.update-banner').getByText(`Kimi Code Desktop ${updateFixtureVersion} 可用`, { exact: true }).waitFor();
+  await dialog.getByRole('button', { name: '下载更新', exact: true }).click();
+  await dialog.getByText('等待重启', { exact: true }).waitFor();
+  assert.equal((await page.evaluate(() => window.kimiDesktop.update.state())).status, 'downloaded');
   await dialog.locator('.settings-nav').getByRole('button', { name: '账户', exact: true }).click();
   await dialog.getByText('未登录', { exact: true }).waitFor();
   await dialog.locator('.dialog-header .icon-button').click();
+  await page.locator('.update-banner').getByTitle('稍后').click();
 }
 
 async function auditAndScreenshot(app, page, width, height, outputPath) {

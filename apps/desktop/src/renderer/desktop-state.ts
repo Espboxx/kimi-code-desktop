@@ -10,6 +10,8 @@ import type {
   TeamStateSnapshot,
   TranscriptSnapshot,
 } from '../shared/desktop-api';
+import { DesktopTranscriptReplica } from './transcript-replica';
+import { TeamReplica } from './team-replica';
 
 interface WorkspaceChangeState {
   readonly version: number;
@@ -19,9 +21,8 @@ interface WorkspaceChangeState {
 export interface CloseRequestState {
   readonly requestId: string;
   readonly dirtyPaths: readonly string[];
+  readonly reason: 'quit' | 'install-update';
 }
-import { DesktopTranscriptReplica } from './transcript-replica';
-import { TeamReplica } from './team-replica';
 
 export interface DesktopState {
   readonly snapshot?: DesktopSnapshot;
@@ -190,8 +191,18 @@ export function useDesktopState(): DesktopState {
           });
           setWorkspaceChange((current) => ({ version: current.version + 1, paths: notification.changedPaths }));
           break;
+        case 'update.changed':
+          setSnapshot((current) => current === undefined ? current : {
+            ...current,
+            update: notification.update,
+          });
+          break;
         case 'host.closeRequested':
-          setCloseRequest({ requestId: notification.requestId, dirtyPaths: notification.dirtyPaths });
+          setCloseRequest({
+            requestId: notification.requestId,
+            dirtyPaths: notification.dirtyPaths,
+            reason: notification.reason,
+          });
           break;
         case 'error':
           setError(notification.error);

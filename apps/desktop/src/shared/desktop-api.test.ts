@@ -43,6 +43,31 @@ describe('desktop IPC schema', () => {
     });
   });
 
+  it('maps update controls to validated update commands', async () => {
+    const calls = vi.fn();
+    const invoke: Parameters<typeof createKimiDesktopApi>[0] = async <T>(
+      domain: DesktopDomain,
+      action: string,
+      payload?: unknown,
+    ) => {
+      calls(domain, action, payload);
+      return undefined as T;
+    };
+    const api = createKimiDesktopApi(invoke, () => () => undefined);
+
+    await api.update.check();
+    await api.update.download();
+    await api.update.install();
+
+    expect(calls.mock.calls).toEqual([
+      ['update', 'check', undefined],
+      ['update', 'download', undefined],
+      ['update', 'install', undefined],
+    ]);
+    expect(parseDesktopCommand({ domain: 'update', action: 'state' })).toMatchObject({ name: 'update.state' });
+    expect(() => parseDesktopCommand({ domain: 'update', action: 'check', payload: { force: true } })).toThrow();
+  });
+
   it('validates file, diff, and close-coordination payloads', () => {
     expect(parseDesktopCommand({
       domain: 'workspace', action: 'readDiff', payload: { path: 'src/a.ts', area: 'staged' },

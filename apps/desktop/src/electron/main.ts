@@ -2,11 +2,17 @@ import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, net, session, shell } from 'electron';
 
 import type { KimiDesktopNotification } from '../shared/desktop-api';
 import { parseDesktopCommand } from '../shared/desktop-command-schema';
+import { createElectronUpdateAdapter } from './electron-update-adapter';
 import { assertExternalUrl, KimiDesktopRuntime, serializeError } from './runtime';
+import {
+  createGitHubReleaseClient,
+  selectDesktopUpdateMode,
+  UpdateController,
+} from './update-controller';
 import {
   isWorkspaceDirectory,
   readWorkspacePreferences,
@@ -22,10 +28,15 @@ const SMOKE_TIMEOUT_MS = 10_000;
 
 let mainWindow: BrowserWindow | undefined;
 let runtime: KimiDesktopRuntime | undefined;
+let updateController: UpdateController | undefined;
+let startupUpdateTimer: ReturnType<typeof setTimeout> | undefined;
+let startupUpdateCheckScheduled = false;
 let exiting = false;
 let allowWindowClose = false;
 let dirtyPaths: readonly string[] = [];
 let closeRequestId: string | undefined;
+let closeRequestReason: 'quit' | 'install-update' = 'quit';
+let closeRequestRunAfter = false;
 
 app.setName('Kimi Code Desktop');
 if (process.platform === 'win32') app.setAppUserModelId('ai.moonshot.kimi-code-desktop');
@@ -65,10 +76,109 @@ function notify(notification: KimiDesktopNotification): void {
   }
 }
 
-function requestRendererClose(): void {
+function requestRendererClose(reason: 'quit' | 'install-update' = 'quit', runAfter = false): void {
   if (closeRequestId !== undefined || mainWindow?.isDestroyed() !== false) return;
   closeRequestId = randomUUID();
-  notify({ type: 'host.closeRequested', requestId: closeRequestId, dirtyPaths });
+  closeRequestReason = reason;
+  closeRequestRunAfter = runAfter;
+  notify({ type: 'host.closeRequested', requestId: closeRequestId, dirtyPaths, reason });
+}
+
+function scheduleStartupUpdateCheck(): void {
+  if (
+    startupUpdateCheckScheduled ||
+    updateController?.startupCheck !== true ||
+    process.env['KIMI_DESKTOP_E2E'] === '1' ||
+    process.env['KIMI_DESKTOP_SMOKE'] === '1'
+  ) return;
+  startupUpdateCheckScheduled = true;
+  startupUpdateTimer = setTimeout(() => {
+    startupUpdateTimer = undefined;
+    void updateController?.check();
+  }, 5_000);
+}
+
+function requestUpdateInstall(): void {
+  const controller = requireUpdateController();
+  controller.assertInstallReady();
+  if (dirtyPaths.length > 0 && mainWindow?.isDestroyed() === false) {
+    requestRendererClose('install-update', true);
+    return;
+  }
+  void shutdownApplication(true, true);
+}
+
+async function shutdownApplication(installUpdate: boolean, runAfter: boolean): Promise<void> {
+  if (exiting) return;
+  exiting = true;
+  allowWindowClose = true;
+  if (startupUpdateTimer !== undefined) {
+    clearTimeout(startupUpdateTimer);
+    startupUpdateTimer = undefined;
+  }
+  try {
+    await (runtime?.close() ?? Promise.resolve());
+  } catch (error) {
+    console.error(error);
+  }
+  if (!installUpdate) {
+    app.exit(0);
+    return;
+  }
+  try {
+    requireUpdateController().quitAndInstall(runAfter);
+  } catch (error) {
+    console.error(error);
+    app.exit(1);
+  }
+}
+
+function requireUpdateController(): UpdateController {
+  if (updateController === undefined) throw new Error('Desktop update controller is not ready');
+  return updateController;
+}
+
+function createDesktopUpdateController(): UpdateController {
+  const e2eVersion = process.env['KIMI_DESKTOP_E2E_UPDATE_VERSION'];
+  if (process.env['KIMI_DESKTOP_E2E'] === '1' && e2eVersion !== undefined) {
+    const releaseUrl = `https://github.com/Espboxx/kimi-code-desktop/releases/tag/desktop-v${e2eVersion}`;
+    return new UpdateController({
+      currentVersion: app.getVersion(),
+      mode: 'automatic',
+      startupCheck: false,
+      releaseClient: {
+        latest: async () => ({
+          version: e2eVersion,
+          name: `Kimi Code Desktop ${e2eVersion}`,
+          notes: 'Deterministic Desktop E2E update fixture.',
+          url: releaseUrl,
+        }),
+      },
+      automaticAdapter: {
+        prepare: async () => e2eVersion,
+        download: async (onProgress) => {
+          onProgress({ percent: 50, transferred: 512, total: 1_024, bytesPerSecond: 1_024 });
+          await new Promise((resolve) => setTimeout(resolve, 25));
+          onProgress({ percent: 100, transferred: 1_024, total: 1_024, bytesPerSecond: 1_024 });
+        },
+        quitAndInstall: () => app.exit(0),
+      },
+      notify: (update) => notify({ type: 'update.changed', update }),
+    });
+  }
+
+  const updateMode = selectDesktopUpdateMode({
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    environment: process.env,
+  });
+  return new UpdateController({
+    currentVersion: app.getVersion(),
+    ...updateMode,
+    releaseClient: createGitHubReleaseClient((input, init) => net.fetch(input, init)),
+    automaticAdapter: updateMode.mode === 'automatic' ? createElectronUpdateAdapter() : undefined,
+    notify: (update) => notify({ type: 'update.changed', update }),
+  });
 }
 
 function createWindow(): BrowserWindow {
@@ -120,6 +230,7 @@ function createWindow(): BrowserWindow {
     .then(async () => {
       loadingInitialDocument = false;
       await runtime?.initialize();
+      scheduleStartupUpdateCheck();
       if (process.env['KIMI_DESKTOP_SMOKE'] === '1') {
         await smokeNativePty();
         setTimeout(() => app.quit(), 500);
@@ -161,6 +272,7 @@ void app.whenReady().then(async () => {
     initialWorkspace = undefined;
     await writeWorkspacePreferences(preferencesPath, undefined).catch(() => undefined);
   }
+  updateController = createDesktopUpdateController();
   runtime = new KimiDesktopRuntime({
     workspaceRoot: initialWorkspace,
     homeDir: process.env['KIMI_CODE_HOME'],
@@ -183,14 +295,31 @@ void app.whenReady().then(async () => {
         const message = await shell.openPath(path);
         if (message.length > 0) throw new Error(message);
       },
+      getUpdateState: () => requireUpdateController().state(),
+      checkForUpdates: () => requireUpdateController().check(),
+      downloadUpdate: () => requireUpdateController().download(),
+      installUpdate: requestUpdateInstall,
+      openUpdateRelease: async () => {
+        if (process.env['KIMI_DESKTOP_E2E'] !== '1') {
+          await shell.openExternal(requireUpdateController().releaseUrl());
+        }
+      },
       setDirtyFiles: (paths) => {
         dirtyPaths = [...new Set(paths)].sort();
       },
       resolveClose: (requestId, action) => {
         if (requestId !== closeRequestId) return;
+        const reason = closeRequestReason;
+        const runAfter = closeRequestRunAfter;
         closeRequestId = undefined;
+        closeRequestReason = 'quit';
+        closeRequestRunAfter = false;
         if (action === 'cancel') return;
         dirtyPaths = [];
+        if (reason === 'install-update') {
+          void shutdownApplication(true, runAfter);
+          return;
+        }
         allowWindowClose = true;
         mainWindow?.close();
       },
@@ -207,14 +336,14 @@ void app.whenReady().then(async () => {
 
 app.on('before-quit', (event) => {
   if (exiting) return;
+  const installUpdate = updateController?.hasDownloadedUpdate() === true;
   if (!allowWindowClose && dirtyPaths.length > 0 && mainWindow?.isDestroyed() === false) {
     event.preventDefault();
-    requestRendererClose();
+    requestRendererClose(installUpdate ? 'install-update' : 'quit', false);
     return;
   }
   event.preventDefault();
-  exiting = true;
-  void (runtime?.close() ?? Promise.resolve()).finally(() => app.exit(0));
+  void shutdownApplication(installUpdate, false);
 });
 
 app.on('window-all-closed', () => {

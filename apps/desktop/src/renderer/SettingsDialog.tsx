@@ -7,9 +7,12 @@ import {
   Check,
   CircleAlert,
   Cloud,
+  Download,
+  ExternalLink,
   FlaskConical,
   FolderOpen,
   KeyRound,
+  Info,
   LogIn,
   LogOut,
   MessageSquareText,
@@ -30,6 +33,7 @@ import type {
   AgentProfileDraft,
   AgentProfileListResult,
   DesktopSnapshot,
+  DesktopUpdateSnapshot,
   JsonRecord,
 } from '../shared/desktop-api';
 import {
@@ -39,10 +43,18 @@ import {
 } from './experimental-features';
 import { array, bool, classNames, formatJson, number, record, text } from './ui-utils';
 
-type SettingsTab = 'account' | 'models' | 'profiles' | 'mcp' | 'extensions' | 'workspace' | 'diagnostics';
+export type SettingsTab = 'account' | 'models' | 'profiles' | 'mcp' | 'extensions' | 'workspace' | 'diagnostics' | 'about';
 
-export function SettingsDialog({ snapshot, onClose }: { readonly snapshot: DesktopSnapshot; readonly onClose: () => void }) {
-  const [tab, setTab] = useState<SettingsTab>('account');
+export function SettingsDialog({
+  snapshot,
+  initialTab,
+  onClose,
+}: {
+  readonly snapshot: DesktopSnapshot;
+  readonly initialTab?: SettingsTab;
+  readonly onClose: () => void;
+}) {
+  const [tab, setTab] = useState<SettingsTab>(initialTab ?? 'account');
   const tabs: Array<{ id: SettingsTab; label: string; icon: React.ReactNode }> = [
     { id: 'account', label: '账户', icon: <UserRound size={15} /> },
     { id: 'models', label: '模型与 Provider', icon: <Bot size={15} /> },
@@ -51,6 +63,7 @@ export function SettingsDialog({ snapshot, onClose }: { readonly snapshot: Deskt
     { id: 'extensions', label: '扩展', icon: <Blocks size={15} /> },
     { id: 'workspace', label: '工作区', icon: <ShieldCheck size={15} /> },
     { id: 'diagnostics', label: '诊断', icon: <Activity size={15} /> },
+    { id: 'about', label: '关于与更新', icon: <Info size={15} /> },
   ];
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
@@ -71,6 +84,7 @@ export function SettingsDialog({ snapshot, onClose }: { readonly snapshot: Deskt
             {tab === 'extensions' && <ExtensionSettings snapshot={snapshot} />}
             {tab === 'workspace' && <WorkspaceSettings snapshot={snapshot} />}
             {tab === 'diagnostics' && <DiagnosticsSettings snapshot={snapshot} />}
+            {tab === 'about' && <AboutSettings update={snapshot.update} />}
           </main>
         </div>
       </div>
@@ -655,6 +669,83 @@ function DiagnosticsSettings({ snapshot }: { readonly snapshot: DesktopSnapshot 
       </section>
     </SettingsPage>
   );
+}
+
+function AboutSettings({ update }: { readonly update: DesktopUpdateSnapshot }) {
+  const checking = update.status === 'checking';
+  const downloading = update.status === 'downloading';
+  const releaseAvailable = update.status === 'available' || downloading || update.status === 'downloaded';
+  return (
+    <SettingsPage title="关于与更新" description="自动检查稳定版发布；下载和安装操作由 Electron 主进程执行。">
+      <section className="settings-section update-settings-card">
+        <div className="update-product-row">
+          <span className="update-product-icon"><Info size={18} /></span>
+          <div>
+            <strong>Kimi Code Desktop</strong>
+            <small>当前版本 {update.currentVersion} · {updateModeLabel(update)}</small>
+          </div>
+          <span className={classNames('update-status-badge', update.status)}>{updateStatusLabel(update)}</span>
+        </div>
+        {update.progress !== undefined && (
+          <div className="update-progress" aria-label={`更新下载进度 ${Math.round(update.progress.percent)}%`}>
+            <div><span style={{ width: `${update.progress.percent}%` }} /></div>
+            <small>{Math.round(update.progress.percent)}% · {formatBytes(update.progress.transferred)} / {formatBytes(update.progress.total)}</small>
+          </div>
+        )}
+        {update.error !== undefined && (
+          <div className="update-error" role="alert"><CircleAlert size={14} /><span>{update.error.message}</span></div>
+        )}
+        <div className="settings-actions wrap">
+          <button disabled={checking || downloading || update.status === 'downloaded'} onClick={() => void window.kimiDesktop.update.check()}>
+            <RefreshCw className={checking ? 'spin' : undefined} size={13} />{checking ? '正在检查' : update.status === 'error' ? '重试检查' : '检查更新'}
+          </button>
+          {update.status === 'available' && update.mode === 'automatic' && (
+            <button className="button-primary" onClick={() => void window.kimiDesktop.update.download()}><Download size={13} />下载更新</button>
+          )}
+          {update.status === 'downloaded' && (
+            <button className="button-primary" onClick={() => void window.kimiDesktop.update.install()}><RefreshCw size={13} />立即重启</button>
+          )}
+          {((update.mode === 'manual' && releaseAvailable) || update.releaseUrl !== undefined) && (
+            <button onClick={() => void window.kimiDesktop.update.openRelease()}><ExternalLink size={13} />查看 GitHub Release</button>
+          )}
+        </div>
+        {update.checkedAt !== undefined && <small className="update-checked-at">上次检查：{new Date(update.checkedAt).toLocaleString()}</small>}
+      </section>
+      {releaseAvailable && (
+        <section className="settings-section">
+          <h3><Download size={15} />{update.releaseName ?? `Kimi Code Desktop ${update.latestVersion ?? ''}`}</h3>
+          <pre className="update-release-notes">{update.releaseNotes?.trim() || '此版本没有附加发布说明。'}</pre>
+        </section>
+      )}
+    </SettingsPage>
+  );
+}
+
+function updateModeLabel(update: DesktopUpdateSnapshot): string {
+  if (update.mode === 'automatic') return '支持应用内更新';
+  if (update.manualReason === 'windows-portable') return 'Portable 版通过 Release 更新';
+  if (update.manualReason === 'macos-unsigned') return 'macOS 版通过 Release 更新';
+  if (update.manualReason === 'linux-package') return 'DEB 版通过 Release 更新';
+  if (update.manualReason === 'development') return '开发模式';
+  return '通过 Release 更新';
+}
+
+function updateStatusLabel(update: DesktopUpdateSnapshot): string {
+  if (update.status === 'idle') return '尚未检查';
+  if (update.status === 'checking') return '正在检查';
+  if (update.status === 'up-to-date') return '已是最新版本';
+  if (update.status === 'available') return `发现 ${update.latestVersion ?? '新版本'}`;
+  if (update.status === 'downloading') return '正在下载';
+  if (update.status === 'downloaded') return '等待重启';
+  return '检查失败';
+}
+
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0 B';
+  if (value < 1024) return `${Math.round(value)} B`;
+  if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KiB`;
+  if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MiB`;
+  return `${(value / 1024 ** 3).toFixed(1)} GiB`;
 }
 
 function SettingsPage({ title, description, children }: { readonly title: string; readonly description: string; readonly children: React.ReactNode }) {

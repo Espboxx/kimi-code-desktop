@@ -7,9 +7,9 @@ Workspace packages maintained in this repository are covered by the repository-l
 [MIT License](../../LICENSE) and are not duplicated here. Electron also ships its own
 `LICENSE.electron.txt` and `LICENSES.chromium.html` files in Windows distributions.
 
-- External packages: 457
+- External packages: 467
 - Workspace source roots: 12
-- Dependency graph SHA-256: `9569fe4e46120d76800170fe41a2e06a879f16e1c7d33c51c34d6d5c3ca07d2a`
+- Dependency graph SHA-256: `a2e008225fc4f38028f170061ea9d1575dd0a3fe2ecda23b81a72f53b5da88ae`
 
 Packages are sorted by name and version. SPDX expressions and license texts come from
 the installed package metadata selected by the pinned pnpm lockfile. If a published
@@ -113,6 +113,7 @@ and records that source next to the affected package.
 | `buffer-crc32` | `0.2.13` | `MIT` | <https://github.com/brianloveswords/buffer-crc32> |
 | `buffer-crc32` | `1.0.0` | `MIT` | <https://github.com/brianloveswords/buffer-crc32> |
 | `buffer-equal-constant-time` | `1.0.1` | `BSD-3-Clause` | <https://github.com/goinstant/buffer-equal-constant-time#readme> |
+| `builder-util-runtime` | `9.7.0` | `MIT` | <https://github.com/electron-userland/electron-builder> |
 | `bundle-name` | `4.1.0` | `MIT` | <https://github.com/sindresorhus/bundle-name#readme> |
 | `bytes` | `3.1.2` | `MIT` | <https://github.com/visionmedia/bytes.js#readme> |
 | `call-bind` | `1.0.9` | `MIT` | <https://github.com/ljharb/call-bind#readme> |
@@ -160,6 +161,7 @@ and records that source next to the affected package.
 | `ecdsa-sig-formatter` | `1.0.11` | `Apache-2.0` | <https://github.com/Brightspace/node-ecdsa-sig-formatter#readme> |
 | `ee-first` | `1.1.1` | `MIT` | <https://github.com/jonathanong/ee-first#readme> |
 | `electron` | `43.3.0` | `MIT` | <https://github.com/electron/electron> |
+| `electron-updater` | `6.8.9` | `MIT` | <https://github.com/electron-userland/electron-builder> |
 | `encodeurl` | `2.0.0` | `MIT` | <https://github.com/pillarjs/encodeurl#readme> |
 | `entities` | `4.5.0` | `BSD-2-Clause` | <https://github.com/fb55/entities#readme> |
 | `entities` | `7.0.1` | `BSD-2-Clause` | <https://github.com/fb55/entities#readme> |
@@ -189,6 +191,7 @@ and records that source next to the affected package.
 | `formdata-polyfill` | `4.0.10` | `MIT` | <https://github.com/jimmywarting/FormData#readme> |
 | `forwarded` | `0.2.0` | `MIT` | <https://github.com/jshttp/forwarded#readme> |
 | `fresh` | `2.0.0` | `MIT` | <https://github.com/jshttp/fresh#readme> |
+| `fs-extra` | `10.1.0` | `MIT` | <https://github.com/jprichardson/node-fs-extra> |
 | `function-bind` | `1.1.2` | `MIT` | <https://github.com/Raynos/function-bind> |
 | `function.prototype.name` | `1.1.8` | `MIT` | <https://github.com/es-shims/Function.prototype.name#readme> |
 | `functions-have-names` | `1.2.3` | `MIT` | <https://github.com/inspect-js/functions-have-names#readme> |
@@ -269,9 +272,13 @@ and records that source next to the affected package.
 | `json-schema-to-ts` | `3.1.1` | `MIT` | <https://github.com/ThomasAribart/json-schema-to-ts#readme> |
 | `json-schema-traverse` | `1.0.0` | `MIT` | <https://github.com/epoberezkin/json-schema-traverse#readme> |
 | `json-schema-typed` | `8.0.2` | `BSD-2-Clause` | <https://github.com/RemyRylan/json-schema-typed/tree/main/dist/node> |
+| `jsonfile` | `6.2.1` | `MIT` | <https://github.com/jprichardson/node-jsonfile#readme> |
 | `jwa` | `2.0.1` | `MIT` | <https://github.com/brianloveswords/node-jwa#readme> |
 | `jws` | `4.0.1` | `MIT` | <https://github.com/brianloveswords/node-jws#readme> |
+| `lazy-val` | `1.0.5` | `MIT` | <https://github.com/develar/lazy-val> |
 | `linkedom` | `0.18.12` | `ISC` | <https://github.com/WebReflection/linkedom#readme> |
+| `lodash.escaperegexp` | `4.1.2` | `MIT` | <https://lodash.com/> |
+| `lodash.isequal` | `4.5.0` | `MIT` | <https://lodash.com/> |
 | `long` | `5.3.2` | `Apache-2.0` | <https://github.com/dcodeIO/long.js#readme> |
 | `longest-streak` | `3.1.0` | `MIT` | <https://github.com/wooorm/longest-streak#readme> |
 | `lucide-react` | `1.30.0` | `ISC` | <https://lucide.dev> |
@@ -396,6 +403,7 @@ and records that source next to the affected package.
 | `safer-buffer` | `2.1.2` | `MIT` | <https://github.com/ChALkeR/safer-buffer#readme> |
 | `sax` | `1.6.0` | `BlueOak-1.0.0` | <https://github.com/isaacs/sax-js#readme> |
 | `scheduler` | `0.27.0` | `MIT` | <https://react.dev/> |
+| `semver` | `7.7.4` | `ISC` | <https://github.com/npm/node-semver#readme> |
 | `send` | `1.2.1` | `MIT` | <https://github.com/pillarjs/send#readme> |
 | `serve-static` | `2.2.1` | `MIT` | <https://github.com/expressjs/serve-static#readme> |
 | `set-function-length` | `1.2.2` | `MIT` | <https://github.com/ljharb/set-function-length#readme> |
@@ -428,6 +436,7 @@ and records that source next to the affected package.
 | `style-to-object` | `1.0.14` | `MIT` | <https://github.com/remarkablemark/style-to-object#readme> |
 | `supports-color` | `8.1.1` | `MIT` | <https://github.com/chalk/supports-color#readme> |
 | `tar` | `7.5.13` | `BlueOak-1.0.0` | <https://github.com/isaacs/node-tar#readme> |
+| `tiny-typed-emitter` | `2.1.0` | `MIT` | <https://github.com/binier/tiny-typed-emitter#readme> |
 | `tinycolor2` | `1.6.0` | `MIT` | <https://github.com/bgrins/TinyColor#readme> |
 | `toidentifier` | `1.0.1` | `MIT` | <https://github.com/component/toidentifier#readme> |
 | `token-types` | `6.1.2` | `MIT` | <https://github.com/Borewit/token-types#readme> |
@@ -452,6 +461,7 @@ and records that source next to the affected package.
 | `unist-util-stringify-position` | `4.0.0` | `MIT` | <https://github.com/syntax-tree/unist-util-stringify-position#readme> |
 | `unist-util-visit` | `5.1.0` | `MIT` | <https://github.com/syntax-tree/unist-util-visit#readme> |
 | `unist-util-visit-parents` | `6.0.2` | `MIT` | <https://github.com/syntax-tree/unist-util-visit-parents#readme> |
+| `universalify` | `2.0.1` | `MIT` | <https://github.com/RyanZim/universalify#readme> |
 | `unpipe` | `1.0.0` | `MIT` | <https://github.com/stream-utils/unpipe#readme> |
 | `utif2` | `4.1.0` | `MIT` | <https://github.com/photopea/UTIF.js> |
 | `vary` | `1.1.2` | `MIT` | <https://github.com/jshttp/vary#readme> |
@@ -3963,6 +3973,37 @@ Redistribution and use in source and binary forms, with or without modification,
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
+### `builder-util-runtime@9.7.0`
+
+- SPDX: `MIT`
+- Homepage: <https://github.com/electron-userland/electron-builder>
+
+#### `LICENSE`
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2015 Loopline Systems
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### `bundle-name@4.1.0`
 
 - SPDX: `MIT`
@@ -6109,6 +6150,37 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
+### `electron-updater@6.8.9`
+
+- SPDX: `MIT`
+- Homepage: <https://github.com/electron-userland/electron-builder>
+
+#### `LICENSE`
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2015 Loopline Systems
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### `encodeurl@2.0.0`
 
 - SPDX: `MIT`
@@ -6992,6 +7064,31 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
 CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
 TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### `fs-extra@10.1.0`
+
+- SPDX: `MIT`
+- Homepage: <https://github.com/jprichardson/node-fs-extra>
+
+#### `LICENSE`
+
+```text
+(The MIT License)
+
+Copyright (c) 2011-2017 JP Richardson
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files
+(the 'Software'), to deal in the Software without restriction, including without limitation the rights to use, copy, modify,
+ merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
+OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
 ### `function-bind@1.1.2`
@@ -10140,6 +10237,31 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
+### `jsonfile@6.2.1`
+
+- SPDX: `MIT`
+- Homepage: <https://github.com/jprichardson/node-jsonfile#readme>
+
+#### `LICENSE`
+
+```text
+(The MIT License)
+
+Copyright (c) 2012-2015, JP Richardson <jprichardson@gmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files
+(the 'Software'), to deal in the Software without restriction, including without limitation the rights to use, copy, modify,
+ merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
+OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
 ### `jwa@2.0.1`
 
 - SPDX: `MIT`
@@ -10194,6 +10316,38 @@ FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TOR
 ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
+### `lazy-val@1.0.5`
+
+- SPDX: `MIT`
+- Homepage: <https://github.com/develar/lazy-val>
+- License text source: <https://github.com/develar/lazy-val/blob/b69ad4119f1b19bdab13c61ee2fcc88d46b89071/package.json#L5-L7>
+
+#### `LICENSE`
+
+```text
+MIT License
+
+Copyright (c) Vladimir Krivosheev
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### `linkedom@0.18.12`
 
 - SPDX: `ISC`
@@ -10217,6 +10371,120 @@ INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
 LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE
 OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 PERFORMANCE OF THIS SOFTWARE.
+```
+
+### `lodash.escaperegexp@4.1.2`
+
+- SPDX: `MIT`
+- Homepage: <https://lodash.com/>
+
+#### `LICENSE`
+
+```text
+Copyright jQuery Foundation and other contributors <https://jquery.org/>
+
+Based on Underscore.js, copyright Jeremy Ashkenas,
+DocumentCloud and Investigative Reporters & Editors <http://underscorejs.org/>
+
+This software consists of voluntary contributions made by many
+individuals. For exact contribution history, see the revision history
+available at https://github.com/lodash/lodash
+
+The following license applies to all parts of this software except as
+documented below:
+
+====
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+====
+
+Copyright and related rights for sample code are waived via CC0. Sample
+code is defined as all source code displayed within the prose of the
+documentation.
+
+CC0: http://creativecommons.org/publicdomain/zero/1.0/
+
+====
+
+Files located in the node_modules and vendor directories are externally
+maintained libraries used by this software which have their own
+licenses; we recommend you read them, as their terms may differ from the
+terms above.
+```
+
+### `lodash.isequal@4.5.0`
+
+- SPDX: `MIT`
+- Homepage: <https://lodash.com/>
+
+#### `LICENSE`
+
+```text
+Copyright JS Foundation and other contributors <https://js.foundation/>
+
+Based on Underscore.js, copyright Jeremy Ashkenas,
+DocumentCloud and Investigative Reporters & Editors <http://underscorejs.org/>
+
+This software consists of voluntary contributions made by many
+individuals. For exact contribution history, see the revision history
+available at https://github.com/lodash/lodash
+
+The following license applies to all parts of this software except as
+documented below:
+
+====
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+====
+
+Copyright and related rights for sample code are waived via CC0. Sample
+code is defined as all source code displayed within the prose of the
+documentation.
+
+CC0: http://creativecommons.org/publicdomain/zero/1.0/
+
+====
+
+Files located in the node_modules and vendor directories are externally
+maintained libraries used by this software which have their own
+licenses; we recommend you read them, as their terms may differ from the
+terms above.
 ```
 
 ### `long@5.3.2`
@@ -14646,6 +14914,31 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+### `semver@7.7.4`
+
+- SPDX: `ISC`
+- Homepage: <https://github.com/npm/node-semver#readme>
+
+#### `LICENSE`
+
+```text
+The ISC License
+
+Copyright (c) Isaac Z. Schlueter and Contributors
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR
+IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+```
+
 ### `send@1.2.1`
 
 - SPDX: `MIT`
@@ -15635,6 +15928,37 @@ will be liable to anyone for any damages related to this
 software or this license, under any kind of legal claim.***
 ```
 
+### `tiny-typed-emitter@2.1.0`
+
+- SPDX: `MIT`
+- Homepage: <https://github.com/binier/tiny-typed-emitter#readme>
+
+#### `LICENSE`
+
+```text
+MIT License
+
+Copyright (c) 2020 Zurab Benashvili (binier) <zura.bena@gmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ### `tinycolor2@1.6.0`
 
 - SPDX: `MIT`
@@ -16357,6 +16681,36 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
 CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
 TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### `universalify@2.0.1`
+
+- SPDX: `MIT`
+- Homepage: <https://github.com/RyanZim/universalify#readme>
+
+#### `LICENSE`
+
+```text
+(The MIT License)
+
+Copyright (c) 2017, Ryan Zimmerman <opensrc@ryanzim.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the 'Software'), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
 ### `unpipe@1.0.0`

@@ -35,7 +35,7 @@ import { useDesktopState } from './desktop-state';
 import { DirtyFilesDialog } from './DirtyFilesDialog';
 import { Inspector } from './Inspector';
 import { PendingInteractionDock } from './PendingInteractionDock';
-import { SettingsDialog } from './SettingsDialog';
+import { SettingsDialog, type SettingsTab } from './SettingsDialog';
 import { Sidebar, type SessionAction } from './Sidebar';
 import { buildTeamBadge } from './swarm-ui';
 import { TeamPage } from './TeamPage';
@@ -44,6 +44,7 @@ import { persistTheme, readTheme, toggleTheme } from './theme';
 import { Timeline } from './Timeline';
 import type { FileOperationTarget } from './tool-display';
 import { classNames, record, text } from './ui-utils';
+import { UpdateBanner } from './UpdateBanner';
 import {
   FileEditorView,
   GitDiffEditorView,
@@ -89,7 +90,11 @@ interface RendererError {
 type DirtyPrompt =
   | { readonly kind: 'tab'; readonly tabId: string }
   | { readonly kind: 'workspace' }
-  | { readonly kind: 'host'; readonly requestId: string };
+  | {
+      readonly kind: 'host';
+      readonly requestId: string;
+      readonly reason: 'quit' | 'install-update';
+    };
 
 interface MemoryDiffState {
   readonly path: string;
@@ -109,7 +114,7 @@ export function App() {
   const activeSessionId = snapshot?.activeSessionId;
   const sessionIndexKey = snapshot?.sessions.map((session) => `${session.id}:${session.surface}`).join('\0') ?? '';
   const [selectedAgents, setSelectedAgents] = useState<Record<string, string>>({});
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>();
   const [workspaceChoosing, setWorkspaceChoosing] = useState(false);
   const [theme, setTheme] = useState(() => readTheme(
     window.localStorage,
@@ -433,7 +438,11 @@ export function App() {
       state.dismissCloseRequest();
       return;
     }
-    setDirtyPrompt({ kind: 'host', requestId: state.closeRequest.requestId });
+    setDirtyPrompt({
+      kind: 'host',
+      requestId: state.closeRequest.requestId,
+      reason: state.closeRequest.reason,
+    });
     setDirtyPromptError(undefined);
   }, [dirtyTabs.length, state.closeRequest]);
 
@@ -774,9 +783,11 @@ export function App() {
           >
             {theme === 'light' ? <Sun size={15} /> : <Moon size={15} />}
           </button>
-          <button className="icon-button" onClick={() => setSettingsOpen(true)} title="设置"><Settings size={16} /></button>
+          <button className="icon-button" onClick={() => setSettingsTab('account')} title="设置"><Settings size={16} /></button>
         </div>
       </header>
+
+      <UpdateBanner update={snapshot.update} onOpenSettings={() => setSettingsTab('about')} />
 
       {workspaceSelected && surface === 'chat' ? <div className="workbench">
         <Sidebar
@@ -994,7 +1005,13 @@ export function App() {
         <WorkspaceWelcome busy={workspaceChoosing} onChoose={chooseWorkspace} />
       )}
 
-      {settingsOpen && <SettingsDialog snapshot={snapshot} onClose={() => setSettingsOpen(false)} />}
+      {settingsTab !== undefined && (
+        <SettingsDialog
+          snapshot={snapshot}
+          initialTab={settingsTab}
+          onClose={() => setSettingsTab(undefined)}
+        />
+      )}
       {teamCreation !== undefined && (
         <CreateTeamDialog
           currentPermission={defaultPermission(snapshot.config.value)}
@@ -1008,7 +1025,15 @@ export function App() {
       {taskOutput !== undefined && <OutputDialog title={`Task · ${taskOutput.taskId}`} output={taskOutput.output} onClose={() => setTaskOutput(undefined)} />}
       {dirtyPrompt !== undefined && dirtyPromptPaths.length > 0 && (
         <DirtyFilesDialog
-          title={dirtyPrompt.kind === 'host' ? '退出前保存修改' : dirtyPrompt.kind === 'workspace' ? '切换工作区前保存修改' : '保存文件修改'}
+          title={
+            dirtyPrompt.kind === 'host'
+              ? dirtyPrompt.reason === 'install-update'
+                ? '重启更新前保存修改'
+                : '退出前保存修改'
+              : dirtyPrompt.kind === 'workspace'
+                ? '切换工作区前保存修改'
+                : '保存文件修改'
+          }
           paths={dirtyPromptPaths}
           busy={dirtyPromptBusy}
           error={dirtyPromptError}

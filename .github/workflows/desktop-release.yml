@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   windows-x64:
-    name: Windows x64 portable
+    name: Windows x64 installer and portable
     runs-on: windows-latest
     timeout-minutes: 60
     env:
@@ -59,7 +59,7 @@ jobs:
           pnpm --filter @moonshot-ai/kimi-code-desktop build
 
       - name: Build Windows package
-        run: pnpm --filter @moonshot-ai/kimi-code-desktop exec electron-builder --win portable --x64 --publish never
+        run: pnpm --filter @moonshot-ai/kimi-code-desktop exec electron-builder --win nsis portable --x64 --publish never
 
       - name: Inspect and smoke packaged application
         run: |
@@ -76,8 +76,12 @@ jobs:
           retention-days: 3
           if-no-files-found: error
           path: |
+            apps/desktop/release/Kimi-Code-Desktop-*-x64-setup.exe
+            apps/desktop/release/Kimi-Code-Desktop-*-x64-setup.exe.sha256
+            apps/desktop/release/Kimi-Code-Desktop-*-x64-setup.exe.blockmap
             apps/desktop/release/Kimi-Code-Desktop-*-x64-portable.exe
             apps/desktop/release/Kimi-Code-Desktop-*-x64-portable.exe.sha256
+            apps/desktop/release/latest.yml
 
   macos-arm64:
     name: macOS arm64 DMG
@@ -229,6 +233,7 @@ jobs:
             apps/desktop/release/Kimi-Code-Desktop-*-x64.AppImage.sha256
             apps/desktop/release/Kimi-Code-Desktop-*-x64.deb
             apps/desktop/release/Kimi-Code-Desktop-*-x64.deb.sha256
+            apps/desktop/release/latest-linux.yml
 
   publish:
     name: Publish Desktop release
@@ -250,6 +255,14 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.0
+
+      - name: Install release verifier dependencies
+        run: pnpm install --frozen-lockfile --filter @moonshot-ai/kimi-code-desktop...
+
       - name: Download release assets
         uses: actions/download-artifact@v8
         with:
@@ -260,15 +273,32 @@ jobs:
       - name: Verify release assets
         run: node apps/desktop/scripts/release-artifacts.mjs verify dist-desktop-release
 
-      - name: Create or update GitHub Release
+      - name: Upload and publish verified GitHub Release
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           version=$(node -p "require('./apps/desktop/package.json').version")
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            is_draft=$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)
+            if [[ "$is_draft" != "true" ]]; then
+              echo "Release $GITHUB_REF_NAME is already public; refusing to replace published assets." >&2
+              exit 1
+            fi
             gh release edit "$GITHUB_REF_NAME" --title "Kimi Code Desktop $version"
           else
-            gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --title "Kimi Code Desktop $version"
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag --generate-notes --title "Kimi Code Desktop $version"
           fi
+
+          while IFS= read -r asset; do
+            [[ -z "$asset" ]] || gh release delete-asset "$GITHUB_REF_NAME" "$asset" --yes
+          done < <(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')
+
           gh release upload "$GITHUB_REF_NAME" dist-desktop-release/* --clobber
+
+          remote_dir="$RUNNER_TEMP/desktop-release-remote"
+          rm -rf "$remote_dir"
+          mkdir -p "$remote_dir"
+          gh release download "$GITHUB_REF_NAME" --dir "$remote_dir"
+          node apps/desktop/scripts/release-artifacts.mjs verify "$remote_dir"
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest

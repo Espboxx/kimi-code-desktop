@@ -240,6 +240,12 @@ export const desktopCommandSchemas = {
   'shell.run': z.object({ sessionId: nonEmptyString.optional(), command: nonEmptyString }).strict(),
   'shell.cancel': z.object({ sessionId: nonEmptyString.optional(), commandId: nonEmptyString }).strict(),
 
+  'update.state': empty,
+  'update.check': empty,
+  'update.download': empty,
+  'update.install': empty,
+  'update.openRelease': empty,
+
   'host.snapshot': empty,
   'host.openExternal': z.object({ url: nonEmptyString }).strict(),
   'host.openPath': z.object({ path: nonEmptyString }).strict(),

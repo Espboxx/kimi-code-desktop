@@ -230,25 +230,10 @@ function Assert-PackagedLicenses {
   Write-Host 'Packaged licenses and Windows x64 native dependencies verified'
 }
 
-function Write-ArtifactChecksum {
-  param([Parameter(Mandatory)][string]$ArtifactPath)
-
-  $checksumPath = "$ArtifactPath.sha256"
-  $hash = (Get-FileHash -LiteralPath $ArtifactPath -Algorithm SHA256).Hash.ToLowerInvariant()
-  $line = "$hash  $([System.IO.Path]::GetFileName($ArtifactPath))`n"
-  [System.IO.File]::WriteAllText($checksumPath, $line, [System.Text.Encoding]::ASCII)
-  Write-Host "SHA256: $hash"
-
-  return [pscustomobject]@{
-    Hash = $hash
-    Path = $checksumPath
-  }
-}
-
 function Invoke-DesktopVerification {
   param(
     [Parameter(Mandatory)][string]$ReleaseDirectory,
-    [Parameter(Mandatory)][string]$ArtifactPath
+    [Parameter(Mandatory)][string[]]$ArtifactPaths
   )
 
   Write-Step 'Install frozen dependencies'
@@ -269,10 +254,11 @@ function Invoke-DesktopVerification {
   Write-Step 'Run Desktop Electron E2E'
   Invoke-ExternalWithRetry -FilePath 'pnpm' -Arguments @('--filter', '@moonshot-ai/kimi-code-desktop', 'e2e')
 
-  Write-Step 'Build clean Windows x64 portable package'
+  Write-Step 'Build clean Windows x64 installer and portable packages'
   Remove-PathWithin -BasePath $ReleaseDirectory -TargetPath (Join-Path $ReleaseDirectory 'win-unpacked')
-  Remove-PathWithin -BasePath $ReleaseDirectory -TargetPath $ArtifactPath
-  Remove-PathWithin -BasePath $ReleaseDirectory -TargetPath "$ArtifactPath.sha256"
+  foreach ($artifactPath in $ArtifactPaths) {
+    Remove-PathWithin -BasePath $ReleaseDirectory -TargetPath $artifactPath
+  }
 
   $previousCertificateSetting = $env:CSC_IDENTITY_AUTO_DISCOVERY
   try {
@@ -283,8 +269,11 @@ function Invoke-DesktopVerification {
       'exec',
       'electron-builder',
       '--win',
+      'nsis',
       'portable',
-      '--x64'
+      '--x64',
+      '--publish',
+      'never'
     )
 
     Write-Step 'Inspect and smoke packaged Windows application'
@@ -457,7 +446,7 @@ function Assert-GitHubRelease {
   param(
     [Parameter(Mandatory)][string]$RepositoryRoot,
     [Parameter(Mandatory)][string]$Tag,
-    [Parameter(Mandatory)][string[]]$ArtifactNames,
+    [Parameter(Mandatory)][string[]]$ExpectedAssetNames,
     [Parameter(Mandatory)][string]$GitHubRepository
   )
 
@@ -469,15 +458,20 @@ function Assert-GitHubRelease {
     '--repo',
     $GitHubRepository,
     '--json',
-    'url,assets'
+    'url,assets,isDraft,isPrerelease'
   )
   $release = $releaseJson | ConvertFrom-Json
-  [string[]]$assetNames = @($release.assets | ForEach-Object { [string]$_.name })
-  [string[]]$expectedAssets = @($ArtifactNames | ForEach-Object { $_; "$_.sha256" })
-  foreach ($expectedAsset in $expectedAssets) {
-    if ($assetNames -notcontains $expectedAsset) {
-      throw "GitHub Release $Tag is missing $expectedAsset."
-    }
+  if ($release.isDraft -or $release.isPrerelease) {
+    throw "GitHub Release $Tag is not a stable public release."
+  }
+  [string[]]$publishedAssetNames = @($release.assets | ForEach-Object { [string]$_.name })
+  [string[]]$missingAssets = @($ExpectedAssetNames | Where-Object { $publishedAssetNames -notcontains $_ })
+  [string[]]$unexpectedAssets = @($publishedAssetNames | Where-Object { $ExpectedAssetNames -notcontains $_ })
+  if ($missingAssets.Count -gt 0 -or $unexpectedAssets.Count -gt 0) {
+    throw @(
+      if ($missingAssets.Count -gt 0) { "Missing assets: $($missingAssets -join ', ')" }
+      if ($unexpectedAssets.Count -gt 0) { "Unexpected assets: $($unexpectedAssets -join ', ')" }
+    ) -join "`n"
   }
 
   $downloadBase = Join-Path $RepositoryRoot '.tmp\desktop-release'
@@ -485,7 +479,7 @@ function Assert-GitHubRelease {
   $safeDownloadDirectory = Assert-PathWithin -BasePath $downloadBase -TargetPath $downloadDirectory
   Remove-PathWithin -BasePath $downloadBase -TargetPath $safeDownloadDirectory
   New-Item -ItemType Directory -Path $safeDownloadDirectory -Force | Out-Null
-  [string[]]$downloadArguments = @(
+  Invoke-External -FilePath 'gh' -Arguments @(
     'release',
     'download',
     $Tag,
@@ -493,11 +487,7 @@ function Assert-GitHubRelease {
     $GitHubRepository,
     '--dir',
     $safeDownloadDirectory
-  )
-  foreach ($expectedAsset in $expectedAssets) {
-    $downloadArguments += @('--pattern', $expectedAsset)
-  }
-  Invoke-External -FilePath 'gh' -Arguments $downloadArguments | Out-Host
+  ) | Out-Host
   Invoke-External -FilePath 'node' -Arguments @(
     'apps/desktop/scripts/release-artifacts.mjs',
     'verify',
@@ -505,7 +495,7 @@ function Assert-GitHubRelease {
   ) | Out-Host
 
   Write-Host "Release: $($release.url)"
-  Write-Host "Published assets: $($expectedAssets -join ', ')"
+  Write-Host "Published assets: $($ExpectedAssetNames -join ', ')"
   return [pscustomobject]@{
     Url = [string]$release.url
     DownloadDirectory = $safeDownloadDirectory
@@ -528,14 +518,24 @@ try {
     throw 'apps/desktop/package.json has no version.'
   }
   $tag = "desktop-v$version"
-  $artifactName = "Kimi-Code-Desktop-$version-x64-portable.exe"
-  [string[]]$releaseArtifactNames = @(
-    $artifactName,
-    "Kimi-Code-Desktop-$version-arm64.dmg",
-    "Kimi-Code-Desktop-$version-x64.AppImage",
-    "Kimi-Code-Desktop-$version-x64.deb"
+  $portableArtifactName = "Kimi-Code-Desktop-$version-x64-portable.exe"
+  $setupArtifactName = "Kimi-Code-Desktop-$version-x64-setup.exe"
+  $portableArtifactPath = Join-Path $releaseDirectory $portableArtifactName
+  $setupArtifactPath = Join-Path $releaseDirectory $setupArtifactName
+  [string[]]$localWindowsAssetPaths = @(
+    $portableArtifactPath,
+    "$portableArtifactPath.sha256",
+    $setupArtifactPath,
+    "$setupArtifactPath.sha256",
+    "$setupArtifactPath.blockmap",
+    (Join-Path $releaseDirectory 'latest.yml')
   )
-  $artifactPath = Join-Path $releaseDirectory $artifactName
+  [string[]]$releaseAssetNames = @(
+    (Get-ExternalOutput -FilePath 'node' -Arguments @(
+      'apps/desktop/scripts/release-artifacts.mjs',
+      'list'
+    )) -split "`r?`n" | Where-Object { $_ }
+  )
   $buildStampPath = Join-Path $releaseDirectory '.verified-workspace.sha256'
   Invoke-External -FilePath 'node' -Arguments @('apps/desktop/scripts/check-release-tag.mjs', $tag)
 
@@ -544,7 +544,7 @@ try {
     Assert-ReusableArtifact -BuildStampPath $buildStampPath -WorkspaceFingerprint $workspaceFingerprint
   }
   else {
-    Invoke-DesktopVerification -ReleaseDirectory $releaseDirectory -ArtifactPath $artifactPath
+    Invoke-DesktopVerification -ReleaseDirectory $releaseDirectory -ArtifactPaths $localWindowsAssetPaths
     $fingerprintAfterBuild = Get-WorkspaceFingerprint -RepositoryRoot $repositoryRoot
     if ($fingerprintAfterBuild -ne $workspaceFingerprint) {
       throw 'Tracked or untracked source files changed during verification; rerun the script.'
@@ -552,11 +552,18 @@ try {
     [System.IO.File]::WriteAllText($buildStampPath, "$workspaceFingerprint`n", [System.Text.Encoding]::ASCII)
   }
 
-  if (-not (Test-Path -LiteralPath $artifactPath -PathType Leaf)) {
-    throw "Portable artifact is missing: $artifactPath"
+  Write-Step 'Validate local Windows release assets and update metadata'
+  Invoke-External -FilePath 'node' -Arguments @(
+    'apps/desktop/scripts/release-artifacts.mjs',
+    'prepare',
+    'windows-x64'
+  )
+  foreach ($artifactPath in @($portableArtifactPath, $setupArtifactPath)) {
+    if (-not (Test-Path -LiteralPath $artifactPath -PathType Leaf)) {
+      throw "Windows artifact is missing: $artifactPath"
+    }
   }
-  Assert-PackagedLicenses -ReleaseDirectory $releaseDirectory -ArtifactPath $artifactPath
-  $checksum = Write-ArtifactChecksum -ArtifactPath $artifactPath
+  Assert-PackagedLicenses -ReleaseDirectory $releaseDirectory -ArtifactPath $portableArtifactPath
 
   $releaseResult = $null
   if ($Phase -eq 'Publish') {
@@ -571,14 +578,15 @@ try {
     $releaseResult = Assert-GitHubRelease `
       -RepositoryRoot $repositoryRoot `
       -Tag $tag `
-      -ArtifactNames $releaseArtifactNames `
+      -ExpectedAssetNames $releaseAssetNames `
       -GitHubRepository $gitHubRepository
   }
 
   Write-Host "`nDesktop release $Phase completed." -ForegroundColor Green
   Write-Host "Tag: $tag"
-  Write-Host "Artifact: $artifactPath"
-  Write-Host "Checksum: $($checksum.Path)"
+  Write-Host "Installer: $setupArtifactPath"
+  Write-Host "Portable: $portableArtifactPath"
+  Write-Host "Checksums: $setupArtifactPath.sha256, $portableArtifactPath.sha256"
   if ($null -ne $releaseResult) {
     Write-Host "GitHub Release: $($releaseResult.Url)"
   }

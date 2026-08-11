@@ -26,6 +26,7 @@ import type {
   DesktopSessionCreateOptions,
   DesktopCommand,
   DesktopSnapshot,
+  DesktopUpdateSnapshot,
   ExtensionSnapshot,
   GitDiffArea,
   JsonRecord,
@@ -52,6 +53,11 @@ export interface KimiDesktopRuntimeHost {
   readonly chooseDirectory: () => Promise<string | null>;
   readonly openExternal: (url: string) => Promise<void>;
   readonly openPath: (path: string) => Promise<void>;
+  readonly getUpdateState: () => DesktopUpdateSnapshot;
+  readonly checkForUpdates: () => Promise<DesktopUpdateSnapshot>;
+  readonly downloadUpdate: () => Promise<DesktopUpdateSnapshot>;
+  readonly installUpdate: () => void;
+  readonly openUpdateRelease: () => Promise<void>;
   readonly setDirtyFiles: (paths: readonly string[]) => void;
   readonly resolveClose: (requestId: string, action: 'proceed' | 'cancel') => void;
   readonly rememberWorkspace: (path: string) => Promise<void>;
@@ -197,6 +203,7 @@ export class KimiDesktopRuntime {
       globalMcpAuth: this.globalMcpAuth,
       shell: runtime?.shellSnapshot ?? { status: 'idle', stdout: '', stderr: '' },
       rawEvents: this.rawEvents,
+      update: this.host.getUpdateState(),
       loading: this.loading,
     };
   }
@@ -804,6 +811,19 @@ export class KimiDesktopRuntime {
         await this.runtimeFor(input.sessionId).cancelShell(input.commandId);
         return undefined;
       }
+
+      case 'update.state':
+        return this.host.getUpdateState();
+      case 'update.check':
+        return this.host.checkForUpdates();
+      case 'update.download':
+        return this.host.downloadUpdate();
+      case 'update.install':
+        this.host.installUpdate();
+        return undefined;
+      case 'update.openRelease':
+        await this.host.openUpdateRelease();
+        return undefined;
 
       case 'host.snapshot':
         return this.snapshot();

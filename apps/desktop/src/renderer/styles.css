@@ -153,6 +153,7 @@ progress {
 }
 
 .desktop-app {
+  position: relative;
   display: grid;
   grid-template-rows: 44px minmax(0, 1fr);
   width: 100%;
@@ -176,6 +177,88 @@ progress {
 .topbar button,
 .topbar select {
   -webkit-app-region: no-drag;
+}
+
+.update-banner {
+  position: absolute;
+  z-index: 12;
+  top: 52px;
+  left: 50%;
+  display: flex;
+  width: min(760px, calc(100% - 28px));
+  min-height: 48px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 9px 8px 11px;
+  border: 1px solid color-mix(in srgb, var(--accent) 48%, var(--border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--panel) 94%, var(--accent));
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.24);
+  transform: translateX(-50%);
+}
+
+.update-banner-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.update-banner-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.update-banner-copy strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.update-banner-copy small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.update-banner-progress {
+  width: min(140px, 18vw);
+  height: 4px;
+  flex: 0 1 140px;
+  border-radius: 2px;
+  background: var(--surface-active);
+  overflow: hidden;
+}
+
+.update-banner-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.update-banner-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+}
+
+.update-banner-actions > button:not(.icon-button) {
+  display: inline-flex;
+  height: 29px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  color: var(--text-soft);
+  font-size: 10px;
 }
 
 .brand-block,
@@ -3089,6 +3172,135 @@ progress {
   margin-bottom: 7px;
 }
 
+.update-settings-card {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.update-product-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel-2);
+}
+
+.update-product-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #0c1d18;
+}
+
+.update-product-row > div {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.update-product-row small,
+.update-checked-at {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.update-status-badge {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.update-status-badge.available,
+.update-status-badge.downloading,
+.update-status-badge.downloaded {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.update-status-badge.error {
+  border-color: color-mix(in srgb, var(--red) 55%, var(--border));
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+.update-progress {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  margin-top: 11px;
+}
+
+.update-progress > div {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--surface-active);
+  overflow: hidden;
+}
+
+.update-progress > div > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.update-progress small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.update-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 8px 9px;
+  border-radius: 5px;
+  background: var(--red-bg);
+  color: var(--red);
+  font-size: 10px;
+}
+
+.update-error > svg {
+  flex: 0 0 auto;
+}
+
+.update-checked-at {
+  display: block;
+  margin-top: 9px;
+}
+
+.update-release-notes {
+  max-height: 280px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-2);
+  color: var(--text-soft);
+  font-family: var(--sans);
+  font-size: 11px;
+  line-height: 1.55;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
 .account-status,
 .trust-status {
   display: flex;
@@ -4872,6 +5084,42 @@ button.team-todo-owner:hover {
 
   .team-messages-column {
     grid-row: 2;
+  }
+}
+
+@media (max-width: 760px) {
+  .update-banner {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .update-banner-copy {
+    min-width: calc(100% - 42px);
+  }
+
+  .update-banner-progress {
+    width: 100%;
+    flex-basis: 100%;
+    order: 3;
+  }
+
+  .update-banner-actions {
+    width: 100%;
+    justify-content: flex-end;
+    order: 4;
+  }
+
+  .update-product-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .update-status-badge {
+    margin-left: 48px;
+  }
+
+  .update-progress {
+    grid-template-columns: 1fr;
   }
 }
 

@@ -1,7 +1,9 @@
 import { constants } from 'node:fs';
-import { access, stat } from 'node:fs/promises';
+import { access, readFile, stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { parse as parseYaml } from 'yaml';
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const releaseDirectory = resolve(scriptDirectory, '..', 'release');
@@ -14,6 +16,7 @@ const layouts = {
     nativeFiles: [
       'app.asar.unpacked/node_modules/node-pty/build/Release/pty.node',
     ],
+    automaticUpdate: true,
   },
   'macos-arm64': {
     applicationDirectories: [
@@ -34,6 +37,7 @@ const layouts = {
       'app.asar.unpacked/node_modules/node-pty/prebuilds/win32-x64/conpty.node',
       'app.asar.unpacked/node_modules/node-pty/prebuilds/win32-x64/pty.node',
     ],
+    automaticUpdate: true,
   },
 };
 
@@ -53,6 +57,11 @@ const requiredFiles = [
 ];
 
 for (const path of requiredFiles) await assertFile(path);
+if (layout.automaticUpdate === true) {
+  const updateConfigPath = resolve(resources, 'app-update.yml');
+  await assertFile(updateConfigPath);
+  await assertUpdateConfig(updateConfigPath);
+}
 await assertOneFile([
   resolve(applicationDirectory, 'LICENSE.electron.txt'),
   resolve(resources, 'LICENSE.electron.txt'),
@@ -90,4 +99,16 @@ async function assertOneFile(paths) {
 async function assertFile(path) {
   const value = await stat(path).catch(() => undefined);
   if (value?.isFile() !== true) throw new Error(`Packaged file is missing: ${path}`);
+}
+
+async function assertUpdateConfig(path) {
+  const config = parseYaml(await readFile(path, 'utf8'));
+  if (
+    config?.provider !== 'github' ||
+    config?.owner !== 'Espboxx' ||
+    config?.repo !== 'kimi-code-desktop' ||
+    config?.tagNamePrefix !== 'desktop-v'
+  ) {
+    throw new Error(`Packaged update configuration is invalid: ${path}`);
+  }
 }

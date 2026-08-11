@@ -32,23 +32,25 @@ These screenshots are generated from an isolated local E2E fixture and contain n
 - **Agent observability:** inspect running, completed, failed, and interactive states for the main agent, subagents, and parallel tasks.
 - **Dedicated Team workbench:** manage multi-agent tasks, named members, profession-based assignments, unread messages, and agent details in a top-level Team surface. The channel uses distinct user/agent bubbles with Markdown line breaks and clickable `@mentions`.
 - **Configuration and extensions:** manage authentication, models, MCP, Skills, Plugins, diagnostics, and workspace trust inside Desktop.
+- **Release updates:** check the stable release once after startup or manually from **Settings → About and Updates**. The Windows installer and Linux AppImage can download a confirmed update and restart into it in-app.
 - **Security boundary:** the renderer runs with sandbox and context isolation and can reach native capabilities only through the validated `window.kimiDesktop` IPC bridge.
 
 ## Download and run
 
 The `desktop-v*` GitHub Actions workflow builds each package on its target operating system. Open this repository's [GitHub Releases](../../releases) page and download:
 
-- `Kimi-Code-Desktop-0.4.1-x64-portable.exe`
-- `Kimi-Code-Desktop-0.4.1-arm64.dmg`
-- `Kimi-Code-Desktop-0.4.1-x64.AppImage`
-- `Kimi-Code-Desktop-0.4.1-x64.deb`
+- `Kimi-Code-Desktop-0.5.0-x64-setup.exe` (recommended Windows installer)
+- `Kimi-Code-Desktop-0.5.0-x64-portable.exe` (Windows portable)
+- `Kimi-Code-Desktop-0.5.0-arm64.dmg`
+- `Kimi-Code-Desktop-0.5.0-x64.AppImage`
+- `Kimi-Code-Desktop-0.5.0-x64.deb`
 
 Every package has a matching `.sha256` file.
 
 Verify the SHA256 checksum in PowerShell:
 
 ```powershell
-$exe = ".\Kimi-Code-Desktop-0.4.1-x64-portable.exe"
+$exe = ".\Kimi-Code-Desktop-0.5.0-x64-setup.exe"
 $expected = (Get-Content "$exe.sha256").Split()[0]
 $actual = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
 $actual -eq $expected
@@ -57,9 +59,9 @@ $actual -eq $expected
 After the command returns `True`, run the EXE directly. The target machine does not need Node.js or pnpm. Verify macOS and Linux packages with built-in tools:
 
 ```bash
-shasum -a 256 -c Kimi-Code-Desktop-0.4.1-arm64.dmg.sha256
-sha256sum -c Kimi-Code-Desktop-0.4.1-x64.AppImage.sha256
-sha256sum -c Kimi-Code-Desktop-0.4.1-x64.deb.sha256
+shasum -a 256 -c Kimi-Code-Desktop-0.5.0-arm64.dmg.sha256
+sha256sum -c Kimi-Code-Desktop-0.5.0-x64.AppImage.sha256
+sha256sum -c Kimi-Code-Desktop-0.5.0-x64.deb.sha256
 ```
 
 On Apple Silicon, mount the DMG and drag the app to Applications. This build is unsigned, so first open it by right-clicking the app in Finder and selecting **Open**. If macOS keeps the download quarantine attribute, run:
@@ -72,13 +74,19 @@ open "/Applications/Kimi Code Desktop.app"
 On Linux x64, use either package:
 
 ```bash
-chmod +x Kimi-Code-Desktop-0.4.1-x64.AppImage
-./Kimi-Code-Desktop-0.4.1-x64.AppImage
+chmod +x Kimi-Code-Desktop-0.5.0-x64.AppImage
+./Kimi-Code-Desktop-0.5.0-x64.AppImage
 
-sudo apt install ./Kimi-Code-Desktop-0.4.1-x64.deb
+sudo apt install ./Kimi-Code-Desktop-0.5.0-x64.deb
 ```
 
 Automated Windows and macOS builds are **unsigned by default**, so the operating system may show a confirmation prompt on first launch. Verify the release source and SHA256 before running it. Code signing can be added separately when a certificate is available.
+
+### Update behavior
+
+- Windows `setup.exe` installations and Linux AppImages check the stable release once after startup and support a manual check under **Settings → About and Updates**. Download starts only after confirmation; once complete, restart immediately or install on the next normal exit.
+- Windows Portable, Linux DEB, and the current unsigned macOS DMG still check and notify, but the update action opens the matching GitHub Release for manual installation.
+- Versions `0.4.1` and earlier do not contain the updater. Install `0.5.0` manually once; subsequent releases can update in-app when using the Windows installer or Linux AppImage.
 
 ## Choose a workspace on first launch
 
@@ -153,7 +161,7 @@ fnm exec --using=24.15.0 -- pnpm --filter @moonshot-ai/kimi-code-desktop build
 fnm exec --using=24.15.0 -- pnpm --filter @moonshot-ai/kimi-code-desktop start
 ```
 
-Create an unpacked directory or the portable EXE:
+Create an unpacked directory, or both Windows installer and portable EXEs:
 
 ```powershell
 fnm exec --using=24.15.0 -- pnpm --filter @moonshot-ai/kimi-code-desktop pack:win

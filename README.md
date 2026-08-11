@@ -32,23 +32,25 @@ Kimi Code Desktop 是一个面向 Windows、macOS 和 Linux 的 Electron 桌面�
 - **Agent 可观测性**：查看主 Agent、子 Agent 和并行任务的运行、完成、失败与交互状态。
 - **独立 Team 工作台**：在顶层“团队”面板中管理多 Agent 任务、频道、具名成员、职业分工、未读消息和 Agent 详情；频道使用左右气泡区分用户与 Agent，并支持 Markdown 换行和可点击的 `@提及`。
 - **配置与扩展**：在 Desktop 内管理登录、模型、MCP、Skills、Plugins、诊断和工作区信任。
+- **发布更新**：启动后检查一次稳定版，也可在“设置 → 关于与更新”手动检查；Windows 安装版和 Linux AppImage 经确认后可在应用内下载并重启安装。
 - **安全边界**：渲染进程启用 sandbox 和 context isolation，只能通过经过校验的 `window.kimiDesktop` IPC 调用主进程能力。
 
 ## 下载与运行
 
 `desktop-v*` 标签会触发 GitHub Actions，在目标系统原生构建以下安装包。前往本仓库的 [GitHub Releases](../../releases) 下载：
 
-- `Kimi-Code-Desktop-0.4.1-x64-portable.exe`
-- `Kimi-Code-Desktop-0.4.1-arm64.dmg`
-- `Kimi-Code-Desktop-0.4.1-x64.AppImage`
-- `Kimi-Code-Desktop-0.4.1-x64.deb`
+- `Kimi-Code-Desktop-0.5.0-x64-setup.exe`（Windows 安装版，推荐）
+- `Kimi-Code-Desktop-0.5.0-x64-portable.exe`（Windows 便携版）
+- `Kimi-Code-Desktop-0.5.0-arm64.dmg`
+- `Kimi-Code-Desktop-0.5.0-x64.AppImage`
+- `Kimi-Code-Desktop-0.5.0-x64.deb`
 
-每个安装包都带有同名 `.sha256` 文件，例如 Windows x64 便携版对应 `Kimi-Code-Desktop-0.4.1-x64-portable.exe.sha256`。
+每个安装包都带有同名 `.sha256` 文件，例如 Windows x64 安装版对应 `Kimi-Code-Desktop-0.5.0-x64-setup.exe.sha256`。
 
 下载后可在 PowerShell 校验 SHA256：
 
 ```powershell
-$exe = ".\Kimi-Code-Desktop-0.4.1-x64-portable.exe"
+$exe = ".\Kimi-Code-Desktop-0.5.0-x64-setup.exe"
 $expected = (Get-Content "$exe.sha256").Split()[0]
 $actual = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
 $actual -eq $expected
@@ -57,9 +59,9 @@ $actual -eq $expected
 返回 `True` 后直接运行 EXE，无需预装 Node.js 或 pnpm。macOS 和 Linux 可用系统自带工具校验：
 
 ```bash
-shasum -a 256 -c Kimi-Code-Desktop-0.4.1-arm64.dmg.sha256
-sha256sum -c Kimi-Code-Desktop-0.4.1-x64.AppImage.sha256
-sha256sum -c Kimi-Code-Desktop-0.4.1-x64.deb.sha256
+shasum -a 256 -c Kimi-Code-Desktop-0.5.0-arm64.dmg.sha256
+sha256sum -c Kimi-Code-Desktop-0.5.0-x64.AppImage.sha256
+sha256sum -c Kimi-Code-Desktop-0.5.0-x64.deb.sha256
 ```
 
 macOS arm64 用户挂载 DMG 后将应用拖入“应用程序”。该构建未签名，首次打开时可在 Finder 中右键应用并选择“打开”；如系统仍保留下载隔离标记，可执行：
@@ -72,13 +74,19 @@ open "/Applications/Kimi Code Desktop.app"
 Linux x64 用户可任选一种方式：
 
 ```bash
-chmod +x Kimi-Code-Desktop-0.4.1-x64.AppImage
-./Kimi-Code-Desktop-0.4.1-x64.AppImage
+chmod +x Kimi-Code-Desktop-0.5.0-x64.AppImage
+./Kimi-Code-Desktop-0.5.0-x64.AppImage
 
-sudo apt install ./Kimi-Code-Desktop-0.4.1-x64.deb
+sudo apt install ./Kimi-Code-Desktop-0.5.0-x64.deb
 ```
 
 当前 Windows 与 macOS 自动构建默认**不做代码签名**，系统可能在首次运行时显示确认提示。请先核对下载来源和 SHA256；后续取得代码签名证书后会单独接入发布流程。
+
+### 更新方式
+
+- Windows `setup.exe` 安装版和 Linux AppImage：启动后检查一次稳定版，也可在“设置 → 关于与更新”手动检查；发现新版本后由用户确认下载，下载完成可立即重启安装，或在下次正常退出时安装。
+- Windows Portable、Linux DEB 和当前未签名的 macOS DMG：应用会检查并提示新版本，更新按钮会打开对应 GitHub Release，由用户下载并安装。
+- `0.4.1` 及更早版本尚未包含更新器，需要先手动安装一次 `0.5.0`。后续使用 Windows 安装版或 Linux AppImage 时即可走应用内更新。
 
 ## 首次选择工作区
 
@@ -153,7 +161,7 @@ fnm exec --using=24.15.0 -- pnpm --filter @moonshot-ai/kimi-code-desktop build
 fnm exec --using=24.15.0 -- pnpm --filter @moonshot-ai/kimi-code-desktop start
 ```
 
-生成未打包目录或便携 EXE：
+生成未打包目录，或同时生成 Windows 安装版与便携版 EXE：
 
 ```powershell
 fnm exec --using=24.15.0 -- pnpm --filter @moonshot-ai/kimi-code-desktop pack:win

@@ -106,9 +106,21 @@ pnpm --filter @moonshot-ai/kimi-code-desktop dist:linux
 
 The outputs are written under `apps/desktop/release/`:
 
-- Windows x64: `Kimi-Code-Desktop-<version>-x64-portable.exe`
+- Windows x64: `Kimi-Code-Desktop-<version>-x64-setup.exe` and `Kimi-Code-Desktop-<version>-x64-portable.exe`
 - macOS arm64: `Kimi-Code-Desktop-<version>-arm64.dmg`
 - Linux x64: `Kimi-Code-Desktop-<version>-x64.AppImage` and `Kimi-Code-Desktop-<version>-x64.deb`
+
+The Windows NSIS installer and Linux AppImage use `electron-updater`. Desktop
+checks the stable GitHub Release once after startup and exposes a manual check
+under **Settings → About and Updates**. A download starts only after the user
+chooses it. A completed update can restart immediately or install at the next
+normal exit. Windows Portable, Linux DEB, and the unsigned macOS DMG use the
+same release check but open GitHub Release for manual installation.
+
+Release packaging also emits `latest.yml`, the NSIS installer blockmap, and
+`latest-linux.yml`. `scripts/release-artifacts.mjs` validates the exact release
+asset set, SHA256 sidecars, and the SHA512 values in updater metadata before a
+draft GitHub Release becomes public.
 
 Use `pack:win`, `pack:mac`, or `pack:linux` to produce an unpacked directory
 for target-native smoke testing without creating the distributable archive.

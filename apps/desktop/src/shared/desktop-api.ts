@@ -130,6 +130,7 @@ export const DESKTOP_DOMAINS = [
   'team',
   'goal',
   'shell',
+  'update',
   'host',
 ] as const;
 
@@ -141,6 +142,44 @@ export interface KimiDesktopError {
   readonly message: string;
   readonly details?: JsonRecord;
   readonly retryable?: boolean;
+}
+
+export type DesktopUpdateStatus =
+  | 'idle'
+  | 'checking'
+  | 'up-to-date'
+  | 'available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error';
+
+export type DesktopUpdateMode = 'automatic' | 'manual';
+export type DesktopUpdateManualReason =
+  | 'development'
+  | 'windows-portable'
+  | 'macos-unsigned'
+  | 'linux-package'
+  | 'unsupported-platform';
+
+export interface DesktopUpdateProgress {
+  readonly percent: number;
+  readonly transferred: number;
+  readonly total: number;
+  readonly bytesPerSecond: number;
+}
+
+export interface DesktopUpdateSnapshot {
+  readonly currentVersion: string;
+  readonly mode: DesktopUpdateMode;
+  readonly manualReason?: DesktopUpdateManualReason;
+  readonly status: DesktopUpdateStatus;
+  readonly latestVersion?: string;
+  readonly releaseName?: string;
+  readonly releaseNotes?: string;
+  readonly releaseUrl?: string;
+  readonly checkedAt?: string;
+  readonly progress?: DesktopUpdateProgress;
+  readonly error?: KimiDesktopError;
 }
 
 export interface WorkspaceNode {
@@ -331,6 +370,7 @@ export interface DesktopSnapshot {
   readonly globalMcpServers: readonly unknown[];
   readonly globalMcpAuth: readonly unknown[];
   readonly shell: ShellSnapshot;
+  readonly update: DesktopUpdateSnapshot;
   readonly rawEvents: readonly JsonRecord[];
   readonly loading: boolean;
 }
@@ -375,7 +415,13 @@ export type KimiDesktopNotification =
       readonly gitFiles: readonly GitFile[];
       readonly changedPaths: readonly string[];
     }
-  | { readonly type: 'host.closeRequested'; readonly requestId: string; readonly dirtyPaths: readonly string[] }
+  | { readonly type: 'update.changed'; readonly update: DesktopUpdateSnapshot }
+  | {
+      readonly type: 'host.closeRequested';
+      readonly requestId: string;
+      readonly dirtyPaths: readonly string[];
+      readonly reason: 'quit' | 'install-update';
+    }
   | { readonly type: 'error'; readonly error: KimiDesktopError; readonly command?: string };
 
 export interface DesktopCommand {
@@ -542,6 +588,13 @@ export interface KimiDesktopApi {
     run(command: string, sessionId?: string): Promise<unknown>;
     cancel(commandId: string, sessionId?: string): Promise<void>;
   };
+  readonly update: {
+    state(): Promise<DesktopUpdateSnapshot>;
+    check(): Promise<DesktopUpdateSnapshot>;
+    download(): Promise<DesktopUpdateSnapshot>;
+    install(): Promise<void>;
+    openRelease(): Promise<void>;
+  };
   readonly host: {
     snapshot(): Promise<DesktopSnapshot>;
     openExternal(url: string): Promise<void>;
@@ -691,6 +744,13 @@ export function createKimiDesktopApi(invoke: Invoke, subscribe: KimiDesktopApi['
     shell: {
       run: (command, sessionId) => call('shell', 'run', { sessionId, command }),
       cancel: (commandId, sessionId) => call('shell', 'cancel', { sessionId, commandId }),
+    },
+    update: {
+      state: () => call('update', 'state'),
+      check: () => call('update', 'check'),
+      download: () => call('update', 'download'),
+      install: () => call('update', 'install'),
+      openRelease: () => call('update', 'openRelease'),
     },
     host: {
       snapshot: () => call('host', 'snapshot'),
